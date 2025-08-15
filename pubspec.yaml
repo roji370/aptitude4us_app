@@ -51,7 +51,6 @@ dependencies:
   shared_preferences: ^2.2.2
   emoji_selector: ^0.0.6
   firebase_messaging: ^16.0.0
-  flutter_local_notifications: ^19.4.0
   intl: ^0.20.0
   rxdart: ^0.28.0
 

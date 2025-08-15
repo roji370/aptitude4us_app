@@ -181,12 +181,7 @@ Future<void> _requestPermissions() async {
       }
     }
 
-    // Request notifications on iOS
-    if (Platform.isIOS) {
-      if (await Permission.notification.status.isDenied) {
-        await Permission.notification.request();
-      }
-    }
+    // Notification permissions removed - using Firebase messaging only
   } catch (e) {
     // Never crash the app due to a permission handler exception
     Logger.w('Permission request failed: $e');

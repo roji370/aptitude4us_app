@@ -4,7 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+// Removed flutter_local_notifications - using Firebase messaging only
 import '../utils/logger.dart';
 import '../utils/global_keys.dart';
 import '../main.dart' show FirebaseInitHelper; // For FirebaseInitHelper
@@ -19,7 +19,7 @@ class NotificationService {
 
   FirebaseMessaging? _firebaseMessaging;
   FirebaseAuth? _auth;
-  FlutterLocalNotificationsPlugin? _localNotifications;
+  // Removed FlutterLocalNotificationsPlugin - using Firebase messaging only
 
   // Use global navigator key from main.dart to avoid early instantiation
 
@@ -53,29 +53,8 @@ class NotificationService {
     // Ensure Firebase services are ready first
     await _initializeFirebaseServices();
 
-    // Initialize Flutter Local Notifications
-    _localNotifications = FlutterLocalNotificationsPlugin();
-    const AndroidInitializationSettings androidInit =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const DarwinInitializationSettings darwinInit =
-        DarwinInitializationSettings(
-          requestAlertPermission: true,
-          requestBadgePermission: true,
-          requestSoundPermission: true,
-        );
-    const InitializationSettings initSettings = InitializationSettings(
-      android: androidInit,
-      iOS: darwinInit,
-    );
-    await _localNotifications!.initialize(
-      initSettings,
-      onDidReceiveNotificationResponse: (response) {
-        final payload = response.payload;
-        if (payload != null) {
-          _handleLocalNotificationTap(payload);
-        }
-      },
-    );
+    // Local notifications removed - using Firebase messaging only
+    Logger.i('Local notifications disabled - using Firebase messaging only');
 
     // Request FCM permissions
     if (_firebaseMessaging != null) {
@@ -937,33 +916,11 @@ class NotificationService {
       body = message.data['body'] ?? '';
     }
 
-    await _showLocalNotification(
-      title: title,
-      body: body,
-      payload: message.data.map((k, v) => MapEntry(k, v.toString())),
-    );
-
-    Logger.i('Local notification created with title: $title');
+    // Local notifications removed - Firebase handles display
+    Logger.i('Firebase message received: $title - $body');
   }
 
-  void _handleLocalNotificationTap(String payload) {
-    try {
-      // Simple parser for our payload string map representation
-      if (payload.contains('type: chat') || payload.contains('type=chat')) {
-        final RegExp re = RegExp(r'chatId[:=] (\w+)');
-        final match = re.firstMatch(payload);
-        final chatId = match?.group(1);
-        if (chatId != null && globalNavigatorKey.currentState != null) {
-          globalNavigatorKey.currentState!.pushNamed(
-            '/chat',
-            arguments: chatId,
-          );
-        }
-      }
-    } catch (e) {
-      Logger.e('Error handling local notification tap: $e');
-    }
-  }
+  // Removed _handleLocalNotificationTap - no longer needed without local notifications
 
   /// Handle app lifecycle changes to ensure tokens are properly managed
   Future<void> handleAppLifecycleChange(AppLifecycleState state) async {
@@ -1441,47 +1398,7 @@ class NotificationService {
     }
   }
 
-  Future<void> _showLocalNotification({
-    required String title,
-    required String body,
-    Map<String, String>? payload,
-  }) async {
-    if (_localNotifications == null) return;
-
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
-          'chat_channel',
-          'Chat Notifications',
-          channelDescription: 'Notifications for new chat messages',
-          importance: Importance.high,
-          priority: Priority.high,
-          playSound: true,
-        );
-
-    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-
-    const NotificationDetails details = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
-
-    final String? payloadString =
-        payload == null
-            ? null
-            : payload.entries.map((e) => '${e.key}=${e.value}').join('&');
-
-    await _localNotifications!.show(
-      DateTime.now().millisecondsSinceEpoch.remainder(100000),
-      title,
-      body,
-      details,
-      payload: payloadString,
-    );
-  }
+  // Removed _showLocalNotification - no longer needed without local notifications
 }
 
 // This needs to be a top-level function

@@ -46,8 +46,7 @@
 		<true/>
         		<key>FirebaseAppDelegateProxyEnabled</key>
 		<string>NO</string>
-		<key>NSUserNotificationsUsageDescription</key>
-		<string>We need to send you notifications about new messages and updates</string>
+		<!-- Removed notification permissions - using Firebase messaging only -->
 		<key>UIMainStoryboardFile</key>
 		<string></string>
 		<key>UIStatusBarHidden</key>

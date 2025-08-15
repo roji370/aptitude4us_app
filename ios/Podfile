@@ -1,4 +1,4 @@
-platform :ios, '16.0'
+platform :ios, '12.0'
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 # Use dynamic frameworks to avoid modulemap issues with transitive pods like gRPC
 use_frameworks!
@@ -35,9 +35,12 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
       # Ensure module stability for mixed Swift/ObjC pods
       config.build_settings['DEFINES_MODULE'] = 'YES'
+      # Additional stability settings
+      config.build_settings['CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER'] = 'NO'
+      config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
     end
   end
 

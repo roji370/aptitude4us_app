@@ -1,6 +1,5 @@
 import Flutter
 import UIKit
-import UserNotifications
 import Firebase
 import FirebaseMessaging
 
@@ -13,55 +12,16 @@ import FirebaseMessaging
     // Configure Firebase as early as possible
     FirebaseApp.configure()
 
-    // Notification center and messaging delegates
-    UNUserNotificationCenter.current().delegate = self
+    // Call super first to initialize Flutter engine
+    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+
+    // Set up Firebase Messaging delegate for token handling
     Messaging.messaging().delegate = self
 
-    // Register plugins BEFORE calling super (matches Flutter template)
-    GeneratedPluginRegistrant.register(with: self)
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    return result
   }
 
-  // Handle foreground notifications - show notifications even when app is in foreground
-  override func userNotificationCenter(
-    _ center: UNUserNotificationCenter,
-    willPresent notification: UNNotification,
-    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-  ) {
-    let userInfo = notification.request.content.userInfo
 
-    // Check if notification is a chat type
-    if let type = userInfo["type"] as? String, type == "chat" {
-      if #available(iOS 14.0, *) {
-        completionHandler([[.banner, .badge, .sound]])
-      } else if #available(iOS 10.0, *) {
-        // Use alert for iOS 10-13 (deprecated but still functional)
-        completionHandler([[.alert, .badge, .sound]])
-      }
-    } else {
-      // Default handling for other notifications
-      super.userNotificationCenter(center, willPresent: notification, withCompletionHandler: completionHandler)
-    }
-  }
-
-  // Handle notification taps when app is backgrounded or closed
-  override func userNotificationCenter(
-    _ center: UNUserNotificationCenter,
-    didReceive response: UNNotificationResponse,
-    withCompletionHandler completionHandler: @escaping () -> Void
-  ) {
-    let userInfo = response.notification.request.content.userInfo
-
-    if userInfo[AnyHashable("gcm.message_id")] != nil {
-      Messaging.messaging().appDidReceiveMessage(userInfo)
-    }
-
-    if let type = userInfo["type"] as? String {
-      print("Notification type tapped: \(type)")
-    }
-
-    super.userNotificationCenter(center, didReceive: response, withCompletionHandler: completionHandler)
-  }
 
   // Firebase Messaging delegate method: receives registration token
   func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
