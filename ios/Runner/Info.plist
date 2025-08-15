@@ -49,7 +49,7 @@
 		<key>NSUserNotificationsUsageDescription</key>
 		<string>We need to send you notifications about new messages and updates</string>
 		<key>UIMainStoryboardFile</key>
-		<string></string>
+		<string>Main</string>
 		<key>UIStatusBarHidden</key>
 		<false/>
 		<key>NSLocalNetworkUsageDescription</key>

@@ -8,6 +8,10 @@
 	<array>
 		<string>applinks:briffiniapp.page.link</string>
 	</array>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.awn.1103b13b</string>
+	</array>
 	<key>com.apple.security.network.client</key>
 	<true/>
 	<key>com.apple.security.network.server</key>
