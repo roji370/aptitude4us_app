@@ -39,15 +39,22 @@ post_install do |installer|
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
       
-      # Fix gRPC module map issues
-      if target.name.include?('gRPC')
-        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= []
-        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'GRPC_CRONET_WITH_PACKET_COALESCING=1'
+      # Fix specific module issues
+      if target.name == 'shared_preferences_foundation'
+        config.build_settings['DEFINES_MODULE'] = 'YES'
+        config.build_settings['MODULEMAP_FILE'] = "#{target.name}/module.modulemap"
       end
       
-      # Ensure proper module map generation
+      # Fix SwiftShims module issue  
+      if target.name.include?('Swift') || target.name.include?('Firebase')
+        config.build_settings['SWIFT_INCLUDE_PATHS'] = ['$(inherited)', '$(PLATFORM_DIR)/Developer/usr/lib']
+        config.build_settings['LIBRARY_SEARCH_PATHS'] = ['$(inherited)', '$(PLATFORM_DIR)/Developer/usr/lib']
+      end
+      
+      # General module map fixes
       config.build_settings['DEFINES_MODULE'] = 'YES'
-      config.build_settings['MODULEMAP_FILE'] = ''
+      config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
+      config.build_settings['SWIFT_VERSION'] = '5.0'
     end
   end
 end
