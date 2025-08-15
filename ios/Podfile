@@ -1,7 +1,6 @@
 platform :ios, '16.0'
+
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
-# Use dynamic frameworks to avoid modulemap issues with transitive pods like gRPC
-use_frameworks!
 
 project 'Runner', {
   'Debug' => :debug,
@@ -27,8 +26,9 @@ require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelpe
 flutter_ios_podfile_setup
 
 target 'Runner' do
+  # IMPORTANT: Do not enable dynamic frameworks; Flutter prefers static linkage
+  # If you must use use_frameworks!, use: use_frameworks! :linkage => :static
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
-  # Re-add awesome_notifications if needed in the future
 end
 
 post_install do |installer|
@@ -36,12 +36,6 @@ post_install do |installer|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
-      # Ensure module stability for mixed Swift/ObjC pods
-      config.build_settings['DEFINES_MODULE'] = 'YES'
-      # Additional stability settings
-      config.build_settings['CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER'] = 'NO'
-      config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
     end
   end
-
 end

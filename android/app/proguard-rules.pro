@@ -12,7 +12,7 @@
 -dontwarn com.google.firebase.**
 -dontwarn com.google.android.gms.**
 
-# Awesome Notifications
+
 
 # Play Core Library
 -keep class com.google.android.play.core.** { *; }

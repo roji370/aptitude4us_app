@@ -9,19 +9,17 @@ import FirebaseMessaging
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    // Configure Firebase as early as possible
+
+    // Initialize Firebase BEFORE calling super to ensure proper plugin registration
     FirebaseApp.configure()
 
-    // Call super first to initialize Flutter engine
-    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    // Set Firebase Messaging delegate for FCM token handling
+    Messaging.messaging().delegate = self
 
-    // Firebase App Delegate Proxy is now enabled, so manual setup not needed
-    // Messaging.messaging().delegate = self // Handled by proxy
-
-    return result
+    // Flutter template order: register plugins BEFORE calling super
+    GeneratedPluginRegistrant.register(with: self)
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
-
-
 
   // Firebase Messaging delegate method: receives registration token
   func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
@@ -30,7 +28,7 @@ import FirebaseMessaging
     }
   }
 
-  // Forward APNs device token to Firebase when needed (kept for compatibility)
+  // Forward APNs device token to Firebase when AppDelegate proxying is disabled
   override func application(
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
@@ -40,17 +38,5 @@ import FirebaseMessaging
       application,
       didRegisterForRemoteNotificationsWithDeviceToken: deviceToken
     )
-  }
-
-  // MARK: UISceneSession Lifecycle (iOS 13+)
-
-  @available(iOS 13.0, *)
-  func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
-    return UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
-  }
-
-  @available(iOS 13.0, *)
-  func application(_ application: UIApplication, didDiscardSceneSessions sceneSessions: Set<UISceneSession>) {
-    // Called when the user discards a scene session.
   }
 }
