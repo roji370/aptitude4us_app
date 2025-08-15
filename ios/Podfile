@@ -1,7 +1,8 @@
 platform :ios, '16.0'
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
-# Let Flutter decide framework/static linkage per-plugin. Forcing this may crash at plugin registration.
-# use_frameworks! :linkage => :static
+# Enable modular headers so Swift can import static libraries without dynamic frameworks
+use_modular_headers!
+# Do not force use_frameworks here; Flutter will choose appropriate linkage per plugin
 
 project 'Runner', {
   'Debug' => :debug,
