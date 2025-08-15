@@ -15,8 +15,8 @@ import FirebaseMessaging
     // Call super first to initialize Flutter engine
     let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
 
-    // Set up Firebase Messaging delegate for token handling
-    Messaging.messaging().delegate = self
+    // Firebase App Delegate Proxy is now enabled, so manual setup not needed
+    // Messaging.messaging().delegate = self // Handled by proxy
 
     return result
   }
@@ -40,5 +40,17 @@ import FirebaseMessaging
       application,
       didRegisterForRemoteNotificationsWithDeviceToken: deviceToken
     )
+  }
+
+  // MARK: UISceneSession Lifecycle (iOS 13+)
+
+  @available(iOS 13.0, *)
+  func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+    return UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
+  }
+
+  @available(iOS 13.0, *)
+  func application(_ application: UIApplication, didDiscardSceneSessions sceneSessions: Set<UISceneSession>) {
+    // Called when the user discards a scene session.
   }
 }
