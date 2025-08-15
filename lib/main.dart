@@ -16,7 +16,7 @@ import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/auth_service.dart';
 import 'services/firestore_service.dart';
-import 'services/messaging_service.dart';
+import 'services/notification_service.dart';
 import 'services/storage_service.dart';
 import 'services/subscription_service.dart';
 import 'utils/accessibility_helper.dart';
@@ -116,8 +116,8 @@ void main() async {
           lazy: true,
         ),
         Provider<StorageService>(create: (_) => StorageService(), lazy: true),
-        Provider<MessagingService>(
-          create: (_) => MessagingService(),
+        Provider<NotificationService>(
+          create: (_) => NotificationService(),
           lazy: true,
         ),
       ],
@@ -180,6 +180,13 @@ Future<void> _requestPermissions() async {
         await Permission.storage.request();
       }
     }
+
+    // Request notifications on iOS
+    if (Platform.isIOS) {
+      if (await Permission.notification.status.isDenied) {
+        await Permission.notification.request();
+      }
+    }
   } catch (e) {
     // Never crash the app due to a permission handler exception
     Logger.w('Permission request failed: $e');
@@ -210,7 +217,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       Logger.i("🔧 MyApp: Post-frame callback - Setting up app services");
       _setupTokenChangeListener();
 
-      // Token cleanup will be handled by the MessagingService when it's lazily created
+      // Token cleanup will be handled by the NotificationService when it's lazily created
     });
   }
 
@@ -278,10 +285,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           create: (_) => StorageService(),
           update: (_, __) => StorageService(),
         ),
-        ProxyProvider0<MessagingService>(
+        ProxyProvider0<NotificationService>(
           lazy: true,
-          create: (_) => MessagingService(),
-          update: (_, __) => MessagingService(),
+          create: (_) => NotificationService(),
+          update: (_, __) => NotificationService(),
         ),
         ProxyProvider0<SubscriptionService>(
           lazy: true,

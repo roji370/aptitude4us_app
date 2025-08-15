@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import '../models/user_model.dart';
 import 'auth_persistence_service.dart';
-import '../services/messaging_service.dart';
+import '../services/notification_service.dart'; // Add this import
 import 'subscription_service.dart';
 import '../utils/logger.dart';
 import '../main.dart'; // For FirebaseInitHelper
@@ -267,16 +267,16 @@ class AuthService {
       await AuthPersistenceService.clearAll();
       Logger.i("Auth persistence cleared");
 
-      // Get messaging service to clean up tokens
-      MessagingService messagingService = MessagingService();
+      // Get notification service to clean up tokens
+      NotificationService notificationService = NotificationService();
 
       // Sign out from Firebase last
       await _auth!.signOut();
       Logger.i("Firebase sign out completed");
 
-      // Clean up messaging tokens AFTER Firebase sign out
+      // Clean up notification tokens AFTER Firebase sign out
       try {
-        await messagingService.cleanupTokens();
+        await notificationService.deleteToken();
         Logger.i("FCM token cleanup completed after logout");
       } catch (error) {
         Logger.w(

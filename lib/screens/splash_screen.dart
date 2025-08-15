@@ -13,7 +13,7 @@ import '../utils/responsive_helper.dart';
 import 'login_screen.dart';
 import 'assigned_courses_screen.dart';
 import 'onboarding_screen.dart';
-import '../services/messaging_service.dart';
+import '../services/notification_service.dart';
 import '../main.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -194,9 +194,9 @@ class _SplashScreenState extends State<SplashScreen>
         // User is already logged in through Firebase Auth
         Logger.i("User already logged in via Firebase Auth");
 
-        // Setup messaging handling first
+        // Setup notification handling first
         if (mounted) {
-          final messagingService = Provider.of<MessagingService>(
+          final notificationService = Provider.of<NotificationService>(
             context,
             listen: false,
           );
@@ -204,11 +204,11 @@ class _SplashScreenState extends State<SplashScreen>
           // Get the current user ID
           String? userId = authService.currentUser?.uid;
           if (userId != null) {
-            // Initialize messaging service for chat
-            messagingService.initialize();
+            // Ensure topic subscriptions and permissions
+            notificationService.ensureTopicSubscriptions(userId);
 
-            // Ensure topic subscriptions for chat
-            messagingService.ensureTopicSubscriptions(userId);
+            // Also refresh token to make sure we have the latest
+            notificationService.refreshToken();
           }
         }
 
