@@ -1,6 +1,7 @@
 platform :ios, '16.0'
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
-use_frameworks! :linkage => :static
+# Let Flutter decide framework/static linkage per-plugin. Forcing this may crash at plugin registration.
+# use_frameworks! :linkage => :static
 
 project 'Runner', {
   'Debug' => :debug,

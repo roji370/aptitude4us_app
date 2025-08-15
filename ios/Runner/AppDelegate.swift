@@ -17,7 +17,7 @@ import FirebaseMessaging
     UNUserNotificationCenter.current().delegate = self
     Messaging.messaging().delegate = self
 
-    // Register Flutter plugins before returning to UIKit
+    // Register plugins BEFORE calling super (matches Flutter template)
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
