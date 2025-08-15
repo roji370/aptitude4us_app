@@ -70,7 +70,7 @@ import FirebaseMessaging
     }
   }
 
-  // Forward APNs device token to Firebase when AppDelegate proxying is disabled
+  // Forward APNs device token to Firebase when needed (kept for compatibility)
   override func application(
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data

@@ -44,8 +44,7 @@
 		<true/>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
 		<true/>
-		<key>FirebaseAppDelegateProxyEnabled</key>
-		<false/>
+        <!-- FirebaseAppDelegateProxyEnabled removed to use default (enabled) behavior -->
 		<key>NSUserNotificationsUsageDescription</key>
 		<string>We need to send you notifications about new messages and updates</string>
 		<key>UIMainStoryboardFile</key>
