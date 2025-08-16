@@ -552,14 +552,8 @@ class NotificationService {
 
     Logger.i('FCM permissions request result: ${settings.authorizationStatus}');
 
-    // Request Awesome Notifications permissions
-    await AwesomeNotifications().isNotificationAllowed().then((
-      isAllowed,
-    ) async {
-      if (!isAllowed) {
-        await AwesomeNotifications().requestPermissionToSendNotifications();
-      }
-    });
+    // DEBUG: Awesome Notifications permissions disabled
+    // await AwesomeNotifications().isNotificationAllowed() ...
 
     return settings;
   }
