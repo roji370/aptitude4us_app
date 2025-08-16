@@ -24,7 +24,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   final FocusNode _inputFocusNode = FocusNode();
 
   List<Map<String, dynamic>> _messages = [];
-  List<Map<String, dynamic>> _optimisticMessages = [];
   bool _isLoading = true;
   bool _isLoadingMore = false;
   bool _hasMoreMessages = true;
@@ -173,24 +172,19 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       _isSending = true;
     });
 
-    // Create optimistic message
+    // Optimistic UI: insert a temporary bubble
     final tempMessage = <String, dynamic>{
       'id': 'temp-${DateTime.now().millisecondsSinceEpoch}',
       'text': text,
       'senderId': FirebaseAuth.instance.currentUser?.uid,
-      'senderName': FirebaseAuth.instance.currentUser?.displayName ?? 'You',
       'timestamp': DateTime.now(),
       'status': 'sending',
     };
 
-    // Add to optimistic messages only
     setState(() {
-      _optimisticMessages.insert(0, tempMessage);
+      _messages.insert(0, tempMessage);
     });
     _messageController.clear();
-
-    // Keep keyboard open after sending
-    _inputFocusNode.requestFocus();
 
     // Ensure newest is visible
     _scrollController.animateTo(
@@ -205,23 +199,37 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       if (!result['success']) {
         if (mounted) {
           _showSnackBar('Error: ${result['error']}', isError: true);
-          // Remove optimistic message and restore text on error
+          // Remove temp message and restore text on error
           setState(() {
-            _optimisticMessages.removeWhere(
-              (msg) => msg['id'] == tempMessage['id'],
-            );
+            if (_messages.isNotEmpty &&
+                _messages.first['id'] == tempMessage['id']) {
+              _messages.removeAt(0);
+            }
           });
           _messageController.text = text;
         }
       } else {
         // Success feedback
         HapticFeedback.selectionClick();
-        // Remove optimistic message - real message will appear through next pagination load
+        // Upgrade optimistic bubble to real one without reloading the whole list
+        final String? newId = result['messageId'] as String?;
         setState(() {
-          _optimisticMessages.removeWhere(
-            (msg) => msg['id'] == tempMessage['id'],
-          );
+          if (_messages.isNotEmpty &&
+              _messages.first['id'] == tempMessage['id']) {
+            _messages.first['status'] = 'sent';
+            if (newId != null) {
+              _messages.first['id'] = newId;
+            }
+          }
         });
+        // Keep scrolled to newest
+        if (mounted) {
+          _scrollController.animateTo(
+            0,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOut,
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -229,9 +237,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         _messageController.text = text;
         // Rollback optimistic insert
         setState(() {
-          _optimisticMessages.removeWhere(
-            (msg) => msg['id'] == tempMessage['id'],
-          );
+          if (_messages.isNotEmpty &&
+              _messages.first['id'] == tempMessage['id']) {
+            _messages.removeAt(0);
+          }
         });
       }
     } finally {
@@ -354,19 +363,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       return _buildErrorState();
     }
 
-    return GestureDetector(
-      onTap: () {
-        // Dismiss keyboard when tapping in chat area
-        FocusScope.of(context).unfocus();
-      },
-      child: Column(
-        children: [
-          // Messages list
-          Expanded(child: _buildMessagesList()),
-          // Message input
-          _buildMessageInput(),
-        ],
-      ),
+    return Column(
+      children: [
+        // Messages list
+        Expanded(child: _buildMessagesList()),
+        // Message input
+        _buildMessageInput(),
+      ],
     );
   }
 
@@ -496,26 +499,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildMessagesList() {
-    // Combine optimistic messages with real messages
-    final allMessages = <Map<String, dynamic>>[
-      ..._optimisticMessages,
-      ..._messages.where(
-        (msg) =>
-            !_optimisticMessages.any(
-              (opt) =>
-                  opt['text'] == msg['text'] &&
-                  opt['senderId'] == msg['senderId'],
-            ),
-      ),
-    ];
-
-    // Sort by timestamp
-    allMessages.sort(
-      (a, b) =>
-          (b['timestamp'] as DateTime).compareTo(a['timestamp'] as DateTime),
-    );
-
-    if (allMessages.isEmpty) {
+    if (_messages.isEmpty) {
       return _buildEmptyState();
     }
 
@@ -523,9 +507,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       controller: _scrollController,
       reverse: true,
       physics: const BouncingScrollPhysics(),
-      itemCount: allMessages.length + (_hasMoreMessages ? 1 : 0),
+      itemCount: _messages.length + (_hasMoreMessages ? 1 : 0),
       itemBuilder: (context, index) {
-        if (index == allMessages.length) {
+        if (index == _messages.length) {
           return _isLoadingMore
               ? Container(
                 padding: EdgeInsets.all(
@@ -551,7 +535,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               )
               : const SizedBox.shrink();
         }
-        final message = allMessages[index];
+        final message = _messages[index];
         return _buildMessageItem(message, index);
       },
     );

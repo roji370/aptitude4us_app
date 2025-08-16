@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/community_chat_message.dart';
 import '../services/community_chat_service.dart';
 import '../widgets/community_chat_message_bubble.dart';
 import '../widgets/protected_course_content.dart';
 import '../utils/responsive_helper.dart';
-import 'dart:async';
 
 class CommunityChatScreen extends StatefulWidget {
   const CommunityChatScreen({super.key});
@@ -21,12 +19,10 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
   final CommunityChatService _chatService = CommunityChatService();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+
   final FocusNode _inputFocusNode = FocusNode();
 
   bool _isSending = false;
-  List<CommunityChatMessage> _optimisticMessages = [];
-  List<CommunityChatMessage> _messages = [];
-  StreamSubscription<List<CommunityChatMessage>>? _messagesSub;
 
   late AnimationController _inputAnimationController;
   late AnimationController _fabAnimationController;
@@ -39,17 +35,6 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     _initializeAnimations();
     _setupInputListener();
     _chatService.addWelcomeMessageIfNeeded();
-    _subscribeToMessages();
-  }
-
-  void _subscribeToMessages() {
-    _messagesSub?.cancel();
-    _messagesSub = _chatService.getCommunityMessages().listen((incoming) {
-      if (!mounted) return;
-      setState(() {
-        _messages = incoming;
-      });
-    });
   }
 
   void _initializeAnimations() {
@@ -92,7 +77,6 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     _inputFocusNode.dispose();
     _inputAnimationController.dispose();
     _fabAnimationController.dispose();
-    _messagesSub?.cancel();
     super.dispose();
   }
 
@@ -112,27 +96,10 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
 
     final messageText = _messageController.text.trim();
 
-    // Create optimistic message
-    final optimisticMessage = CommunityChatMessage(
-      id: 'temp-${DateTime.now().millisecondsSinceEpoch}',
-      senderId: user.uid,
-      senderName: user.displayName ?? 'You',
-      receiverId: 'COMMUNITY',
-      text: messageText,
-      timestamp: Timestamp.now(),
-      status: 'sending',
-      type: 'text',
-    );
-
-    // Add optimistic message and clear input
-    setState(() {
-      _optimisticMessages.insert(0, optimisticMessage);
-      _isSending = true;
-    });
+    // Clear message input immediately for responsiveness
     _messageController.clear();
 
-    // Keep keyboard open after sending
-    _inputFocusNode.requestFocus();
+    setState(() => _isSending = true);
 
     try {
       await _chatService.sendMessage(
@@ -143,28 +110,10 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
 
       // Success feedback
       HapticFeedback.selectionClick();
-
-      // Remove optimistic message after a small delay to ensure real message appears
-      if (mounted) {
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted) {
-            setState(() {
-              _optimisticMessages.removeWhere(
-                (msg) => msg.id == optimisticMessage.id,
-              );
-            });
-          }
-        });
-      }
     } catch (e) {
       if (mounted) {
         _showSnackBar('Failed to send message: ${e.toString()}', isError: true);
-        // Remove optimistic message and restore text on error
-        setState(() {
-          _optimisticMessages.removeWhere(
-            (msg) => msg.id == optimisticMessage.id,
-          );
-        });
+        // Restore message text on error
         _messageController.text = messageText;
       }
     } finally {
@@ -200,6 +149,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
 
   @override
   Widget build(BuildContext context) {
+    final currentUser = FirebaseAuth.instance.currentUser;
     final theme = Theme.of(context);
 
     return Scaffold(
@@ -208,19 +158,13 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
       body: ProtectedCourseContent(
         contentTitle: 'Community Chat',
         child: SafeArea(
-          child: GestureDetector(
-            onTap: () {
-              // Dismiss keyboard when tapping in chat area
-              FocusScope.of(context).unfocus();
-            },
-            child: Column(
-              children: [
-                // Messages list
-                Expanded(child: _buildMessagesList()),
-                // Message input
-                _buildMessageInput(theme),
-              ],
-            ),
+          child: Column(
+            children: [
+              // Messages list
+              Expanded(child: _buildMessagesList(currentUser)),
+              // Message input
+              _buildMessageInput(theme),
+            ],
           ),
         ),
       ),
@@ -245,64 +189,58 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     );
   }
 
-  Widget _buildMessagesList() {
-    final currentUser = FirebaseAuth.instance.currentUser;
+  Widget _buildMessagesList(User? currentUser) {
+    return StreamBuilder<List<CommunityChatMessage>>(
+      stream: _chatService.getCommunityMessages(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _buildErrorState('Error: ${snapshot.error}');
+        }
 
-    // Merge optimistic and real messages while avoiding duplicates
-    final merged = <CommunityChatMessage>[
-      ..._optimisticMessages,
-      ..._messages.where(
-        (msg) =>
-            !_optimisticMessages.any(
-              (opt) =>
-                  opt.id.startsWith('temp-') &&
-                  opt.text == msg.text &&
-                  opt.senderId == msg.senderId &&
-                  msg.timestamp
-                          .toDate()
-                          .difference(opt.timestamp.toDate())
-                          .abs()
-                          .inSeconds <
-                      5,
+        if (!snapshot.hasData) {
+          return _buildLoadingState();
+        }
+
+        final messages = snapshot.data!;
+
+        if (messages.isEmpty) {
+          return _buildEmptyState();
+        }
+
+        return ListView.builder(
+          controller: _scrollController,
+          reverse: true,
+          physics: const BouncingScrollPhysics(),
+          itemCount: messages.length,
+          padding: EdgeInsets.only(
+            top: ResponsiveHelper.getAdaptiveSpacing(
+              context,
+              compact: 8.0,
+              regular: 12.0,
+              pro: 16.0,
+              large: 20.0,
+              extraLarge: 24.0,
             ),
-      ),
-    ]..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+            bottom: ResponsiveHelper.getAdaptiveSpacing(
+              context,
+              compact: 8.0,
+              regular: 12.0,
+              pro: 16.0,
+              large: 20.0,
+              extraLarge: 24.0,
+            ),
+          ),
+          itemBuilder: (context, index) {
+            final message = messages[index];
+            final isCurrentUser = message.senderId == currentUser?.uid;
 
-    if (merged.isEmpty) {
-      return _buildEmptyState();
-    }
-
-    return ListView.builder(
-      controller: _scrollController,
-      reverse: true,
-      physics: const BouncingScrollPhysics(),
-      itemCount: merged.length,
-      padding: EdgeInsets.only(
-        top: ResponsiveHelper.getAdaptiveSpacing(
-          context,
-          compact: 8.0,
-          regular: 12.0,
-          pro: 16.0,
-          large: 20.0,
-          extraLarge: 24.0,
-        ),
-        bottom: ResponsiveHelper.getAdaptiveSpacing(
-          context,
-          compact: 8.0,
-          regular: 12.0,
-          pro: 16.0,
-          large: 20.0,
-          extraLarge: 24.0,
-        ),
-      ),
-      itemBuilder: (context, index) {
-        final message = merged[index];
-        final isCurrentUser = message.senderId == currentUser?.uid;
-        return CommunityChatMessageBubble(
-          key: ValueKey(message.id),
-          message: message,
-          isCurrentUser: isCurrentUser,
-          onReply: () => HapticFeedback.selectionClick(),
+            return CommunityChatMessageBubble(
+              key: ValueKey(message.id),
+              message: message,
+              isCurrentUser: isCurrentUser,
+              onReply: () => HapticFeedback.selectionClick(),
+            );
+          },
         );
       },
     );
