@@ -19,6 +19,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
   final CommunityChatService _chatService = CommunityChatService();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final GlobalKey<AnimatedListState> _listKey = GlobalKey<AnimatedListState>();
   final FocusNode _inputFocusNode = FocusNode();
 
   bool _isSending = false;
@@ -94,6 +95,20 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     });
 
     final messageText = _messageController.text.trim();
+
+    // Optimistic UI: insert temp bubble
+    final temp = CommunityChatMessage(
+      id: 'temp-${DateTime.now().millisecondsSinceEpoch}',
+      senderId: FirebaseAuth.instance.currentUser!.uid,
+      senderName: FirebaseAuth.instance.currentUser!.displayName ?? 'You',
+      text: messageText,
+      timestamp: DateTime.now(),
+    );
+    _listKey.currentState?.insertItem(
+      0,
+      duration: const Duration(milliseconds: 200),
+    );
+    // Use controller clear after insert to mimic WhatsApp
     _messageController.clear();
 
     setState(() => _isSending = true);
@@ -110,7 +125,6 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     } catch (e) {
       if (mounted) {
         _showSnackBar('Failed to send message: ${e.toString()}', isError: true);
-        // Restore message text on error
         _messageController.text = messageText;
       }
     } finally {
@@ -204,10 +218,12 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
           return _buildEmptyState();
         }
 
-        return ListView.builder(
+        return AnimatedList(
+          key: _listKey,
           controller: _scrollController,
           reverse: true,
           physics: const BouncingScrollPhysics(),
+          initialItemCount: messages.length,
           padding: EdgeInsets.only(
             top: ResponsiveHelper.getAdaptiveSpacing(
               context,
@@ -226,19 +242,28 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
               extraLarge: 24.0,
             ),
           ),
-          itemCount: messages.length,
-          itemBuilder: (context, index) {
+          itemBuilder: (context, index, animation) {
             final message = messages[index];
             final isCurrentUser = message.senderId == currentUser?.uid;
 
-            return CommunityChatMessageBubble(
-              key: ValueKey(message.id),
-              message: message,
-              isCurrentUser: isCurrentUser,
-              onReply: () {
-                // Implement reply functionality
-                HapticFeedback.selectionClick();
-              },
+            final slide = Tween<Offset>(
+              begin: const Offset(0, 0.15),
+              end: Offset.zero,
+            ).animate(
+              CurvedAnimation(parent: animation, curve: Curves.easeOut),
+            );
+
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: slide,
+                child: CommunityChatMessageBubble(
+                  key: ValueKey(message.id),
+                  message: message,
+                  isCurrentUser: isCurrentUser,
+                  onReply: () => HapticFeedback.selectionClick(),
+                ),
+              ),
             );
           },
         );
