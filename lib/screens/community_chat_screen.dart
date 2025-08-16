@@ -7,6 +7,7 @@ import '../services/community_chat_service.dart';
 import '../widgets/community_chat_message_bubble.dart';
 import '../widgets/protected_course_content.dart';
 import '../utils/responsive_helper.dart';
+import 'dart:async';
 
 class CommunityChatScreen extends StatefulWidget {
   const CommunityChatScreen({super.key});
@@ -24,6 +25,8 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
 
   bool _isSending = false;
   List<CommunityChatMessage> _optimisticMessages = [];
+  List<CommunityChatMessage> _messages = [];
+  StreamSubscription<List<CommunityChatMessage>>? _messagesSub;
 
   late AnimationController _inputAnimationController;
   late AnimationController _fabAnimationController;
@@ -36,6 +39,17 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     _initializeAnimations();
     _setupInputListener();
     _chatService.addWelcomeMessageIfNeeded();
+    _subscribeToMessages();
+  }
+
+  void _subscribeToMessages() {
+    _messagesSub?.cancel();
+    _messagesSub = _chatService.getCommunityMessages().listen((incoming) {
+      if (!mounted) return;
+      setState(() {
+        _messages = incoming;
+      });
+    });
   }
 
   void _initializeAnimations() {
@@ -78,6 +92,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     _inputFocusNode.dispose();
     _inputAnimationController.dispose();
     _fabAnimationController.dispose();
+    _messagesSub?.cancel();
     super.dispose();
   }
 
@@ -185,7 +200,6 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
 
   @override
   Widget build(BuildContext context) {
-    final currentUser = FirebaseAuth.instance.currentUser;
     final theme = Theme.of(context);
 
     return Scaffold(
@@ -202,7 +216,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
             child: Column(
               children: [
                 // Messages list
-                Expanded(child: _buildMessagesList(currentUser)),
+                Expanded(child: _buildMessagesList()),
                 // Message input
                 _buildMessageInput(theme),
               ],
@@ -231,81 +245,64 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     );
   }
 
-  Widget _buildMessagesList(User? currentUser) {
-    return StreamBuilder<List<CommunityChatMessage>>(
-      stream: _chatService.getCommunityMessages(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return _buildErrorState('Error: ${snapshot.error}');
-        }
+  Widget _buildMessagesList() {
+    final currentUser = FirebaseAuth.instance.currentUser;
 
-        if (!snapshot.hasData) {
-          return _buildLoadingState();
-        }
-
-        final messages = snapshot.data!;
-
-        // Combine optimistic messages with real messages
-        final allMessages = <CommunityChatMessage>[
-          ..._optimisticMessages,
-          ...messages.where(
-            (msg) =>
-                !_optimisticMessages.any(
-                  (opt) =>
-                      opt.id.startsWith('temp-') &&
-                      opt.text == msg.text &&
-                      opt.senderId == msg.senderId &&
-                      msg.timestamp
-                              .toDate()
-                              .difference(opt.timestamp.toDate())
-                              .abs()
-                              .inSeconds <
-                          5,
-                ),
-          ),
-        ];
-
-        // Sort by timestamp
-        allMessages.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-
-        if (allMessages.isEmpty) {
-          return _buildEmptyState();
-        }
-
-        return ListView.builder(
-          controller: _scrollController,
-          reverse: true,
-          physics: const BouncingScrollPhysics(),
-          itemCount: allMessages.length,
-          padding: EdgeInsets.only(
-            top: ResponsiveHelper.getAdaptiveSpacing(
-              context,
-              compact: 8.0,
-              regular: 12.0,
-              pro: 16.0,
-              large: 20.0,
-              extraLarge: 24.0,
+    // Merge optimistic and real messages while avoiding duplicates
+    final merged = <CommunityChatMessage>[
+      ..._optimisticMessages,
+      ..._messages.where(
+        (msg) =>
+            !_optimisticMessages.any(
+              (opt) =>
+                  opt.id.startsWith('temp-') &&
+                  opt.text == msg.text &&
+                  opt.senderId == msg.senderId &&
+                  msg.timestamp
+                          .toDate()
+                          .difference(opt.timestamp.toDate())
+                          .abs()
+                          .inSeconds <
+                      5,
             ),
-            bottom: ResponsiveHelper.getAdaptiveSpacing(
-              context,
-              compact: 8.0,
-              regular: 12.0,
-              pro: 16.0,
-              large: 20.0,
-              extraLarge: 24.0,
-            ),
-          ),
-          itemBuilder: (context, index) {
-            final message = allMessages[index];
-            final isCurrentUser = message.senderId == currentUser?.uid;
+      ),
+    ]..sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
-            return CommunityChatMessageBubble(
-              key: ValueKey(message.id),
-              message: message,
-              isCurrentUser: isCurrentUser,
-              onReply: () => HapticFeedback.selectionClick(),
-            );
-          },
+    if (merged.isEmpty) {
+      return _buildEmptyState();
+    }
+
+    return ListView.builder(
+      controller: _scrollController,
+      reverse: true,
+      physics: const BouncingScrollPhysics(),
+      itemCount: merged.length,
+      padding: EdgeInsets.only(
+        top: ResponsiveHelper.getAdaptiveSpacing(
+          context,
+          compact: 8.0,
+          regular: 12.0,
+          pro: 16.0,
+          large: 20.0,
+          extraLarge: 24.0,
+        ),
+        bottom: ResponsiveHelper.getAdaptiveSpacing(
+          context,
+          compact: 8.0,
+          regular: 12.0,
+          pro: 16.0,
+          large: 20.0,
+          extraLarge: 24.0,
+        ),
+      ),
+      itemBuilder: (context, index) {
+        final message = merged[index];
+        final isCurrentUser = message.senderId == currentUser?.uid;
+        return CommunityChatMessageBubble(
+          key: ValueKey(message.id),
+          message: message,
+          isCurrentUser: isCurrentUser,
+          onReply: () => HapticFeedback.selectionClick(),
         );
       },
     );
