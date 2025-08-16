@@ -4,8 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-// DEBUG: Temporarily disable Awesome Notifications
-// import 'package:awesome_notifications/awesome_notifications.dart';
+import 'package:awesome_notifications/awesome_notifications.dart';
 import '../utils/logger.dart';
 import '../utils/global_keys.dart';
 import '../main.dart' show FirebaseInitHelper; // For FirebaseInitHelper
@@ -53,9 +52,34 @@ class NotificationService {
     // Ensure Firebase services are ready first
     await _initializeFirebaseServices();
 
-    // DEBUG: Awesome Notifications initialization disabled
-    // await AwesomeNotifications().initialize(...)
-    // await AwesomeNotifications().isNotificationAllowed() ...
+    // Initialize Awesome Notifications
+    await AwesomeNotifications().initialize(
+      null, // use default app icon
+      [
+        NotificationChannel(
+          channelKey: 'chat_channel',
+          channelName: 'Chat Notifications',
+          channelDescription: 'Notifications for new chat messages',
+          defaultColor: Colors.blue,
+          ledColor: Colors.blue,
+          importance: NotificationImportance.High,
+          channelShowBadge: true,
+          enableVibration: true,
+          enableLights: true,
+          soundSource: 'resource://raw/notification_sound',
+          playSound: true,
+        ),
+      ],
+    );
+
+    // Request Awesome Notifications permissions
+    await AwesomeNotifications().isNotificationAllowed().then((
+      isAllowed,
+    ) async {
+      if (!isAllowed) {
+        await AwesomeNotifications().requestPermissionToSendNotifications();
+      }
+    });
 
     // Request FCM permissions
     if (_firebaseMessaging != null) {
@@ -149,8 +173,13 @@ class NotificationService {
     // Handle when app is in background but opened
     FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
 
-    // DEBUG: Awesome Notifications listeners disabled
-    // await AwesomeNotifications().setListeners(...)
+    // Setup Awesome Notifications action handlers
+    await AwesomeNotifications().setListeners(
+      onActionReceivedMethod: _onNotificationAction,
+      onNotificationCreatedMethod: _onNotificationCreated,
+      onNotificationDisplayedMethod: _onNotificationDisplayed,
+      onDismissActionReceivedMethod: _onDismissActionReceived,
+    );
 
     // Mark as initialized
     _isInitialized = true;
@@ -512,8 +541,13 @@ class NotificationService {
       }
     }
 
-    // DEBUG: Awesome Notifications permission check disabled
-    report['awesomeNotificationsAllowed'] = false;
+    // Report Awesome Notifications permission state
+    try {
+      report['awesomeNotificationsAllowed'] =
+          await AwesomeNotifications().isNotificationAllowed();
+    } catch (_) {
+      report['awesomeNotificationsAllowed'] = false;
+    }
 
     Logger.i('Notification permissions report: $report');
     return report;
@@ -552,8 +586,13 @@ class NotificationService {
 
     Logger.i('FCM permissions request result: ${settings.authorizationStatus}');
 
-    // DEBUG: Awesome Notifications permissions disabled
-    // await AwesomeNotifications().isNotificationAllowed() ...
+    // Also ensure Awesome Notifications permission on iOS
+    try {
+      final allowed = await AwesomeNotifications().isNotificationAllowed();
+      if (!allowed) {
+        await AwesomeNotifications().requestPermissionToSendNotifications();
+      }
+    } catch (_) {}
 
     return settings;
   }
@@ -919,40 +958,64 @@ class NotificationService {
       body = message.data['body'] ?? '';
     }
 
-    // DEBUG: Awesome Notifications createNotification disabled
-    Logger.i(
-      'Local notification suppressed (Awesome Notifications disabled): title=$title',
-    );
-
-    Logger.i('Local notification created with title: $title');
+    // Create a local notification using Awesome Notifications
+    try {
+      await AwesomeNotifications().createNotification(
+        content: NotificationContent(
+          id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
+          channelKey: 'chat_channel',
+          title: title,
+          body: body,
+          notificationLayout: NotificationLayout.Default,
+          payload: Map<String, String>.from(message.data),
+          category: NotificationCategory.Message,
+          wakeUpScreen: true,
+          criticalAlert: true,
+        ),
+      );
+      Logger.i('Local notification created with title: $title');
+    } catch (e) {
+      Logger.e('Failed to create local notification: $e');
+    }
   }
 
   /// Handle notification action
   @pragma('vm:entry-point')
-  static Future<void> _onNotificationAction(dynamic receivedAction) async {
-    Logger.i('AwesomeNotifications action suppressed for debugging');
+  static Future<void> _onNotificationAction(
+    ReceivedAction receivedAction,
+  ) async {
+    Logger.i('Notification action received: ${receivedAction.toString()}');
+    if (receivedAction.payload != null &&
+        receivedAction.payload!['type'] == 'chat') {
+      final String? chatId = receivedAction.payload!['chatId'];
+      if (chatId != null && globalNavigatorKey.currentState != null) {
+        globalNavigatorKey.currentState!.pushNamed('/chat', arguments: chatId);
+      }
+    }
   }
 
   /// Handle notification creation
   @pragma('vm:entry-point')
   static Future<void> _onNotificationCreated(
-    dynamic receivedNotification,
+    ReceivedNotification receivedNotification,
   ) async {
-    Logger.i('AwesomeNotifications created suppressed for debugging');
+    Logger.i('Notification created: ${receivedNotification.toString()}');
   }
 
   /// Handle notification display
   @pragma('vm:entry-point')
   static Future<void> _onNotificationDisplayed(
-    dynamic receivedNotification,
+    ReceivedNotification receivedNotification,
   ) async {
-    Logger.i('AwesomeNotifications displayed suppressed for debugging');
+    Logger.i('Notification displayed: ${receivedNotification.toString()}');
   }
 
   /// Handle notification dismissal
   @pragma('vm:entry-point')
-  static Future<void> _onDismissActionReceived(dynamic receivedAction) async {
-    Logger.i('AwesomeNotifications dismissed suppressed for debugging');
+  static Future<void> _onDismissActionReceived(
+    ReceivedAction receivedAction,
+  ) async {
+    Logger.i('Notification dismissed: ${receivedAction.toString()}');
   }
 
   /// Handle app lifecycle changes to ensure tokens are properly managed
@@ -1466,10 +1529,21 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 
   // Create a notification even in background
-  // DEBUG: Awesome Notifications createNotification disabled (background)
-  Logger.i(
-    'Background notification suppressed (Awesome Notifications disabled): title=$title',
-  );
-
-  debugPrint('Background notification created with title: $title');
+  try {
+    await AwesomeNotifications().createNotification(
+      content: NotificationContent(
+        id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
+        channelKey: 'chat_channel',
+        title: title,
+        body: body,
+        notificationLayout: NotificationLayout.Default,
+        payload: Map<String, String>.from(message.data),
+        category: NotificationCategory.Message,
+        wakeUpScreen: true,
+        criticalAlert: true,
+      ),
+    );
+  } catch (e) {
+    debugPrint('Failed to create background notification: $e');
+  }
 }

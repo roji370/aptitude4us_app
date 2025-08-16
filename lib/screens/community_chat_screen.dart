@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/community_chat_message.dart';
 import '../services/community_chat_service.dart';
 import '../widgets/community_chat_message_bubble.dart';
@@ -101,8 +102,11 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
       id: 'temp-${DateTime.now().millisecondsSinceEpoch}',
       senderId: FirebaseAuth.instance.currentUser!.uid,
       senderName: FirebaseAuth.instance.currentUser!.displayName ?? 'You',
+      receiverId: 'COMMUNITY',
       text: messageText,
-      timestamp: DateTime.now(),
+      timestamp: Timestamp.now(),
+      status: 'sending',
+      type: 'text',
     );
     _listKey.currentState?.insertItem(
       0,
