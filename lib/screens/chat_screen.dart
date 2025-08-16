@@ -19,7 +19,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final GlobalKey<AnimatedListState> _listKey = GlobalKey<AnimatedListState>();
+
   final ChatService _chatService = ChatService();
   final FocusNode _inputFocusNode = FocusNode();
 
@@ -172,19 +172,19 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       _isSending = true;
     });
 
-    // Optimistic UI: insert a temporary bubble that animates like WhatsApp
+    // Optimistic UI: insert a temporary bubble
     final tempMessage = <String, dynamic>{
       'id': 'temp-${DateTime.now().millisecondsSinceEpoch}',
       'text': text,
       'senderId': FirebaseAuth.instance.currentUser?.uid,
       'timestamp': DateTime.now(),
     };
-    _messages.insert(0, tempMessage);
-    _listKey.currentState?.insertItem(
-      0,
-      duration: const Duration(milliseconds: 200),
-    );
+
+    setState(() {
+      _messages.insert(0, tempMessage);
+    });
     _messageController.clear();
+
     // Ensure newest is visible
     _scrollController.animateTo(
       0,
@@ -198,19 +198,25 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       if (!result['success']) {
         if (mounted) {
           _showSnackBar('Error: ${result['error']}', isError: true);
-          // Restore message text on error
+          // Remove temp message and restore text on error
+          setState(() {
+            if (_messages.isNotEmpty &&
+                _messages.first['id'] == tempMessage['id']) {
+              _messages.removeAt(0);
+            }
+          });
           _messageController.text = text;
         }
       } else {
         // Success feedback
         HapticFeedback.selectionClick();
-        // Remove temp bubble smoothly, then reload from server to avoid dupes
-        _listKey.currentState?.removeItem(
-          0,
-          (context, animation) => _buildAnimatedItem(tempMessage, animation, 0),
-          duration: const Duration(milliseconds: 150),
-        );
-        _messages.removeAt(0);
+        // Remove temp message and reload from server to avoid dupes
+        setState(() {
+          if (_messages.isNotEmpty &&
+              _messages.first['id'] == tempMessage['id']) {
+            _messages.removeAt(0);
+          }
+        });
         await _loadInitialMessages();
         // Keep scrolled to newest
         if (mounted) {
@@ -226,15 +232,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         _showSnackBar('Error sending message: $e', isError: true);
         _messageController.text = text;
         // Rollback optimistic insert
-        _listKey.currentState?.removeItem(
-          0,
-          (context, animation) => _buildAnimatedItem(tempMessage, animation, 0),
-          duration: const Duration(milliseconds: 150),
-        );
-        if (_messages.isNotEmpty &&
-            _messages.first['id'] == tempMessage['id']) {
-          _messages.removeAt(0);
-        }
+        setState(() {
+          if (_messages.isNotEmpty &&
+              _messages.first['id'] == tempMessage['id']) {
+            _messages.removeAt(0);
+          }
+        });
       }
     } finally {
       if (mounted) {
@@ -269,10 +272,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         margin: ResponsiveHelper.getScreenHorizontalPadding(context),
       ),
     );
-  }
-
-  void _showDebugInfo() {
-    // Debug functionality removed for production
   }
 
   @override
@@ -500,13 +499,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       return _buildEmptyState();
     }
 
-    return AnimatedList(
-      key: _listKey,
+    return ListView.builder(
       controller: _scrollController,
       reverse: true,
       physics: const BouncingScrollPhysics(),
-      initialItemCount: _messages.length + (_hasMoreMessages ? 1 : 0),
-      itemBuilder: (context, index, animation) {
+      itemCount: _messages.length + (_hasMoreMessages ? 1 : 0),
+      itemBuilder: (context, index) {
         if (index == _messages.length) {
           return _isLoadingMore
               ? Container(
@@ -534,35 +532,21 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               : const SizedBox.shrink();
         }
         final message = _messages[index];
-        return _buildAnimatedItem(message, animation, index);
+        return _buildMessageItem(message, index);
       },
     );
   }
 
-  Widget _buildAnimatedItem(
-    Map<String, dynamic> message,
-    Animation<double> animation,
-    int index,
-  ) {
+  Widget _buildMessageItem(Map<String, dynamic> message, int index) {
     final currentUser = FirebaseAuth.instance.currentUser;
     final isMe = message['senderId'] == currentUser?.uid;
-    final slide = Tween<Offset>(
-      begin: const Offset(0, 0.15),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut));
 
-    return FadeTransition(
-      opacity: animation,
-      child: SlideTransition(
-        position: slide,
-        child: MessageBubble(
-          key: ValueKey(message['id'] ?? index),
-          message: message,
-          isMe: isMe,
-          status: 'sent',
-          onReply: () => HapticFeedback.selectionClick(),
-        ),
-      ),
+    return MessageBubble(
+      key: ValueKey(message['id'] ?? index),
+      message: message,
+      isMe: isMe,
+      status: 'sent',
+      onReply: () => HapticFeedback.selectionClick(),
     );
   }
 
