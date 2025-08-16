@@ -351,18 +351,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
 
-          const Divider(),
-
-          // Sign Out Button
-          ListTile(
-            leading: const Icon(Icons.logout, color: Colors.red),
-            title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
-            subtitle: const Text('Sign out of your account'),
-            onTap: _signOut,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
+          // Sign out removed as per requirements
         ],
       ),
     );
