@@ -93,8 +93,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 16),
               _buildInfoRow('Email', user?.email ?? 'Not available'),
-              const SizedBox(height: 8),
-              _buildInfoRow('User ID', user?.uid ?? 'Not available'),
             ],
           ),
         );
