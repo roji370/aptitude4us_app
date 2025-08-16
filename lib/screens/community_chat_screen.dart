@@ -129,12 +129,16 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
       // Success feedback
       HapticFeedback.selectionClick();
 
-      // Remove optimistic message since real one will come from stream
+      // Remove optimistic message after a small delay to ensure real message appears
       if (mounted) {
-        setState(() {
-          _optimisticMessages.removeWhere(
-            (msg) => msg.id == optimisticMessage.id,
-          );
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            setState(() {
+              _optimisticMessages.removeWhere(
+                (msg) => msg.id == optimisticMessage.id,
+              );
+            });
+          }
         });
       }
     } catch (e) {
@@ -247,7 +251,16 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
           ...messages.where(
             (msg) =>
                 !_optimisticMessages.any(
-                  (opt) => opt.text == msg.text && opt.senderId == msg.senderId,
+                  (opt) =>
+                      opt.id.startsWith('temp-') &&
+                      opt.text == msg.text &&
+                      opt.senderId == msg.senderId &&
+                      msg.timestamp
+                              .toDate()
+                              .difference(opt.timestamp.toDate())
+                              .abs()
+                              .inSeconds <
+                          5,
                 ),
           ),
         ];
