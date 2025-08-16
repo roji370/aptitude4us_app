@@ -185,6 +185,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     });
     _messageController.clear();
 
+    // Keep keyboard open after sending
+    _inputFocusNode.requestFocus();
+
     // Ensure newest is visible
     _scrollController.animateTo(
       0,
@@ -210,22 +213,14 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       } else {
         // Success feedback
         HapticFeedback.selectionClick();
-        // Remove temp message and reload from server to avoid dupes
+        // Remove temp message - real message will be loaded naturally via pagination
         setState(() {
           if (_messages.isNotEmpty &&
               _messages.first['id'] == tempMessage['id']) {
             _messages.removeAt(0);
           }
         });
-        await _loadInitialMessages();
-        // Keep scrolled to newest
-        if (mounted) {
-          _scrollController.animateTo(
-            0,
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeOut,
-          );
-        }
+        // Note: No need to reload all messages, the new message will appear through natural flow
       }
     } catch (e) {
       if (mounted) {
@@ -359,13 +354,19 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       return _buildErrorState();
     }
 
-    return Column(
-      children: [
-        // Messages list
-        Expanded(child: _buildMessagesList()),
-        // Message input
-        _buildMessageInput(),
-      ],
+    return GestureDetector(
+      onTap: () {
+        // Dismiss keyboard when tapping in chat area
+        FocusScope.of(context).unfocus();
+      },
+      child: Column(
+        children: [
+          // Messages list
+          Expanded(child: _buildMessagesList()),
+          // Message input
+          _buildMessageInput(),
+        ],
+      ),
     );
   }
 

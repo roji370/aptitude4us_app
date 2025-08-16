@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/community_chat_message.dart';
 import '../services/community_chat_service.dart';
 import '../widgets/community_chat_message_bubble.dart';
@@ -19,10 +20,10 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
   final CommunityChatService _chatService = CommunityChatService();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-
   final FocusNode _inputFocusNode = FocusNode();
 
   bool _isSending = false;
+  List<CommunityChatMessage> _optimisticMessages = [];
 
   late AnimationController _inputAnimationController;
   late AnimationController _fabAnimationController;
@@ -96,10 +97,27 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
 
     final messageText = _messageController.text.trim();
 
-    // Clear message input immediately for responsiveness
+    // Create optimistic message
+    final optimisticMessage = CommunityChatMessage(
+      id: 'temp-${DateTime.now().millisecondsSinceEpoch}',
+      senderId: user.uid,
+      senderName: user.displayName ?? 'You',
+      receiverId: 'COMMUNITY',
+      text: messageText,
+      timestamp: Timestamp.now(),
+      status: 'sending',
+      type: 'text',
+    );
+
+    // Add optimistic message and clear input
+    setState(() {
+      _optimisticMessages.insert(0, optimisticMessage);
+      _isSending = true;
+    });
     _messageController.clear();
 
-    setState(() => _isSending = true);
+    // Keep keyboard open after sending
+    _inputFocusNode.requestFocus();
 
     try {
       await _chatService.sendMessage(
@@ -110,10 +128,24 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
 
       // Success feedback
       HapticFeedback.selectionClick();
+
+      // Remove optimistic message since real one will come from stream
+      if (mounted) {
+        setState(() {
+          _optimisticMessages.removeWhere(
+            (msg) => msg.id == optimisticMessage.id,
+          );
+        });
+      }
     } catch (e) {
       if (mounted) {
         _showSnackBar('Failed to send message: ${e.toString()}', isError: true);
-        // Restore message text on error
+        // Remove optimistic message and restore text on error
+        setState(() {
+          _optimisticMessages.removeWhere(
+            (msg) => msg.id == optimisticMessage.id,
+          );
+        });
         _messageController.text = messageText;
       }
     } finally {
@@ -158,13 +190,19 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
       body: ProtectedCourseContent(
         contentTitle: 'Community Chat',
         child: SafeArea(
-          child: Column(
-            children: [
-              // Messages list
-              Expanded(child: _buildMessagesList(currentUser)),
-              // Message input
-              _buildMessageInput(theme),
-            ],
+          child: GestureDetector(
+            onTap: () {
+              // Dismiss keyboard when tapping in chat area
+              FocusScope.of(context).unfocus();
+            },
+            child: Column(
+              children: [
+                // Messages list
+                Expanded(child: _buildMessagesList(currentUser)),
+                // Message input
+                _buildMessageInput(theme),
+              ],
+            ),
           ),
         ),
       ),
@@ -203,7 +241,21 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
 
         final messages = snapshot.data!;
 
-        if (messages.isEmpty) {
+        // Combine optimistic messages with real messages
+        final allMessages = <CommunityChatMessage>[
+          ..._optimisticMessages,
+          ...messages.where(
+            (msg) =>
+                !_optimisticMessages.any(
+                  (opt) => opt.text == msg.text && opt.senderId == msg.senderId,
+                ),
+          ),
+        ];
+
+        // Sort by timestamp
+        allMessages.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+        if (allMessages.isEmpty) {
           return _buildEmptyState();
         }
 
@@ -211,7 +263,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
           controller: _scrollController,
           reverse: true,
           physics: const BouncingScrollPhysics(),
-          itemCount: messages.length,
+          itemCount: allMessages.length,
           padding: EdgeInsets.only(
             top: ResponsiveHelper.getAdaptiveSpacing(
               context,
@@ -231,7 +283,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
             ),
           ),
           itemBuilder: (context, index) {
-            final message = messages[index];
+            final message = allMessages[index];
             final isCurrentUser = message.senderId == currentUser?.uid;
 
             return CommunityChatMessageBubble(
