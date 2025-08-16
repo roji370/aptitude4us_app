@@ -4,7 +4,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:awesome_notifications/awesome_notifications.dart';
+// DEBUG: Temporarily disable Awesome Notifications
+// import 'package:awesome_notifications/awesome_notifications.dart';
 import '../utils/logger.dart';
 import '../utils/global_keys.dart';
 import '../main.dart' show FirebaseInitHelper; // For FirebaseInitHelper
@@ -52,34 +53,9 @@ class NotificationService {
     // Ensure Firebase services are ready first
     await _initializeFirebaseServices();
 
-    // Initialize Awesome Notifications
-    await AwesomeNotifications().initialize(
-      null, // no icon for now, it will use the default app icon
-      [
-        NotificationChannel(
-          channelKey: 'chat_channel',
-          channelName: 'Chat Notifications',
-          channelDescription: 'Notifications for new chat messages',
-          defaultColor: Colors.blue,
-          ledColor: Colors.blue,
-          importance: NotificationImportance.High,
-          channelShowBadge: true,
-          enableVibration: true,
-          enableLights: true,
-          soundSource: 'resource://raw/notification_sound',
-          playSound: true,
-        ),
-      ],
-    );
-
-    // Request notification permissions
-    await AwesomeNotifications().isNotificationAllowed().then((
-      isAllowed,
-    ) async {
-      if (!isAllowed) {
-        await AwesomeNotifications().requestPermissionToSendNotifications();
-      }
-    });
+    // DEBUG: Awesome Notifications initialization disabled
+    // await AwesomeNotifications().initialize(...)
+    // await AwesomeNotifications().isNotificationAllowed() ...
 
     // Request FCM permissions
     if (_firebaseMessaging != null) {
@@ -173,13 +149,8 @@ class NotificationService {
     // Handle when app is in background but opened
     FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
 
-    // Setup Awesome Notifications action handlers
-    await AwesomeNotifications().setListeners(
-      onActionReceivedMethod: _onNotificationAction,
-      onNotificationCreatedMethod: _onNotificationCreated,
-      onNotificationDisplayedMethod: _onNotificationDisplayed,
-      onDismissActionReceivedMethod: _onDismissActionReceived,
-    );
+    // DEBUG: Awesome Notifications listeners disabled
+    // await AwesomeNotifications().setListeners(...)
 
     // Mark as initialized
     _isInitialized = true;
@@ -541,10 +512,8 @@ class NotificationService {
       }
     }
 
-    // Check Awesome Notifications permissions
-    bool isAwesomeNotificationsAllowed =
-        await AwesomeNotifications().isNotificationAllowed();
-    report['awesomeNotificationsAllowed'] = isAwesomeNotificationsAllowed;
+    // DEBUG: Awesome Notifications permission check disabled
+    report['awesomeNotificationsAllowed'] = false;
 
     Logger.i('Notification permissions report: $report');
     return report;
@@ -956,19 +925,9 @@ class NotificationService {
       body = message.data['body'] ?? '';
     }
 
-    // Create a local notification using Awesome Notifications
-    await AwesomeNotifications().createNotification(
-      content: NotificationContent(
-        id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-        channelKey: 'chat_channel',
-        title: title,
-        body: body,
-        notificationLayout: NotificationLayout.Default,
-        payload: Map<String, String>.from(message.data),
-        category: NotificationCategory.Message,
-        wakeUpScreen: true,
-        criticalAlert: true,
-      ),
+    // DEBUG: Awesome Notifications createNotification disabled
+    Logger.i(
+      'Local notification suppressed (Awesome Notifications disabled): title=$title',
     );
 
     Logger.i('Local notification created with title: $title');
@@ -976,42 +935,30 @@ class NotificationService {
 
   /// Handle notification action
   @pragma('vm:entry-point')
-  static Future<void> _onNotificationAction(
-    ReceivedAction receivedAction,
-  ) async {
-    Logger.i('Notification action received: ${receivedAction.toString()}');
-    // Handle the action based on the payload
-    if (receivedAction.payload != null &&
-        receivedAction.payload!['type'] == 'chat') {
-      final String? chatId = receivedAction.payload!['chatId'];
-      if (chatId != null && globalNavigatorKey.currentState != null) {
-        globalNavigatorKey.currentState!.pushNamed('/chat', arguments: chatId);
-      }
-    }
+  static Future<void> _onNotificationAction(dynamic receivedAction) async {
+    Logger.i('AwesomeNotifications action suppressed for debugging');
   }
 
   /// Handle notification creation
   @pragma('vm:entry-point')
   static Future<void> _onNotificationCreated(
-    ReceivedNotification receivedNotification,
+    dynamic receivedNotification,
   ) async {
-    Logger.i('Notification created: ${receivedNotification.toString()}');
+    Logger.i('AwesomeNotifications created suppressed for debugging');
   }
 
   /// Handle notification display
   @pragma('vm:entry-point')
   static Future<void> _onNotificationDisplayed(
-    ReceivedNotification receivedNotification,
+    dynamic receivedNotification,
   ) async {
-    Logger.i('Notification displayed: ${receivedNotification.toString()}');
+    Logger.i('AwesomeNotifications displayed suppressed for debugging');
   }
 
   /// Handle notification dismissal
   @pragma('vm:entry-point')
-  static Future<void> _onDismissActionReceived(
-    ReceivedAction receivedAction,
-  ) async {
-    Logger.i('Notification dismissed: ${receivedAction.toString()}');
+  static Future<void> _onDismissActionReceived(dynamic receivedAction) async {
+    Logger.i('AwesomeNotifications dismissed suppressed for debugging');
   }
 
   /// Handle app lifecycle changes to ensure tokens are properly managed
@@ -1525,18 +1472,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 
   // Create a notification even in background
-  await AwesomeNotifications().createNotification(
-    content: NotificationContent(
-      id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-      channelKey: 'chat_channel',
-      title: title,
-      body: body,
-      notificationLayout: NotificationLayout.Default,
-      payload: Map<String, String>.from(message.data),
-      category: NotificationCategory.Message,
-      wakeUpScreen: true,
-      criticalAlert: true,
-    ),
+  // DEBUG: Awesome Notifications createNotification disabled (background)
+  Logger.i(
+    'Background notification suppressed (Awesome Notifications disabled): title=$title',
   );
 
   debugPrint('Background notification created with title: $title');

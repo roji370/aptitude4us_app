@@ -173,11 +173,14 @@ Future<void> _configureImmediateUI() async {
 }
 
 Future<void> _requestPermissions() async {
-  if (await Permission.storage.status.isDenied) {
-    await Permission.storage.request();
+  // Request storage permission only on Android
+  if (!Platform.isIOS) {
+    if (await Permission.storage.status.isDenied) {
+      await Permission.storage.request();
+    }
   }
 
-  // Add notifications permission request for iOS
+  // Request notifications permission on iOS
   if (Platform.isIOS) {
     if (await Permission.notification.status.isDenied) {
       await Permission.notification.request();
