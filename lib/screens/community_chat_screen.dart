@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/community_chat_message.dart';
 import '../services/community_chat_service.dart';
 import '../widgets/community_chat_message_bubble.dart';
@@ -20,7 +19,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
   final CommunityChatService _chatService = CommunityChatService();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final GlobalKey<AnimatedListState> _listKey = GlobalKey<AnimatedListState>();
+
   final FocusNode _inputFocusNode = FocusNode();
 
   bool _isSending = false;
@@ -97,22 +96,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
 
     final messageText = _messageController.text.trim();
 
-    // Optimistic UI: insert temp bubble
-    final temp = CommunityChatMessage(
-      id: 'temp-${DateTime.now().millisecondsSinceEpoch}',
-      senderId: FirebaseAuth.instance.currentUser!.uid,
-      senderName: FirebaseAuth.instance.currentUser!.displayName ?? 'You',
-      receiverId: 'COMMUNITY',
-      text: messageText,
-      timestamp: Timestamp.now(),
-      status: 'sending',
-      type: 'text',
-    );
-    _listKey.currentState?.insertItem(
-      0,
-      duration: const Duration(milliseconds: 200),
-    );
-    // Use controller clear after insert to mimic WhatsApp
+    // Clear message input immediately for responsiveness
     _messageController.clear();
 
     setState(() => _isSending = true);
@@ -129,6 +113,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     } catch (e) {
       if (mounted) {
         _showSnackBar('Failed to send message: ${e.toString()}', isError: true);
+        // Restore message text on error
         _messageController.text = messageText;
       }
     } finally {
@@ -222,12 +207,11 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
           return _buildEmptyState();
         }
 
-        return AnimatedList(
-          key: _listKey,
+        return ListView.builder(
           controller: _scrollController,
           reverse: true,
           physics: const BouncingScrollPhysics(),
-          initialItemCount: messages.length,
+          itemCount: messages.length,
           padding: EdgeInsets.only(
             top: ResponsiveHelper.getAdaptiveSpacing(
               context,
@@ -246,28 +230,15 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
               extraLarge: 24.0,
             ),
           ),
-          itemBuilder: (context, index, animation) {
+          itemBuilder: (context, index) {
             final message = messages[index];
             final isCurrentUser = message.senderId == currentUser?.uid;
 
-            final slide = Tween<Offset>(
-              begin: const Offset(0, 0.15),
-              end: Offset.zero,
-            ).animate(
-              CurvedAnimation(parent: animation, curve: Curves.easeOut),
-            );
-
-            return FadeTransition(
-              opacity: animation,
-              child: SlideTransition(
-                position: slide,
-                child: CommunityChatMessageBubble(
-                  key: ValueKey(message.id),
-                  message: message,
-                  isCurrentUser: isCurrentUser,
-                  onReply: () => HapticFeedback.selectionClick(),
-                ),
-              ),
+            return CommunityChatMessageBubble(
+              key: ValueKey(message.id),
+              message: message,
+              isCurrentUser: isCurrentUser,
+              onReply: () => HapticFeedback.selectionClick(),
             );
           },
         );
