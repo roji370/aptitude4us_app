@@ -11,6 +11,7 @@ final class ScreenProtectionManager {
   private var captureObserver: NSObjectProtocol?
   private var screenshotObserver: NSObjectProtocol?
   private var shieldView: UIView?
+  private var screenshotSecureField: UITextField?
   private var isEnabled: Bool = false
 
   private init() {}
@@ -34,7 +35,8 @@ final class ScreenProtectionManager {
       object: nil,
       queue: .main
     ) { [weak self] _ in
-      self?.showTemporaryShield(on: window)
+      // Add a temporary secure text field overlay to mask subsequent rapid screenshots
+      self?.showTemporarySecureMask(on: window)
     }
 
     // Initial application
@@ -80,14 +82,21 @@ final class ScreenProtectionManager {
     shieldView = nil
   }
 
-  private func showTemporaryShield(on window: UIWindow) {
-    // Briefly overlay to discourage screenshots; auto-remove
-    addShield(to: window)
+  private func showTemporarySecureMask(on window: UIWindow) {
+    // Note: Screenshot notification fires after capture; this protects subsequent rapid captures
+    guard screenshotSecureField == nil else { return }
+    let field = UITextField(frame: window.bounds)
+    field.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    field.isSecureTextEntry = true
+    field.backgroundColor = .clear
+    field.isUserInteractionEnabled = false
+    window.addSubview(field)
+    window.bringSubviewToFront(field)
+    screenshotSecureField = field
+
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-      // Only remove if not currently captured
-      if !UIScreen.main.isCaptured {
-        self?.removeShield()
-      }
+      self?.screenshotSecureField?.removeFromSuperview()
+      self?.screenshotSecureField = nil
     }
   }
 }
