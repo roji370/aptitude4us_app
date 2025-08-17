@@ -71,6 +71,12 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
       Logger.i(
         '🔄 App resumed - re-checking subscription access with fresh data',
       );
+
+      // Check for admin reset when app resumes
+      if (ResponsiveHelper.isIOS()) {
+        _screenshotService.checkForAdminReset();
+      }
+
       _checkAccess(forceRefresh: true);
     }
   }
@@ -229,6 +235,9 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     try {
       await _screenshotService.initialize();
       _screenshotService.addListener(_onScreenshotServiceChanged);
+
+      // Check for admin reset before starting monitoring
+      await _screenshotService.checkForAdminReset();
 
       // Start monitoring when content is accessed
       await _screenshotService.startMonitoring();

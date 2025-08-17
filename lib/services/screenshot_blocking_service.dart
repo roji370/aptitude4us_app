@@ -184,6 +184,25 @@ class ScreenshotBlockingService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Check for admin reset from backend (call this periodically)
+  Future<void> checkForAdminReset() async {
+    if (!ResponsiveHelper.isIOS()) return;
+
+    try {
+      // TODO: Replace with actual API call to check if admin reset the violations
+      // final response = await http.get('/api/users/{userId}/screenshot-violations');
+      // if (response.data['isReset'] == true) {
+      //   await resetState();
+      //   Logger.i('📱 Screenshot violations reset by admin');
+      // }
+
+      // For now, this is just a placeholder for the admin integration
+      Logger.d('📱 Checking for admin reset (placeholder)');
+    } catch (error) {
+      Logger.e('❌ Error checking for admin reset: $error');
+    }
+  }
+
   /// Check if content access should be blocked due to screenshot violations
   bool shouldBlockAccess() {
     final blocked = _isAccessBlocked && ResponsiveHelper.isIOS();
