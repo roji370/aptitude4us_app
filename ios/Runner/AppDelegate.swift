@@ -13,6 +13,10 @@ final class ScreenProtectionManager {
   private var secureTextField: UITextField?
   private weak var originalSuperlayer: CALayer?
   private var isEnabled: Bool = false
+  
+  // For direct view protection (PDF containers)
+  private var secureOverlayField: UITextField?
+  private var isSecureViewEnabled: Bool = false
 
   private init() {}
 
@@ -91,6 +95,30 @@ final class ScreenProtectionManager {
     secureTextField = nil
     originalSuperlayer = nil
   }
+  
+  // Direct secure view overlay for PDF content
+  func enableSecureView(on window: UIWindow?) {
+    guard !isSecureViewEnabled, let window = window else { return }
+    isSecureViewEnabled = true
+    
+    let field = UITextField(frame: window.bounds)
+    field.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    field.isSecureTextEntry = true
+    field.backgroundColor = .clear
+    field.isUserInteractionEnabled = false
+    field.layer.zPosition = 1000 // High z-index to ensure it's on top
+    
+    window.addSubview(field)
+    window.bringSubviewToFront(field)
+    secureOverlayField = field
+  }
+  
+  func disableSecureView() {
+    guard isSecureViewEnabled else { return }
+    isSecureViewEnabled = false
+    secureOverlayField?.removeFromSuperview()
+    secureOverlayField = nil
+  }
 }
 
 @main
@@ -138,6 +166,17 @@ final class ScreenProtectionManager {
             result(true)
           } else {
             result(FlutterError(code: "BAD_ARGS", message: "Expected Bool for preventScreenshots", details: nil))
+          }
+        case "secureView":
+          if let enable = call.arguments as? Bool {
+            if enable {
+              ScreenProtectionManager.shared.enableSecureView(on: self.window)
+            } else {
+              ScreenProtectionManager.shared.disableSecureView()
+            }
+            result(true)
+          } else {
+            result(FlutterError(code: "BAD_ARGS", message: "Expected Bool for secureView", details: nil))
           }
         default:
           result(FlutterMethodNotImplemented)

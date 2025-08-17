@@ -21,6 +21,7 @@ import '../utils/pdf_loader.dart';
 import '../widgets/custom_pdf_viewer.dart';
 import '../services/firestore_service.dart';
 import '../widgets/custom_bottom_navigation.dart';
+import '../widgets/secure_overlay_widget.dart';
 
 // Watermark overlay widget for PDFs
 class BriffiniWatermark extends StatelessWidget {
@@ -170,97 +171,101 @@ class _FullScreenPdfViewerState extends State<FullScreenPdfViewer> {
     final isLandscape = ResponsiveHelper.isLandscape(context);
     final bottomInset = mediaQuery.padding.bottom;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar:
-          _isFullScreen
-              ? PreferredSize(
-                preferredSize: const Size.fromHeight(0),
-                child: AppBar(
-                  elevation: 0,
-                  backgroundColor: Colors.transparent,
-                ),
-              )
-              : AppBar(
-                backgroundColor: Colors.black,
-                elevation: 0,
-                title: const Text('PDF Document'),
-                leading: IconButton(
-                  icon: const Icon(Icons.arrow_back),
-                  onPressed: () => Navigator.of(context).pop(),
-                  // Use a larger touch target for better accessibility
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 48,
-                    minHeight: 48,
+    return SecureOverlayWidget(
+      enableProtection: true,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        appBar:
+            _isFullScreen
+                ? PreferredSize(
+                  preferredSize: const Size.fromHeight(0),
+                  child: AppBar(
+                    elevation: 0,
+                    backgroundColor: Colors.transparent,
                   ),
-                ),
-                actions: [
-                  IconButton(
-                    icon: const Icon(Icons.fullscreen),
-                    onPressed: _toggleFullScreen,
-                    // Use a larger touch target
+                )
+                : AppBar(
+                  backgroundColor: Colors.black,
+                  elevation: 0,
+                  title: const Text('PDF Document'),
+                  leading: IconButton(
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: () => Navigator.of(context).pop(),
+                    // Use a larger touch target for better accessibility
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(
                       minWidth: 48,
                       minHeight: 48,
                     ),
                   ),
-                ],
-              ),
-      // Use SafeContainer for proper safe area handling
-      body: SafeArea(
-        // In landscape mode, we might want to reduce padding to maximize viewing area
-        bottom: !isLandscape,
-        child: GestureDetector(
-          onTap: _toggleFullScreen,
-          onDoubleTap: _toggleFullScreen, // Double tap also toggles fullscreen
-          // iOS-specific gesture enhancements
-          onLongPress: ResponsiveHelper.isIOS() ? _toggleFullScreen : null,
-          behavior: HitTestBehavior.opaque,
-          child: Stack(
-            children: [
-              SizedBox.expand(
-                child: CustomPDFViewer(
-                  filePath: widget.filePath,
-                  userName: widget.userName,
+                  actions: [
+                    IconButton(
+                      icon: const Icon(Icons.fullscreen),
+                      onPressed: _toggleFullScreen,
+                      // Use a larger touch target
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 48,
+                        minHeight: 48,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              // Show floating button based on screen state
-              if (!_isFullScreen)
-                Positioned(
-                  bottom: bottomInset + 20, // Respect device bottom inset
-                  right: 20,
-                  child: FloatingActionButton(
-                    backgroundColor: Colors.black.withAlpha(
-                      128,
-                    ), // 0.5 opacity = 128 alpha (255 * 0.5)
-                    onPressed: _toggleFullScreen,
-                    child: const Icon(Icons.fullscreen),
-                    heroTag: "pdf_fullscreen_btn", // Unique hero tag
+        // Use SafeContainer for proper safe area handling
+        body: SafeArea(
+          // In landscape mode, we might want to reduce padding to maximize viewing area
+          bottom: !isLandscape,
+          child: GestureDetector(
+            onTap: _toggleFullScreen,
+            onDoubleTap:
+                _toggleFullScreen, // Double tap also toggles fullscreen
+            // iOS-specific gesture enhancements
+            onLongPress: ResponsiveHelper.isIOS() ? _toggleFullScreen : null,
+            behavior: HitTestBehavior.opaque,
+            child: Stack(
+              children: [
+                SizedBox.expand(
+                  child: CustomPDFViewer(
+                    filePath: widget.filePath,
+                    userName: widget.userName,
                   ),
                 ),
-              // Show exit hint in fullscreen mode
-              if (_isFullScreen)
-                Positioned(
-                  top: MediaQuery.of(context).padding.top + 20,
-                  left: 20,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withAlpha(128),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      "Tap to exit fullscreen",
-                      style: TextStyle(color: Colors.white, fontSize: 12),
+                // Show floating button based on screen state
+                if (!_isFullScreen)
+                  Positioned(
+                    bottom: bottomInset + 20, // Respect device bottom inset
+                    right: 20,
+                    child: FloatingActionButton(
+                      backgroundColor: Colors.black.withAlpha(
+                        128,
+                      ), // 0.5 opacity = 128 alpha (255 * 0.5)
+                      onPressed: _toggleFullScreen,
+                      child: const Icon(Icons.fullscreen),
+                      heroTag: "pdf_fullscreen_btn", // Unique hero tag
                     ),
                   ),
-                ),
-            ],
+                // Show exit hint in fullscreen mode
+                if (_isFullScreen)
+                  Positioned(
+                    top: MediaQuery.of(context).padding.top + 20,
+                    left: 20,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withAlpha(128),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        "Tap to exit fullscreen",
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -299,7 +304,6 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
   bool _isPdfLoading = false;
   String? _pdfPath;
   String? _pdfError;
-  bool _isScreenProtectionEnabled = false;
 
   @override
   void initState() {
@@ -398,25 +402,24 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
       const MethodChannel(
         'flutter.native/screenProtection',
       ).invokeMethod('preventScreenshots', false);
-      _isScreenProtectionEnabled = false;
     } else {
       AccessibilityHelper.showStatusBar();
     }
   }
 
   void _addScreenshotProtection() {
-    if (!ResponsiveHelper.isIOS() || _isScreenProtectionEnabled) return;
+    if (!ResponsiveHelper.isIOS()) return;
     const MethodChannel(
       'flutter.native/screenProtection',
     ).invokeMethod('preventScreenshots', true);
-    _isScreenProtectionEnabled = true;
   }
 
   void _maybeUpdateProtectionForContentType(String contentType) {
     if (!ResponsiveHelper.isIOS()) return;
-    if (contentType == 'video' || contentType == 'pdf') {
+    if (contentType == 'video') {
+      // Only enable for video; PDF protection is handled by SecureOverlayWidget
       _addScreenshotProtection();
-    } else if (_isScreenProtectionEnabled) {
+    } else {
       _removeScreenshotProtection();
     }
   }
