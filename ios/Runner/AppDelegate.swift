@@ -4,6 +4,94 @@ import UserNotifications
 import Firebase
 import FirebaseMessaging
 
+// Manages screen capture/recording protection on iOS
+final class ScreenProtectionManager {
+  static let shared = ScreenProtectionManager()
+
+  private var captureObserver: NSObjectProtocol?
+  private var screenshotObserver: NSObjectProtocol?
+  private var shieldView: UIView?
+  private var isEnabled: Bool = false
+
+  private init() {}
+
+  func enable(on window: UIWindow?) {
+    guard !isEnabled, let window = window else { return }
+    isEnabled = true
+
+    // Observe screen capture (recording / mirroring)
+    captureObserver = NotificationCenter.default.addObserver(
+      forName: UIScreen.capturedDidChangeNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.updateShield(on: window)
+    }
+
+    // Optional: react to screenshots by briefly overlaying
+    screenshotObserver = NotificationCenter.default.addObserver(
+      forName: UIApplication.userDidTakeScreenshotNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.showTemporaryShield(on: window)
+    }
+
+    // Initial application
+    updateShield(on: window)
+  }
+
+  func disable() {
+    guard isEnabled else { return }
+    isEnabled = false
+
+    if let captureObserver = captureObserver {
+      NotificationCenter.default.removeObserver(captureObserver)
+      self.captureObserver = nil
+    }
+    if let screenshotObserver = screenshotObserver {
+      NotificationCenter.default.removeObserver(screenshotObserver)
+      self.screenshotObserver = nil
+    }
+    removeShield()
+  }
+
+  private func updateShield(on window: UIWindow) {
+    if UIScreen.main.isCaptured {
+      addShield(to: window)
+    } else {
+      removeShield()
+    }
+  }
+
+  private func addShield(to window: UIWindow) {
+    guard shieldView == nil else { return }
+    let view = UIView(frame: window.bounds)
+    view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    view.backgroundColor = .black
+    view.isUserInteractionEnabled = false
+    window.addSubview(view)
+    window.bringSubviewToFront(view)
+    shieldView = view
+  }
+
+  private func removeShield() {
+    shieldView?.removeFromSuperview()
+    shieldView = nil
+  }
+
+  private func showTemporaryShield(on window: UIWindow) {
+    // Briefly overlay to discourage screenshots; auto-remove
+    addShield(to: window)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+      // Only remove if not currently captured
+      if !UIScreen.main.isCaptured {
+        self?.removeShield()
+      }
+    }
+  }
+}
+
 @main
 @objc class AppDelegate: FlutterAppDelegate, MessagingDelegate {
   override func application(
@@ -28,6 +116,33 @@ import FirebaseMessaging
     
     // Register plugins AFTER Flutter engine is ready to avoid nil registrar
     GeneratedPluginRegistrant.register(with: self)
+
+    // Setup method channel for screen protection
+    if let flutterViewController = window?.rootViewController as? FlutterViewController {
+      let channel = FlutterMethodChannel(
+        name: "flutter.native/screenProtection",
+        binaryMessenger: flutterViewController.binaryMessenger
+      )
+
+      channel.setMethodCallHandler { [weak self] call, result in
+        guard let self = self else { result(FlutterError(code: "UNAVAILABLE", message: "AppDelegate deallocated", details: nil)); return }
+        switch call.method {
+        case "preventScreenshots":
+          if let enable = call.arguments as? Bool {
+            if enable {
+              ScreenProtectionManager.shared.enable(on: self.window)
+            } else {
+              ScreenProtectionManager.shared.disable()
+            }
+            result(true)
+          } else {
+            result(FlutterError(code: "BAD_ARGS", message: "Expected Bool for preventScreenshots", details: nil))
+          }
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
+    }
     
     return result
   }

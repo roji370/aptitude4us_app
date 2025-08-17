@@ -299,6 +299,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
   bool _isPdfLoading = false;
   String? _pdfPath;
   String? _pdfError;
+  bool _isScreenProtectionEnabled = false;
 
   @override
   void initState() {
@@ -397,8 +398,26 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
       const MethodChannel(
         'flutter.native/screenProtection',
       ).invokeMethod('preventScreenshots', false);
+      _isScreenProtectionEnabled = false;
     } else {
       AccessibilityHelper.showStatusBar();
+    }
+  }
+
+  void _addScreenshotProtection() {
+    if (!ResponsiveHelper.isIOS() || _isScreenProtectionEnabled) return;
+    const MethodChannel(
+      'flutter.native/screenProtection',
+    ).invokeMethod('preventScreenshots', true);
+    _isScreenProtectionEnabled = true;
+  }
+
+  void _maybeUpdateProtectionForContentType(String contentType) {
+    if (!ResponsiveHelper.isIOS()) return;
+    if (contentType == 'video' || contentType == 'pdf') {
+      _addScreenshotProtection();
+    } else if (_isScreenProtectionEnabled) {
+      _removeScreenshotProtection();
     }
   }
 
@@ -664,6 +683,8 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
 
   // Update the _buildContentView method to handle PDF viewing with watermark
   Widget _buildContentView(ContentModel content) {
+    // Ensure iOS screen protection is toggled appropriately by content type
+    _maybeUpdateProtectionForContentType(content.contentType);
     switch (content.contentType) {
       case 'video':
         if (content.content.isEmpty) {
