@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/subscription_service.dart';
+import '../services/screenshot_blocking_service.dart';
 import '../screens/subscription_expired_screen.dart';
+import '../screens/screenshot_warning_screen.dart';
+import '../screens/screenshot_blocked_screen.dart';
 import '../utils/logger.dart';
 import '../utils/app_colors.dart';
+import '../utils/responsive_helper.dart';
 
 /// Widget that protects course content behind subscription validation
 ///
@@ -34,21 +38,27 @@ class ProtectedCourseContent extends StatefulWidget {
 class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     with WidgetsBindingObserver {
   final SubscriptionService _subscriptionService = SubscriptionService();
+  final ScreenshotBlockingService _screenshotService =
+      ScreenshotBlockingService();
   bool? _hasAccess;
   bool _isLoading = true;
   String? _errorMessage;
   bool _isNavigatingToSubscription = false;
+  bool _showingScreenshotWarning = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _initializeScreenshotService();
     _checkAccess();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _screenshotService.removeListener(_onScreenshotServiceChanged);
+    _screenshotService.stopMonitoring();
     super.dispose();
   }
 
@@ -208,8 +218,102 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     }
   }
 
+  /// Initialize the screenshot blocking service
+  Future<void> _initializeScreenshotService() async {
+    // Only initialize on iOS
+    if (!ResponsiveHelper.isIOS()) {
+      Logger.i('📱 Screenshot blocking not available on this platform');
+      return;
+    }
+
+    try {
+      await _screenshotService.initialize();
+      _screenshotService.addListener(_onScreenshotServiceChanged);
+
+      // Start monitoring when content is accessed
+      await _screenshotService.startMonitoring();
+
+      Logger.i('📱 Screenshot blocking service initialized successfully');
+    } catch (error) {
+      Logger.e('❌ Error initializing screenshot service: $error');
+    }
+  }
+
+  /// Handle screenshot service state changes
+  void _onScreenshotServiceChanged() {
+    if (!mounted) return;
+
+    Logger.i('📱 Screenshot service state changed');
+
+    // Check if we should show warning (first screenshot)
+    if (_screenshotService.shouldShowWarning() && !_showingScreenshotWarning) {
+      _showScreenshotWarning();
+    }
+
+    // Check if access should be blocked (second screenshot)
+    if (_screenshotService.shouldBlockAccess()) {
+      _showScreenshotBlocked();
+    }
+  }
+
+  /// Show screenshot warning screen
+  void _showScreenshotWarning() {
+    if (_showingScreenshotWarning) return;
+
+    setState(() {
+      _showingScreenshotWarning = true;
+    });
+
+    Logger.w('📱 Showing screenshot warning screen');
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder:
+            (context) => ScreenshotWarningScreen(
+              onContinue: () {
+                Navigator.of(context).pop();
+                setState(() {
+                  _showingScreenshotWarning = false;
+                });
+              },
+              onGoBack: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).pop(); // Go back to previous screen
+              },
+            ),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
+  /// Show screenshot blocked screen
+  void _showScreenshotBlocked() {
+    Logger.e('📱 Showing screenshot blocked screen');
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder:
+            (context) => ScreenshotBlockedScreen(
+              onGoBack: () {
+                Navigator.of(context).popUntil((route) => route.isFirst);
+              },
+            ),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Check for screenshot blocking first (iOS only)
+    if (ResponsiveHelper.isIOS() && _screenshotService.shouldBlockAccess()) {
+      Logger.e('📱 Access blocked due to screenshot violations');
+      return ScreenshotBlockedScreen(
+        onGoBack: () {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        },
+      );
+    }
     // Show error state
     if (_errorMessage != null) {
       return _buildErrorState();
