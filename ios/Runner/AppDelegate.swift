@@ -10,7 +10,8 @@ final class ScreenProtectionManager {
 
   private var captureObserver: NSObjectProtocol?
   private var screenshotObserver: NSObjectProtocol?
-  private var shieldView: UIView?
+  private var secureTextField: UITextField?
+  private weak var originalSuperlayer: CALayer?
   private var isEnabled: Bool = false
 
   private init() {}
@@ -19,13 +20,17 @@ final class ScreenProtectionManager {
     guard !isEnabled, let window = window else { return }
     isEnabled = true
 
+    // Apply secure text field hierarchy so that screenshots/recordings are blanked
+    applySecureMask(on: window)
+
     // Observe screen capture (recording / mirroring)
     captureObserver = NotificationCenter.default.addObserver(
       forName: UIScreen.capturedDidChangeNotification,
       object: nil,
       queue: .main
     ) { [weak self] _ in
-      self?.updateShield(on: window)
+      // No UI change required; secure mask covers capture as well
+      // Keep hook in case we want to react (e.g., show a banner)
     }
 
     // Optional: react to screenshots by briefly overlaying
@@ -34,11 +39,9 @@ final class ScreenProtectionManager {
       object: nil,
       queue: .main
     ) { [weak self] _ in
-      self?.showTemporaryShield(on: window)
+      // With secure mask active, screenshots are already blanked
+      // Optionally, we could notify Flutter here in the future
     }
-
-    // Initial application
-    updateShield(on: window)
   }
 
   func disable() {
@@ -53,42 +56,40 @@ final class ScreenProtectionManager {
       NotificationCenter.default.removeObserver(screenshotObserver)
       self.screenshotObserver = nil
     }
-    removeShield()
+    removeSecureMask()
   }
 
-  private func updateShield(on window: UIWindow) {
-    if UIScreen.main.isCaptured {
-      addShield(to: window)
-    } else {
-      removeShield()
-    }
+  // Place the app window's layer under a secure text field layer so captures are blank
+  private func applySecureMask(on window: UIWindow) {
+    guard secureTextField == nil else { return }
+    let field = UITextField(frame: window.bounds)
+    field.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    field.isSecureTextEntry = true
+    field.backgroundColor = .clear
+    field.isUserInteractionEnabled = false
+    window.addSubview(field)
+
+    let windowLayer = window.layer
+    originalSuperlayer = windowLayer.superlayer
+
+    // Embed the window's layer inside the secure field layer
+    originalSuperlayer?.addSublayer(field.layer)
+    field.layer.addSublayer(windowLayer)
+
+    secureTextField = field
   }
 
-  private func addShield(to window: UIWindow) {
-    guard shieldView == nil else { return }
-    let view = UIView(frame: window.bounds)
-    view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    view.backgroundColor = .black
-    view.isUserInteractionEnabled = false
-    window.addSubview(view)
-    window.bringSubviewToFront(view)
-    shieldView = view
-  }
-
-  private func removeShield() {
-    shieldView?.removeFromSuperview()
-    shieldView = nil
-  }
-
-  private func showTemporaryShield(on window: UIWindow) {
-    // Briefly overlay to discourage screenshots; auto-remove
-    addShield(to: window)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-      // Only remove if not currently captured
-      if !UIScreen.main.isCaptured {
-        self?.removeShield()
+  private func removeSecureMask() {
+    guard let field = secureTextField else { return }
+    if let originalSuperlayer = originalSuperlayer {
+      // Move the window's layer back to its original superlayer
+      if let windowLayer = field.layer.sublayers?.first(where: { $0 is CALayer && $0 !== field.layer }) {
+        originalSuperlayer.addSublayer(windowLayer)
       }
     }
+    field.removeFromSuperview()
+    secureTextField = nil
+    originalSuperlayer = nil
   }
 }
 
