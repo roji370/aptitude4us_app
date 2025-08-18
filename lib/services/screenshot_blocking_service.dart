@@ -15,6 +15,9 @@ import '../utils/responsive_helper.dart';
 class ScreenshotBlockingService extends ChangeNotifier {
   static const String _channelName = 'flutter.native/screenProtection';
   static const MethodChannel _channel = MethodChannel(_channelName);
+  static final FirebaseFunctions _functions = FirebaseFunctions.instanceFor(
+    region: 'us-central1',
+  );
 
   // Storage keys for persistent state
   static const String _keyScreenshotCount = 'screenshot_count';
@@ -128,10 +131,10 @@ class ScreenshotBlockingService extends ChangeNotifier {
     }
   }
 
-    /// Handle when a screenshot is detected
+  /// Handle when a screenshot is detected
   Future<void> _handleScreenshotDetected() async {
     Logger.w('📱 Screenshot detected! Recording violation...');
-    
+
     try {
       // Record violation using Firebase function
       await _recordScreenshotViolation();
@@ -145,26 +148,24 @@ class ScreenshotBlockingService extends ChangeNotifier {
   /// Record screenshot violation using Firebase function
   Future<void> _recordScreenshotViolation() async {
     try {
-      final result = await FirebaseFunctions.instance
-          .httpsCallable('recordScreenshotViolation')
-          .call();
-      
+      final result =
+          await _functions.httpsCallable('recordScreenshotViolation').call();
+
       final data = result.data;
       final violationCount = data['violationCount'] as int;
       final isBlocked = data['isBlocked'] as bool;
       final message = data['message'] as String;
-      
+
       Logger.i('✅ Violation recorded: $message');
       Logger.i('📊 Total violations: $violationCount');
-      
+
       // Update local state to match backend
       _screenshotCount = violationCount;
       _isAccessBlocked = isBlocked;
       _lastWarningTime = DateTime.now();
-      
+
       await _saveState();
       notifyListeners();
-      
     } catch (error) {
       Logger.e('❌ Error calling recordScreenshotViolation: $error');
       rethrow;
@@ -175,7 +176,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
   Future<void> _handleScreenshotDetectedLocal() async {
     _screenshotCount++;
     _lastWarningTime = DateTime.now();
-    
+
     if (_screenshotCount == 1) {
       Logger.w('📱 First screenshot detected - showing warning');
       await _saveState();
@@ -224,39 +225,37 @@ class ScreenshotBlockingService extends ChangeNotifier {
     notifyListeners();
   }
 
-    /// Check for admin reset from backend (call this periodically)
+  /// Check for admin reset from backend (call this periodically)
   Future<void> checkForAdminReset() async {
     if (!ResponsiveHelper.isIOS()) return;
-    
+
     try {
       Logger.d('📱 Checking for admin reset...');
-      
-      final result = await FirebaseFunctions.instance
-          .httpsCallable('checkViolationResetStatus')
-          .call();
-      
+
+      final result =
+          await _functions.httpsCallable('checkViolationResetStatus').call();
+
       final data = result.data;
       final hasBeenReset = data['hasBeenReset'] as bool;
       final currentViolations = data['currentViolations'] as int;
       final isBlocked = data['isBlocked'] as bool;
-      
+
       if (hasBeenReset) {
         Logger.i('🎉 Screenshot violations reset by admin!');
-        
+
         // Update local state to match backend
         _screenshotCount = currentViolations;
         _isAccessBlocked = isBlocked;
         _lastWarningTime = null;
-        
+
         await _saveState();
         notifyListeners();
-        
+
         // Acknowledge the reset
         await _acknowledgeReset();
       } else {
         Logger.d('📱 No admin reset detected');
       }
-      
     } catch (error) {
       Logger.e('❌ Error checking for admin reset: $error');
     }
@@ -265,9 +264,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
   /// Acknowledge that the reset has been processed
   Future<void> _acknowledgeReset() async {
     try {
-      await FirebaseFunctions.instance
-          .httpsCallable('acknowledgeViolationReset')
-          .call();
+      await _functions.httpsCallable('acknowledgeViolationReset').call();
       Logger.i('✅ Reset acknowledged');
     } catch (error) {
       Logger.e('❌ Error acknowledging reset: $error');
