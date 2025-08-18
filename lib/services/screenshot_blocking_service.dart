@@ -25,12 +25,14 @@ class ScreenshotBlockingService extends ChangeNotifier {
   static const String _keyPrefixIsAccessBlocked = 'screenshot_access_blocked_';
   static const String _keyPrefixLastWarningTime =
       'screenshot_last_warning_time_';
+  static const String _keyPrefixLastResetCheck = 'screenshot_last_reset_check_';
 
   // State variables
   bool _isMonitoring = false;
   int _screenshotCount = 0;
   bool _isAccessBlocked = false;
   DateTime? _lastWarningTime;
+  DateTime? _lastResetCheckTime;
 
   // Getters
   bool get isMonitoring => _isMonitoring;
@@ -64,6 +66,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
       'screenshotCount': '$_keyPrefixScreenshotCount$userId',
       'isAccessBlocked': '$_keyPrefixIsAccessBlocked$userId',
       'lastWarningTime': '$_keyPrefixLastWarningTime$userId',
+      'lastResetCheck': '$_keyPrefixLastResetCheck$userId',
     };
   }
 
@@ -104,6 +107,13 @@ class ScreenshotBlockingService extends ChangeNotifier {
         );
       }
 
+      final lastResetCheckTimestamp = prefs.getInt(keys['lastResetCheck']!);
+      if (lastResetCheckTimestamp != null) {
+        _lastResetCheckTime = DateTime.fromMillisecondsSinceEpoch(
+          lastResetCheckTimestamp,
+        );
+      }
+
       final userId = _getCurrentUserId();
       Logger.i(
         '📱 Loaded screenshot state for user $userId: count=$_screenshotCount, blocked=$_isAccessBlocked',
@@ -130,6 +140,13 @@ class ScreenshotBlockingService extends ChangeNotifier {
         await prefs.setInt(
           keys['lastWarningTime']!,
           _lastWarningTime!.millisecondsSinceEpoch,
+        );
+      }
+
+      if (_lastResetCheckTime != null) {
+        await prefs.setInt(
+          keys['lastResetCheck']!,
+          _lastResetCheckTime!.millisecondsSinceEpoch,
         );
       }
 
@@ -262,6 +279,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
     _screenshotCount = 0;
     _isAccessBlocked = false;
     _lastWarningTime = null;
+    _lastResetCheckTime = null;
 
     await _saveState();
     notifyListeners();
@@ -287,20 +305,58 @@ class ScreenshotBlockingService extends ChangeNotifier {
       final hasBeenReset = data['hasBeenReset'] as bool;
       final currentViolations = data['currentViolations'] as int;
       final isBlocked = data['isBlocked'] as bool;
+      final resetAtString = data['resetAt'] as String?;
 
-      if (hasBeenReset) {
-        Logger.i('🎉 Screenshot violations reset by admin for user $userId!');
+      if (hasBeenReset && resetAtString != null) {
+        final resetAt = DateTime.parse(resetAtString);
+
+        // Check if we've already processed this reset
+        if (_lastResetCheckTime != null &&
+            resetAt.isBefore(_lastResetCheckTime!)) {
+          Logger.d(
+            '📱 Reset already processed for user $userId (resetAt: $resetAt, lastCheck: $_lastResetCheckTime)',
+          );
+          return;
+        }
+
+        Logger.i(
+          '🎉 Screenshot violations reset by admin for user $userId at $resetAt!',
+        );
 
         // Update local state to match backend
         _screenshotCount = currentViolations;
         _isAccessBlocked = isBlocked;
         _lastWarningTime = null;
+        _lastResetCheckTime =
+            DateTime.now(); // Mark that we processed this reset
 
         await _saveState();
         notifyListeners();
 
         // Acknowledge the reset
         await _acknowledgeReset();
+      } else if (hasBeenReset && resetAtString == null) {
+        Logger.w(
+          '📱 Reset detected but no timestamp provided - processing anyway',
+        );
+
+        // Fallback for backend compatibility - process if we haven't checked recently
+        final now = DateTime.now();
+        if (_lastResetCheckTime == null ||
+            now.difference(_lastResetCheckTime!).inMinutes > 5) {
+          Logger.i(
+            '🎉 Screenshot violations reset by admin for user $userId (no timestamp)!',
+          );
+
+          _screenshotCount = currentViolations;
+          _isAccessBlocked = isBlocked;
+          _lastWarningTime = null;
+          _lastResetCheckTime = now;
+
+          await _saveState();
+          notifyListeners();
+          await _acknowledgeReset();
+        }
       } else {
         Logger.d('📱 No admin reset detected for user $userId');
       }
@@ -346,6 +402,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
       _screenshotCount = 0;
       _isAccessBlocked = false;
       _lastWarningTime = null;
+      _lastResetCheckTime = null;
       notifyListeners();
     } else {
       // User logged in - load their specific state
