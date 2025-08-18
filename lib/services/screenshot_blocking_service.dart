@@ -195,16 +195,13 @@ class ScreenshotBlockingService extends ChangeNotifier {
 
   /// Handle when a screenshot is detected
   Future<void> _handleScreenshotDetected() async {
-    Logger.w('📱 Screenshot detected! Recording violation...');
+    Logger.w('📱 Screenshot detected! Showing immediate response...');
 
-    try {
-      // Record violation using Firebase function
-      await _recordScreenshotViolation();
-    } catch (error) {
-      Logger.e('❌ Error recording violation, using local fallback: $error');
-      // Fallback to local handling if Firebase fails
-      await _handleScreenshotDetectedLocal();
-    }
+    // IMMEDIATE RESPONSE: Update local state and show UI instantly
+    await _handleScreenshotDetectedLocal();
+
+    // BACKGROUND SYNC: Then sync with Firebase (don't await to avoid delays)
+    _syncWithFirebaseInBackground();
   }
 
   /// Record screenshot violation using Firebase function
@@ -245,15 +242,31 @@ class ScreenshotBlockingService extends ChangeNotifier {
     _lastWarningTime = DateTime.now();
 
     if (_screenshotCount == 1) {
-      Logger.w('📱 First screenshot detected - showing warning');
+      Logger.w('📱 First screenshot detected - showing warning IMMEDIATELY');
       await _saveState();
       notifyListeners();
     } else if (_screenshotCount >= 2) {
-      Logger.e('📱 Multiple screenshots detected - blocking access');
+      Logger.e(
+        '📱 Multiple screenshots detected - blocking access IMMEDIATELY',
+      );
       _isAccessBlocked = true;
       await _saveState();
       notifyListeners();
     }
+  }
+
+  /// Sync with Firebase in background without blocking UI
+  void _syncWithFirebaseInBackground() {
+    Logger.i('📱 Syncing with Firebase in background...');
+
+    _recordScreenshotViolation()
+        .then((_) {
+          Logger.i('✅ Firebase sync completed successfully');
+        })
+        .catchError((error) {
+          Logger.e('❌ Firebase sync failed: $error');
+          // Local state already updated, so UI is consistent
+        });
   }
 
   /// Start monitoring screenshots (call when entering protected content)

@@ -293,20 +293,21 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     Logger.w('📱 Showing screenshot warning screen');
 
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder:
-            (context) => ScreenshotWarningScreen(
+      PageRouteBuilder(
+        pageBuilder:
+            (context, animation, secondaryAnimation) => ScreenshotWarningScreen(
               onContinue: () {
                 Navigator.of(context).pop();
                 setState(() {
                   _showingScreenshotWarning = false;
                 });
               },
-              onGoBack: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).pop(); // Go back to previous screen
-              },
             ),
+        transitionDuration: Duration(milliseconds: 150), // Faster transition
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          // Quick fade transition instead of default slide
+          return FadeTransition(opacity: animation, child: child);
+        },
         fullscreenDialog: true,
       ),
     );
@@ -317,8 +318,17 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     Logger.e('📱 Showing screenshot blocked screen');
 
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (context) => const ScreenshotBlockedScreen(),
+      PageRouteBuilder(
+        pageBuilder:
+            (context, animation, secondaryAnimation) =>
+                const ScreenshotBlockedScreen(),
+        transitionDuration: Duration(
+          milliseconds: 100,
+        ), // Even faster for blocking
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          // Instant fade transition for immediate blocking
+          return FadeTransition(opacity: animation, child: child);
+        },
         fullscreenDialog: true,
       ),
     );

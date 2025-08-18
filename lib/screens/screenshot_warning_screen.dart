@@ -8,10 +8,8 @@ import '../utils/logger.dart';
 /// and that further attempts will result in access being blocked
 class ScreenshotWarningScreen extends StatelessWidget {
   final VoidCallback? onContinue;
-  final VoidCallback? onGoBack;
 
-  const ScreenshotWarningScreen({Key? key, this.onContinue, this.onGoBack})
-    : super(key: key);
+  const ScreenshotWarningScreen({Key? key, this.onContinue}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -156,62 +154,7 @@ class ScreenshotWarningScreen extends StatelessWidget {
                       ),
                     ),
                   ),
-
-                  const SizedBox(height: 12),
-
-                  // Go Back Button (Optional)
-                  if (onGoBack != null)
-                    SizedBox(
-                      width: double.infinity,
-                      child: TextButton(
-                        onPressed: () {
-                          Logger.i(
-                            '📱 User chose to go back from screenshot warning',
-                          );
-                          onGoBack!();
-                        },
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.grey[600],
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                        child: const Text(
-                          'Go Back',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ),
                 ],
-              ),
-
-              const SizedBox(height: 24),
-
-              // Additional Info
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[200]!, width: 1),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, color: Colors.blue[600], size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'This is your first and only warning. Please respect our content protection policies.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue[700],
-                          height: 1.3,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
               ),
             ],
           ),
