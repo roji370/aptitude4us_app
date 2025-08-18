@@ -34,6 +34,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
   DateTime? _lastWarningTime;
   DateTime? _lastResetCheckTime;
   bool _hasShownResetMessage = false;
+  bool _hasShownWarningForCurrentSession = false;
 
   // Getters
   bool get isMonitoring => _isMonitoring;
@@ -288,6 +289,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
     _lastWarningTime = null;
     _lastResetCheckTime = null;
     _hasShownResetMessage = false;
+    _hasShownWarningForCurrentSession = false;
 
     await _saveState();
     notifyListeners();
@@ -338,6 +340,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
         _lastResetCheckTime =
             DateTime.now(); // Mark that we processed this reset
         _hasShownResetMessage = true; // Flag to show reset message
+        _hasShownWarningForCurrentSession = false; // Reset warning session flag
 
         await _saveState();
         notifyListeners();
@@ -362,6 +365,8 @@ class ScreenshotBlockingService extends ChangeNotifier {
           _lastWarningTime = null;
           _lastResetCheckTime = now;
           _hasShownResetMessage = true; // Flag to show reset message
+          _hasShownWarningForCurrentSession =
+              false; // Reset warning session flag
 
           await _saveState();
           notifyListeners();
@@ -396,12 +401,21 @@ class ScreenshotBlockingService extends ChangeNotifier {
 
   /// Check if warning should be shown (first screenshot)
   bool shouldShowWarning() {
-    final showWarning =
-        _screenshotCount == 1 && !_isAccessBlocked && ResponsiveHelper.isIOS();
-    if (showWarning) {
+    final shouldShow =
+        _screenshotCount == 1 &&
+        !_isAccessBlocked &&
+        ResponsiveHelper.isIOS() &&
+        !_hasShownWarningForCurrentSession;
+    if (shouldShow) {
       Logger.w('📱 Should show screenshot warning');
     }
-    return showWarning;
+    return shouldShow;
+  }
+
+  /// Mark that the warning has been shown for this session
+  void markWarningShown() {
+    Logger.i('📱 Warning marked as shown for current session');
+    _hasShownWarningForCurrentSession = true;
   }
 
   /// Acknowledge that the reset message has been shown to the user
@@ -421,11 +435,13 @@ class ScreenshotBlockingService extends ChangeNotifier {
       _lastWarningTime = null;
       _lastResetCheckTime = null;
       _hasShownResetMessage = false;
+      _hasShownWarningForCurrentSession = false;
       notifyListeners();
     } else {
       // User logged in - load their specific state
       Logger.i('📱 User logged in (${user.uid}) - loading screenshot state');
       await _loadState();
+      _hasShownWarningForCurrentSession = false; // Reset session flags on login
       notifyListeners();
     }
   }

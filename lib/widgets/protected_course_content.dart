@@ -287,6 +287,9 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
       _showingScreenshotWarning = true;
     });
 
+    // Mark that we're showing the warning to prevent repeated displays
+    _screenshotService.markWarningShown();
+
     Logger.w('📱 Showing screenshot warning screen');
 
     Navigator.of(context).push(
@@ -315,12 +318,7 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
 
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder:
-            (context) => ScreenshotBlockedScreen(
-              onGoBack: () {
-                Navigator.of(context).popUntil((route) => route.isFirst);
-              },
-            ),
+        builder: (context) => const ScreenshotBlockedScreen(),
         fullscreenDialog: true,
       ),
     );
@@ -360,11 +358,7 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     // Check for screenshot blocking first (iOS only)
     if (ResponsiveHelper.isIOS() && _screenshotService.shouldBlockAccess()) {
       Logger.e('📱 Access blocked due to screenshot violations');
-      return ScreenshotBlockedScreen(
-        onGoBack: () {
-          Navigator.of(context).popUntil((route) => route.isFirst);
-        },
-      );
+      return const ScreenshotBlockedScreen();
     }
     // Show error state
     if (_errorMessage != null) {
