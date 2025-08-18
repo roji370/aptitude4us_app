@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
 
@@ -127,20 +128,59 @@ class ScreenshotBlockingService extends ChangeNotifier {
     }
   }
 
-  /// Handle when a screenshot is detected
+    /// Handle when a screenshot is detected
   Future<void> _handleScreenshotDetected() async {
-    Logger.w('📱 Screenshot detected! Current count: $_screenshotCount');
+    Logger.w('📱 Screenshot detected! Recording violation...');
+    
+    try {
+      // Record violation using Firebase function
+      await _recordScreenshotViolation();
+    } catch (error) {
+      Logger.e('❌ Error recording violation, using local fallback: $error');
+      // Fallback to local handling if Firebase fails
+      await _handleScreenshotDetectedLocal();
+    }
+  }
 
+  /// Record screenshot violation using Firebase function
+  Future<void> _recordScreenshotViolation() async {
+    try {
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('recordScreenshotViolation')
+          .call();
+      
+      final data = result.data;
+      final violationCount = data['violationCount'] as int;
+      final isBlocked = data['isBlocked'] as bool;
+      final message = data['message'] as String;
+      
+      Logger.i('✅ Violation recorded: $message');
+      Logger.i('📊 Total violations: $violationCount');
+      
+      // Update local state to match backend
+      _screenshotCount = violationCount;
+      _isAccessBlocked = isBlocked;
+      _lastWarningTime = DateTime.now();
+      
+      await _saveState();
+      notifyListeners();
+      
+    } catch (error) {
+      Logger.e('❌ Error calling recordScreenshotViolation: $error');
+      rethrow;
+    }
+  }
+
+  /// Local fallback for screenshot detection
+  Future<void> _handleScreenshotDetectedLocal() async {
     _screenshotCount++;
     _lastWarningTime = DateTime.now();
-
+    
     if (_screenshotCount == 1) {
-      // First screenshot - show warning
       Logger.w('📱 First screenshot detected - showing warning');
       await _saveState();
       notifyListeners();
     } else if (_screenshotCount >= 2) {
-      // Second or subsequent screenshot - block access
       Logger.e('📱 Multiple screenshots detected - blocking access');
       _isAccessBlocked = true;
       await _saveState();
@@ -184,22 +224,53 @@ class ScreenshotBlockingService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Check for admin reset from backend (call this periodically)
+    /// Check for admin reset from backend (call this periodically)
   Future<void> checkForAdminReset() async {
     if (!ResponsiveHelper.isIOS()) return;
-
+    
     try {
-      // TODO: Replace with actual API call to check if admin reset the violations
-      // final response = await http.get('/api/users/{userId}/screenshot-violations');
-      // if (response.data['isReset'] == true) {
-      //   await resetState();
-      //   Logger.i('📱 Screenshot violations reset by admin');
-      // }
-
-      // For now, this is just a placeholder for the admin integration
-      Logger.d('📱 Checking for admin reset (placeholder)');
+      Logger.d('📱 Checking for admin reset...');
+      
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('checkViolationResetStatus')
+          .call();
+      
+      final data = result.data;
+      final hasBeenReset = data['hasBeenReset'] as bool;
+      final currentViolations = data['currentViolations'] as int;
+      final isBlocked = data['isBlocked'] as bool;
+      
+      if (hasBeenReset) {
+        Logger.i('🎉 Screenshot violations reset by admin!');
+        
+        // Update local state to match backend
+        _screenshotCount = currentViolations;
+        _isAccessBlocked = isBlocked;
+        _lastWarningTime = null;
+        
+        await _saveState();
+        notifyListeners();
+        
+        // Acknowledge the reset
+        await _acknowledgeReset();
+      } else {
+        Logger.d('📱 No admin reset detected');
+      }
+      
     } catch (error) {
       Logger.e('❌ Error checking for admin reset: $error');
+    }
+  }
+
+  /// Acknowledge that the reset has been processed
+  Future<void> _acknowledgeReset() async {
+    try {
+      await FirebaseFunctions.instance
+          .httpsCallable('acknowledgeViolationReset')
+          .call();
+      Logger.i('✅ Reset acknowledged');
+    } catch (error) {
+      Logger.e('❌ Error acknowledging reset: $error');
     }
   }
 
