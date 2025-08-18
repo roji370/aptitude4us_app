@@ -163,6 +163,11 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
       final authService = Provider.of<AuthService>(context, listen: false);
       final currentUser = authService.currentUser;
 
+      // Update screenshot service with current user state (iOS only)
+      if (ResponsiveHelper.isIOS()) {
+        _screenshotService.onUserAuthChanged(currentUser);
+      }
+
       if (currentUser == null) {
         Logger.w('🔐 No authenticated user for content access check');
         if (mounted) {
@@ -235,6 +240,10 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     try {
       await _screenshotService.initialize();
       _screenshotService.addListener(_onScreenshotServiceChanged);
+
+      // Update screenshot service with current user state
+      final authService = Provider.of<AuthService>(context, listen: false);
+      await _screenshotService.onUserAuthChanged(authService.currentUser);
 
       // Check for admin reset before starting monitoring
       await _screenshotService.checkForAdminReset();

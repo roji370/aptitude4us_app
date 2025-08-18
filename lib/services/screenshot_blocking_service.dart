@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
 
@@ -19,10 +20,11 @@ class ScreenshotBlockingService extends ChangeNotifier {
     region: 'us-central1',
   );
 
-  // Storage keys for persistent state
-  static const String _keyScreenshotCount = 'screenshot_count';
-  static const String _keyIsAccessBlocked = 'screenshot_access_blocked';
-  static const String _keyLastWarningTime = 'screenshot_last_warning_time';
+  // Storage key prefixes for persistent state (will be made user-specific)
+  static const String _keyPrefixScreenshotCount = 'screenshot_count_';
+  static const String _keyPrefixIsAccessBlocked = 'screenshot_access_blocked_';
+  static const String _keyPrefixLastWarningTime =
+      'screenshot_last_warning_time_';
 
   // State variables
   bool _isMonitoring = false;
@@ -43,6 +45,28 @@ class ScreenshotBlockingService extends ChangeNotifier {
   factory ScreenshotBlockingService() => _instance;
   ScreenshotBlockingService._internal();
 
+  /// Get current user ID for user-specific storage
+  String? _getCurrentUserId() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      Logger.w('📱 No authenticated user for screenshot service');
+      return null;
+    }
+    return user.uid;
+  }
+
+  /// Get user-specific storage keys
+  Map<String, String>? _getUserSpecificKeys() {
+    final userId = _getCurrentUserId();
+    if (userId == null) return null;
+
+    return {
+      'screenshotCount': '$_keyPrefixScreenshotCount$userId',
+      'isAccessBlocked': '$_keyPrefixIsAccessBlocked$userId',
+      'lastWarningTime': '$_keyPrefixLastWarningTime$userId',
+    };
+  }
+
   /// Initialize the service and load persistent state
   Future<void> initialize() async {
     Logger.i('📱 Initializing ScreenshotBlockingService');
@@ -59,19 +83,30 @@ class ScreenshotBlockingService extends ChangeNotifier {
   /// Load persistent state from SharedPreferences
   Future<void> _loadState() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      _screenshotCount = prefs.getInt(_keyScreenshotCount) ?? 0;
-      _isAccessBlocked = prefs.getBool(_keyIsAccessBlocked) ?? false;
+      final keys = _getUserSpecificKeys();
+      if (keys == null) {
+        Logger.w('📱 Cannot load state: No authenticated user');
+        // Reset to default values when no user
+        _screenshotCount = 0;
+        _isAccessBlocked = false;
+        _lastWarningTime = null;
+        return;
+      }
 
-      final lastWarningTimestamp = prefs.getInt(_keyLastWarningTime);
+      final prefs = await SharedPreferences.getInstance();
+      _screenshotCount = prefs.getInt(keys['screenshotCount']!) ?? 0;
+      _isAccessBlocked = prefs.getBool(keys['isAccessBlocked']!) ?? false;
+
+      final lastWarningTimestamp = prefs.getInt(keys['lastWarningTime']!);
       if (lastWarningTimestamp != null) {
         _lastWarningTime = DateTime.fromMillisecondsSinceEpoch(
           lastWarningTimestamp,
         );
       }
 
+      final userId = _getCurrentUserId();
       Logger.i(
-        '📱 Loaded screenshot state: count=$_screenshotCount, blocked=$_isAccessBlocked',
+        '📱 Loaded screenshot state for user $userId: count=$_screenshotCount, blocked=$_isAccessBlocked',
       );
     } catch (error) {
       Logger.e('❌ Error loading screenshot blocking state: $error');
@@ -81,19 +116,26 @@ class ScreenshotBlockingService extends ChangeNotifier {
   /// Save current state to SharedPreferences
   Future<void> _saveState() async {
     try {
+      final keys = _getUserSpecificKeys();
+      if (keys == null) {
+        Logger.w('📱 Cannot save state: No authenticated user');
+        return;
+      }
+
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_keyScreenshotCount, _screenshotCount);
-      await prefs.setBool(_keyIsAccessBlocked, _isAccessBlocked);
+      await prefs.setInt(keys['screenshotCount']!, _screenshotCount);
+      await prefs.setBool(keys['isAccessBlocked']!, _isAccessBlocked);
 
       if (_lastWarningTime != null) {
         await prefs.setInt(
-          _keyLastWarningTime,
+          keys['lastWarningTime']!,
           _lastWarningTime!.millisecondsSinceEpoch,
         );
       }
 
+      final userId = _getCurrentUserId();
       Logger.i(
-        '📱 Saved screenshot state: count=$_screenshotCount, blocked=$_isAccessBlocked',
+        '📱 Saved screenshot state for user $userId: count=$_screenshotCount, blocked=$_isAccessBlocked',
       );
     } catch (error) {
       Logger.e('❌ Error saving screenshot blocking state: $error');
@@ -229,8 +271,14 @@ class ScreenshotBlockingService extends ChangeNotifier {
   Future<void> checkForAdminReset() async {
     if (!ResponsiveHelper.isIOS()) return;
 
+    final userId = _getCurrentUserId();
+    if (userId == null) {
+      Logger.w('📱 Cannot check for admin reset: No authenticated user');
+      return;
+    }
+
     try {
-      Logger.d('📱 Checking for admin reset...');
+      Logger.d('📱 Checking for admin reset for user $userId...');
 
       final result =
           await _functions.httpsCallable('checkViolationResetStatus').call();
@@ -241,7 +289,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
       final isBlocked = data['isBlocked'] as bool;
 
       if (hasBeenReset) {
-        Logger.i('🎉 Screenshot violations reset by admin!');
+        Logger.i('🎉 Screenshot violations reset by admin for user $userId!');
 
         // Update local state to match backend
         _screenshotCount = currentViolations;
@@ -254,7 +302,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
         // Acknowledge the reset
         await _acknowledgeReset();
       } else {
-        Logger.d('📱 No admin reset detected');
+        Logger.d('📱 No admin reset detected for user $userId');
       }
     } catch (error) {
       Logger.e('❌ Error checking for admin reset: $error');
@@ -288,6 +336,23 @@ class ScreenshotBlockingService extends ChangeNotifier {
       Logger.w('📱 Should show screenshot warning');
     }
     return showWarning;
+  }
+
+  /// Handle user authentication changes (login/logout)
+  Future<void> onUserAuthChanged(User? user) async {
+    if (user == null) {
+      // User logged out - clear local state
+      Logger.i('📱 User logged out - clearing screenshot state');
+      _screenshotCount = 0;
+      _isAccessBlocked = false;
+      _lastWarningTime = null;
+      notifyListeners();
+    } else {
+      // User logged in - load their specific state
+      Logger.i('📱 User logged in (${user.uid}) - loading screenshot state');
+      await _loadState();
+      notifyListeners();
+    }
   }
 
   /// Dispose resources
