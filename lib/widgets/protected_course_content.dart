@@ -248,22 +248,23 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     }
   }
 
-    /// Handle screenshot service state changes
+  /// Handle screenshot service state changes
   void _onScreenshotServiceChanged() {
     if (!mounted) return;
-    
+
     Logger.i('📱 Screenshot service state changed');
-    
+
     // Check if access was restored (admin reset)
-    if (!_screenshotService.isAccessBlocked && !_screenshotService.hasReceivedWarning) {
+    if (!_screenshotService.isAccessBlocked &&
+        !_screenshotService.hasReceivedWarning) {
       _showAccessRestoredMessage();
     }
-    
+
     // Check if we should show warning (first screenshot)
     if (_screenshotService.shouldShowWarning() && !_showingScreenshotWarning) {
       _showScreenshotWarning();
     }
-    
+
     // Check if access should be blocked (second screenshot)
     if (_screenshotService.shouldBlockAccess()) {
       _showScreenshotBlocked();
@@ -320,7 +321,7 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
   /// Show access restored message when admin resets violations
   void _showAccessRestoredMessage() {
     Logger.i('🎉 Showing access restored message');
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
