@@ -33,6 +33,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
   bool _isAccessBlocked = false;
   DateTime? _lastWarningTime;
   DateTime? _lastResetCheckTime;
+  bool _hasShownResetMessage = false;
 
   // Getters
   bool get isMonitoring => _isMonitoring;
@@ -40,6 +41,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
   bool get isAccessBlocked => _isAccessBlocked;
   bool get hasReceivedWarning => _screenshotCount >= 1;
   DateTime? get lastWarningTime => _lastWarningTime;
+  bool get shouldShowResetMessage => _hasShownResetMessage;
 
   /// Singleton instance
   static final ScreenshotBlockingService _instance =
@@ -206,6 +208,9 @@ class ScreenshotBlockingService extends ChangeNotifier {
 
   /// Record screenshot violation using Firebase function
   Future<void> _recordScreenshotViolation() async {
+    final userId = _getCurrentUserId();
+    Logger.i('📱 Recording screenshot violation for user: $userId');
+
     try {
       final result =
           await _functions.httpsCallable('recordScreenshotViolation').call();
@@ -216,12 +221,14 @@ class ScreenshotBlockingService extends ChangeNotifier {
       final message = data['message'] as String;
 
       Logger.i('✅ Violation recorded: $message');
-      Logger.i('📊 Total violations: $violationCount');
+      Logger.i('📊 Total violations: $violationCount, blocked: $isBlocked');
 
       // Update local state to match backend
       _screenshotCount = violationCount;
       _isAccessBlocked = isBlocked;
       _lastWarningTime = DateTime.now();
+      _hasShownResetMessage =
+          false; // Clear reset message flag since new violation occurred
 
       await _saveState();
       notifyListeners();
@@ -280,6 +287,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
     _isAccessBlocked = false;
     _lastWarningTime = null;
     _lastResetCheckTime = null;
+    _hasShownResetMessage = false;
 
     await _saveState();
     notifyListeners();
@@ -329,6 +337,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
         _lastWarningTime = null;
         _lastResetCheckTime =
             DateTime.now(); // Mark that we processed this reset
+        _hasShownResetMessage = true; // Flag to show reset message
 
         await _saveState();
         notifyListeners();
@@ -352,6 +361,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
           _isAccessBlocked = isBlocked;
           _lastWarningTime = null;
           _lastResetCheckTime = now;
+          _hasShownResetMessage = true; // Flag to show reset message
 
           await _saveState();
           notifyListeners();
@@ -394,6 +404,13 @@ class ScreenshotBlockingService extends ChangeNotifier {
     return showWarning;
   }
 
+  /// Acknowledge that the reset message has been shown to the user
+  void acknowledgeResetMessage() {
+    Logger.i('📱 Reset message acknowledged by user');
+    _hasShownResetMessage = false;
+    notifyListeners();
+  }
+
   /// Handle user authentication changes (login/logout)
   Future<void> onUserAuthChanged(User? user) async {
     if (user == null) {
@@ -403,6 +420,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
       _isAccessBlocked = false;
       _lastWarningTime = null;
       _lastResetCheckTime = null;
+      _hasShownResetMessage = false;
       notifyListeners();
     } else {
       // User logged in - load their specific state

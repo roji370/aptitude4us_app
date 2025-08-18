@@ -263,9 +263,8 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
 
     Logger.i('📱 Screenshot service state changed');
 
-    // Check if access was restored (admin reset)
-    if (!_screenshotService.isAccessBlocked &&
-        !_screenshotService.hasReceivedWarning) {
+    // Check if access was restored (admin reset) - only show once
+    if (_screenshotService.shouldShowResetMessage) {
       _showAccessRestoredMessage();
     }
 
@@ -330,6 +329,9 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
   /// Show access restored message when admin resets violations
   void _showAccessRestoredMessage() {
     Logger.i('🎉 Showing access restored message');
+
+    // Acknowledge that we're showing the message
+    _screenshotService.acknowledgeResetMessage();
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
