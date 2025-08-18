@@ -35,6 +35,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
   DateTime? _lastResetCheckTime;
   bool _hasShownResetMessage = false;
   bool _hasShownWarningForCurrentSession = false;
+  String? _currentUserId; // Track current user to avoid unnecessary resets
 
   // Getters
   bool get isMonitoring => _isMonitoring;
@@ -303,6 +304,7 @@ class ScreenshotBlockingService extends ChangeNotifier {
     _lastResetCheckTime = null;
     _hasShownResetMessage = false;
     _hasShownWarningForCurrentSession = false;
+    _currentUserId = null; // Reset user tracking as well
 
     await _saveState();
     notifyListeners();
@@ -419,6 +421,11 @@ class ScreenshotBlockingService extends ChangeNotifier {
         !_isAccessBlocked &&
         ResponsiveHelper.isIOS() &&
         !_hasShownWarningForCurrentSession;
+
+    Logger.d(
+      '📱 Warning check: count=$_screenshotCount, blocked=$_isAccessBlocked, iOS=${ResponsiveHelper.isIOS()}, shownForSession=$_hasShownWarningForCurrentSession, shouldShow=$shouldShow',
+    );
+
     if (shouldShow) {
       Logger.w('📱 Should show screenshot warning');
     }
@@ -440,6 +447,17 @@ class ScreenshotBlockingService extends ChangeNotifier {
 
   /// Handle user authentication changes (login/logout)
   Future<void> onUserAuthChanged(User? user) async {
+    final newUserId = user?.uid;
+
+    // Check if user actually changed
+    if (_currentUserId == newUserId) {
+      Logger.d('📱 User unchanged (${newUserId ?? 'null'}) - skipping reset');
+      return; // No change, don't reset session flags or notify
+    }
+
+    Logger.i('📱 User changed from $_currentUserId to $newUserId');
+    _currentUserId = newUserId;
+
     if (user == null) {
       // User logged out - clear local state
       Logger.i('📱 User logged out - clearing screenshot state');
