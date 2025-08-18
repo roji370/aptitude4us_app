@@ -247,8 +247,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         child: Text(
                           "Briffini Academy",
+                          maxLines: 1,
+                          overflow: TextOverflow.visible,
                           style: GoogleFonts.archivo(
-                            fontSize: screenSize.width * 0.11,
+                            fontSize: screenSize.width * 0.095,
                             fontWeight: FontWeight.w700,
                             color: Colors.white,
                           ),
@@ -266,12 +268,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Container(
                         width: screenSize.width * 0.5,
                         height: screenSize.width * 0.5,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(
-                            0.1,
-                          ), // Fallback background
-                          borderRadius: BorderRadius.circular(20),
-                          image: const DecorationImage(
+                        decoration: const BoxDecoration(
+                          image: DecorationImage(
                             image: AssetImage(
                               'assets/images/treasure_chest.png',
                             ),
