@@ -16,29 +16,32 @@ class ScreenshotBlockedScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.red[50],
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.start,
             children: [
+              const SizedBox(
+                height: 40,
+              ), // Add top spacing instead of centering
               // Blocked Icon
               Container(
-                width: 120,
-                height: 120,
+                width: 100,
+                height: 100,
                 decoration: BoxDecoration(
                   color: Colors.red[100],
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.block, size: 80, color: Colors.red[600]),
+                child: Icon(Icons.block, size: 64, color: Colors.red[600]),
               ),
 
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
 
               // Title
               Text(
                 'Access Blocked',
                 style: TextStyle(
-                  fontSize: 32,
+                  fontSize: 28,
                   fontWeight: FontWeight.bold,
                   color: Colors.red[700],
                 ),
@@ -49,7 +52,7 @@ class ScreenshotBlockedScreen extends StatelessWidget {
 
               // Blocked Message
               Container(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
@@ -67,7 +70,7 @@ class ScreenshotBlockedScreen extends StatelessWidget {
                     Text(
                       'Your access has been suspended',
                       style: TextStyle(
-                        fontSize: 22,
+                        fontSize: 20,
                         fontWeight: FontWeight.w600,
                         color: Colors.red[700],
                       ),
@@ -135,7 +138,7 @@ class ScreenshotBlockedScreen extends StatelessWidget {
                 ),
               ),
 
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
 
               // Contact Admin Button
               GestureDetector(
@@ -172,6 +175,7 @@ class ScreenshotBlockedScreen extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: 40), // Bottom spacing to prevent overflow
             ],
           ),
         ),
