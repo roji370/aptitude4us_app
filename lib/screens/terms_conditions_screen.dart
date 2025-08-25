@@ -20,69 +20,23 @@ class TermsConditionsScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildTermSection(
-                  "1. For Students Only",
-                  "This app is for nursing students studying abroad who are 18 years or older.",
-                ),
-                _buildTermSection(
-                  "2. Personal Use",
-                  "Use this app only for your own learning. Don't share your account with others.",
-                ),
-                _buildTermSection(
-                  "3. Privacy",
-                  "We collect your basic details (like name, email) to give you the best learning experience. Your information is safe with us.",
-                ),
-                _buildTermSection(
-                  "4. No Copying",
-                  "All videos, notes, and materials are protected. Don't copy, download, or share them without permission.",
-                ),
-                _buildTermSection(
-                  "5. No Cheating",
-                  "Using this app for cheating or unfair practices is not allowed.",
-                ),
-                _buildTermSection(
-                  "6. Account Rules",
-                  "If you break the rules, your account may be blocked or removed.",
-                ),
-                _buildTermSection(
-                  "7. App Availability",
-                  "Sometimes the app may be down for updates or due to technical issues.",
-                ),
-                _buildTermSection(
-                  "8. Updates to Terms",
-                  "We may update these rules. If you keep using the app, it means you agree to the latest terms.",
-                ),
-                _buildTermSection(
-                  "9. Laws",
-                  "These terms follow the law of the country where our app is managed.",
+                Text(
+                  "Welcome to Briffini Academy for Nurses. By accessing this platform and engaging with any of its educational content, you acknowledge and agree to the following legally binding terms. All material provided within this platform—including but not limited to videos, audio recordings, presentation slides, written documents, illustrations, and any supporting digital or printed media—is the exclusive intellectual property of Briffini Academy for Nurses and its contributors. These materials are protected under national and international copyright legislation, including the Copyright and Related Rights Act, 2000 of Ireland and The Copyright Act, 1957 (as amended) of India.\n\n"
+                  "This educational content is provided strictly for personal learning and professional development. Any attempt to download, copy, reproduce, screen-record, distribute, transmit, alter, adapt, translate, publicly display, or upload any part of the content to third-party platforms or social networks constitutes an infringement of copyright law. Sharing materials in any form, including via email, messaging services, cloud storage, or learning forums, without explicit, prior written consent from Briffini Academy for Nurses is strictly prohibited.\n\n"
+                  "Such unauthorised actions are considered serious offences and may result in immediate revocation of access to all resources and services offered by Briffini Academy for Nurses. Furthermore, violators may face civil and criminal liability. Under Section 140 to 146 of the Irish Copyright and Related Rights Act, 2000, and Sections 63 to 70 of the Indian Copyright Act, 1957, copyright infringement may lead to legal proceedings, substantial financial penalties, and, in certain cases, imprisonment.\n\n"
+                  "By proceeding to access and use this platform, you confirm your understanding of and commitment to upholding these copyright conditions. You agree to respect the creative and intellectual efforts that underpin the development of these educational resources. If you are uncertain about any aspect of acceptable usage or if you wish to obtain permission for specific purposes, we urge you to contact Briffini Academy for Nurses directly at [insert contact email].\n\n"
+                  "We thank you for your cooperation in safeguarding the integrity of our educational assets and for contributing to a culture of respect, responsibility, and legal compliance.",
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    color: const Color(0xFF4D4D4D),
+                    height: 1.6,
+                  ),
+                  textAlign: TextAlign.justify,
                 ),
               ],
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildTermSection(String title, String content) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            content,
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: const Color(0xFF4D4D4D),
-            ),
-          ),
-        ],
       ),
     );
   }
