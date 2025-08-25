@@ -2,17 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import '../utils/logger.dart';
+import 'video_watermark.dart';
 
 class SimpleVideoPlayer extends StatefulWidget {
   final String videoUrl;
   final String? title;
   final bool autoPlay;
+  final String? userName;
+  final bool showWatermark;
 
   const SimpleVideoPlayer({
     super.key,
     required this.videoUrl,
     this.title,
     this.autoPlay = false,
+    this.userName,
+    this.showWatermark = true,
   });
 
   @override
@@ -104,6 +109,8 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
             title: widget.title,
             initialPosition: currentPosition,
             wasPlaying: wasPlaying,
+            userName: widget.userName,
+            showWatermark: widget.showWatermark,
             onExit: (exitPosition, wasPlayingOnExit) {
               // Restore the main player's state after navigation is complete
               Future.microtask(() {
@@ -237,6 +244,10 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
               ),
             ),
 
+            // Watermark overlay
+            if (widget.showWatermark && widget.userName != null)
+              VideoWatermark(userName: widget.userName!),
+
             // Controls overlay
             _buildControls(),
           ],
@@ -252,6 +263,8 @@ class _FullscreenVideoPlayer extends StatefulWidget {
   final String? title;
   final Duration initialPosition;
   final bool wasPlaying;
+  final String? userName;
+  final bool showWatermark;
   final Function(Duration position, bool wasPlaying) onExit;
 
   const _FullscreenVideoPlayer({
@@ -259,6 +272,8 @@ class _FullscreenVideoPlayer extends StatefulWidget {
     this.title,
     required this.initialPosition,
     required this.wasPlaying,
+    this.userName,
+    this.showWatermark = true,
     required this.onExit,
   });
 
@@ -530,6 +545,10 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
                           child: VideoPlayer(_controller!),
                         ),
                       ),
+
+                      // Watermark overlay
+                      if (widget.showWatermark && widget.userName != null)
+                        FullscreenVideoWatermark(userName: widget.userName!),
 
                       // Controls overlay
                       _buildFullscreenControls(),

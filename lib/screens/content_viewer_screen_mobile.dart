@@ -725,6 +725,8 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
                 videoUrl: _currentVideoUrl!,
                 title: _currentVideoTitle ?? 'Video Content',
                 autoPlay: false,
+                userName: _userName,
+                showWatermark: true,
               ),
             ),
           );
