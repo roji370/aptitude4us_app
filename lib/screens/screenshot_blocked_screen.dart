@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../utils/app_colors.dart';
 import '../utils/logger.dart';
+import '../services/whatsapp_service.dart';
 
 /// Screen shown when user's access is blocked due to screenshot violations
 ///
@@ -217,26 +219,81 @@ class ScreenshotBlockedScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 16, height: 1.4),
               ),
               const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.primary.withOpacity(0.3)),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.phone, color: AppColors.primary, size: 20),
-                    const SizedBox(width: 12),
-                    const Text(
-                      '+353 89 419 6175',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'monospace',
-                      ),
+              // Phone number container (clickable to copy)
+              GestureDetector(
+                onTap: () => _copyPhoneNumber(context),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppColors.primary.withOpacity(0.3),
                     ),
-                  ],
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.phone, color: AppColors.primary, size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          WhatsAppService.getFormattedAdminPhone(),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        Icons.copy,
+                        color: AppColors.primary.withOpacity(0.7),
+                        size: 16,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // WhatsApp button
+              GestureDetector(
+                onTap: () => _openWhatsApp(context),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF25D366).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0xFF25D366).withOpacity(0.3),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Image.asset(
+                        'assets/icons/whatsapp.png',
+                        width: 24,
+                        height: 24,
+                        errorBuilder:
+                            (context, error, stackTrace) => Icon(
+                              Icons.chat,
+                              color: const Color(0xFF25D366),
+                              size: 24,
+                            ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'Open WhatsApp Chat',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF25D366),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -256,5 +313,88 @@ class ScreenshotBlockedScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// Copy phone number to clipboard
+  static void _copyPhoneNumber(BuildContext context) {
+    final phoneNumber = WhatsAppService.getFormattedAdminPhone();
+    Clipboard.setData(ClipboardData(text: phoneNumber));
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.white, size: 20),
+            const SizedBox(width: 8),
+            Text('Phone number copied: $phoneNumber'),
+          ],
+        ),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
+
+    Logger.i('📋 Phone number copied to clipboard: $phoneNumber');
+  }
+
+  /// Open WhatsApp chat with admin
+  static Future<void> _openWhatsApp(BuildContext context) async {
+    Logger.i('🟢 Attempting to open WhatsApp chat with admin');
+
+    try {
+      final success =
+          await WhatsAppService.openAdminChatForScreenshotViolation();
+
+      if (!success) {
+        // Show error message if WhatsApp couldn't be opened
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.error, color: Colors.white, size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Could not open WhatsApp. Please make sure WhatsApp is installed or use the phone number above.',
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      Logger.e('❌ Error opening WhatsApp: $e');
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.error, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                const Text('Error opening WhatsApp. Please try again.'),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        );
+      }
+    }
   }
 }
