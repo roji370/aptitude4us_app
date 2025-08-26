@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/community_chat_message.dart';
 import '../services/community_chat_service.dart';
+import '../services/attachment_service.dart';
 import '../widgets/community_chat_message_bubble.dart';
+import '../widgets/attachment_picker.dart';
 import '../widgets/protected_course_content.dart';
 import '../utils/responsive_helper.dart';
 
@@ -419,6 +421,63 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            // Attachment button
+            Container(
+              width: ResponsiveHelper.adaptiveFontSize(context, 48.0),
+              height: ResponsiveHelper.adaptiveFontSize(context, 48.0),
+              margin: EdgeInsets.only(
+                right: ResponsiveHelper.getAdaptiveSpacing(
+                  context,
+                  compact: 8.0,
+                  regular: 12.0,
+                  pro: 16.0,
+                  large: 20.0,
+                  extraLarge: 24.0,
+                ),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap:
+                      _isSending ? null : () => _showAttachmentPicker(context),
+                  borderRadius: BorderRadius.circular(
+                    ResponsiveHelper.getAdaptiveSpacing(
+                      context,
+                      compact: 24.0,
+                      regular: 28.0,
+                      pro: 32.0,
+                      large: 36.0,
+                      extraLarge: 40.0,
+                    ),
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest
+                          .withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(
+                        ResponsiveHelper.getAdaptiveSpacing(
+                          context,
+                          compact: 24.0,
+                          regular: 28.0,
+                          pro: 32.0,
+                          large: 36.0,
+                          extraLarge: 40.0,
+                        ),
+                      ),
+                      border: Border.all(
+                        color: theme.colorScheme.outline.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.attach_file_rounded,
+                      size: ResponsiveHelper.adaptiveFontSize(context, 20.0),
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
             // Message input field
             Expanded(
               child: Container(
@@ -584,5 +643,53 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
         ),
       ),
     );
+  }
+
+  void _showAttachmentPicker(BuildContext context) {
+    showAttachmentPicker(
+      context,
+      onAttachmentSelected: (AttachmentData attachment) {
+        _sendAttachment(attachment);
+      },
+      onError: (String error) {
+        _showSnackBar(error, isError: true);
+      },
+    );
+  }
+
+  Future<void> _sendAttachment(AttachmentData attachment) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    setState(() => _isSending = true);
+
+    try {
+      await _chatService.sendMessageWithAttachment(
+        senderId: user.uid,
+        senderName: user.displayName ?? 'Anonymous',
+        attachment: attachment,
+        text:
+            _messageController.text.trim().isEmpty
+                ? null
+                : _messageController.text.trim(),
+      );
+
+      // Clear message input
+      _messageController.clear();
+
+      // Success feedback
+      HapticFeedback.selectionClick();
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar(
+          'Failed to send attachment: ${e.toString()}',
+          isError: true,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
   }
 }

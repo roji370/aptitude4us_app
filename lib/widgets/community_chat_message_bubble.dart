@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../models/community_chat_message.dart';
+import '../services/attachment_service.dart';
+import '../widgets/attachment_preview.dart';
 import '../utils/responsive_helper.dart';
 
 class CommunityChatMessageBubble extends StatefulWidget {
@@ -380,19 +382,39 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
                 ),
               ],
 
-              // Message text
-              SelectableText(
-                widget.message.text,
-                style: TextStyle(
-                  color:
-                      isCurrentUser
-                          ? colorScheme.onPrimary
-                          : colorScheme.onSurface,
-                  fontSize: ResponsiveHelper.adaptiveFontSize(context, 15.0),
-                  height: 1.4,
-                  fontWeight: FontWeight.w400,
+              // Attachment preview
+              if (widget.message.hasAttachment) ...[
+                AttachmentPreview(
+                  attachment: widget.message.attachment!,
+                  isCompact: true,
                 ),
-              ),
+                if (widget.message.text.isNotEmpty)
+                  SizedBox(
+                    height: ResponsiveHelper.getAdaptiveSpacing(
+                      context,
+                      compact: 8.0,
+                      regular: 10.0,
+                      pro: 12.0,
+                      large: 14.0,
+                      extraLarge: 16.0,
+                    ),
+                  ),
+              ],
+
+              // Message text
+              if (widget.message.text.isNotEmpty)
+                SelectableText(
+                  widget.message.text,
+                  style: TextStyle(
+                    color:
+                        isCurrentUser
+                            ? colorScheme.onPrimary
+                            : colorScheme.onSurface,
+                    fontSize: ResponsiveHelper.adaptiveFontSize(context, 15.0),
+                    height: 1.4,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
             ],
           ),
         ),

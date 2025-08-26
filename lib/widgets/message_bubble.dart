@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/attachment_service.dart';
+import '../widgets/attachment_preview.dart';
 import '../utils/responsive_helper.dart';
 
 class MessageBubble extends StatefulWidget {
@@ -460,16 +462,38 @@ class _MessageBubbleState extends State<MessageBubble>
                 ),
               ],
 
-              // Message text
-              SelectableText(
-                messageText,
-                style: TextStyle(
-                  color: isMe ? colorScheme.onPrimary : colorScheme.onSurface,
-                  fontSize: ResponsiveHelper.adaptiveFontSize(context, 15.0),
-                  height: 1.4,
-                  fontWeight: FontWeight.w400,
+              // Attachment preview
+              if (widget.message['attachment'] != null) ...[
+                AttachmentPreview(
+                  attachment: AttachmentData.fromMap(
+                    widget.message['attachment'] as Map<String, dynamic>,
+                  ),
+                  isCompact: true,
                 ),
-              ),
+                if (messageText.isNotEmpty)
+                  SizedBox(
+                    height: ResponsiveHelper.getAdaptiveSpacing(
+                      context,
+                      compact: 8.0,
+                      regular: 10.0,
+                      pro: 12.0,
+                      large: 14.0,
+                      extraLarge: 16.0,
+                    ),
+                  ),
+              ],
+
+              // Message text
+              if (messageText.isNotEmpty)
+                SelectableText(
+                  messageText,
+                  style: TextStyle(
+                    color: isMe ? colorScheme.onPrimary : colorScheme.onSurface,
+                    fontSize: ResponsiveHelper.adaptiveFontSize(context, 15.0),
+                    height: 1.4,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
             ],
           ),
         ),

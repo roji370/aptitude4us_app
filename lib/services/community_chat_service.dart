@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/community_chat_message.dart';
+import '../services/attachment_service.dart';
 import '../utils/logger.dart';
 
 class CommunityChatService {
@@ -20,7 +21,7 @@ class CommunityChatService {
         );
   }
 
-  // Send a new message to community chat
+  // Send a new text message to community chat
   Future<void> sendMessage({
     required String senderId,
     required String senderName,
@@ -39,6 +40,41 @@ class CommunityChatService {
       });
     } catch (e) {
       throw Exception('Failed to send message: $e');
+    }
+  }
+
+  // Send a message with attachment to community chat
+  Future<void> sendMessageWithAttachment({
+    required String senderId,
+    required String senderName,
+    required AttachmentData attachment,
+    String? text,
+  }) async {
+    try {
+      final messageType =
+          attachment.type == AttachmentType.image
+              ? 'image'
+              : attachment.type == AttachmentType.video
+              ? 'video'
+              : attachment.type == AttachmentType.audio
+              ? 'audio'
+              : attachment.type == AttachmentType.document
+              ? 'document'
+              : 'attachment';
+
+      await _firestore.collection(_collection).add({
+        'senderId': senderId,
+        'senderName': senderName,
+        'receiverId': 'COMMUNITY',
+        'text': text ?? '',
+        'timestamp': FieldValue.serverTimestamp(),
+        'status': 'sent',
+        'type': messageType,
+        'isCommunity': true,
+        'attachment': attachment.toMap(),
+      });
+    } catch (e) {
+      throw Exception('Failed to send message with attachment: $e');
     }
   }
 

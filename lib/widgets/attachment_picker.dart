@@ -1,0 +1,566 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../services/attachment_service.dart';
+import '../utils/responsive_helper.dart';
+
+class AttachmentPicker extends StatefulWidget {
+  final Function(AttachmentData) onAttachmentSelected;
+  final Function(String) onError;
+
+  const AttachmentPicker({
+    super.key,
+    required this.onAttachmentSelected,
+    required this.onError,
+  });
+
+  @override
+  State<AttachmentPicker> createState() => _AttachmentPickerState();
+}
+
+class _AttachmentPickerState extends State<AttachmentPicker>
+    with TickerProviderStateMixin {
+  final AttachmentService _attachmentService = AttachmentService();
+  late AnimationController _animationController;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _fadeAnimation;
+  bool _isUploading = false;
+  double _uploadProgress = 0.0;
+  String _uploadingFileName = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+
+    _scaleAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.elasticOut),
+    );
+
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+
+    _animationController.forward();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: Container(
+        padding: EdgeInsets.all(
+          ResponsiveHelper.getAdaptiveSpacing(
+            context,
+            compact: 16.0,
+            regular: 20.0,
+            pro: 24.0,
+            large: 28.0,
+            extraLarge: 32.0,
+          ),
+        ),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(
+              ResponsiveHelper.getAdaptiveSpacing(
+                context,
+                compact: 20.0,
+                regular: 24.0,
+                pro: 28.0,
+                large: 32.0,
+                extraLarge: 36.0,
+              ),
+            ),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: theme.colorScheme.shadow.withValues(alpha: 0.15),
+              blurRadius: ResponsiveHelper.getAdaptiveElevation(context) * 2,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Handle bar
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.onSurfaceVariant.withValues(
+                    alpha: 0.4,
+                  ),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+
+              if (_isUploading) ...[
+                _buildUploadProgress(context, theme),
+                SizedBox(height: 20),
+              ],
+
+              // Title
+              Text(
+                'Send Attachment',
+                style: TextStyle(
+                  fontSize: ResponsiveHelper.adaptiveFontSize(context, 20.0),
+                  fontWeight: FontWeight.w700,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+
+              SizedBox(height: 24),
+
+              // Attachment options grid
+              ScaleTransition(
+                scale: _scaleAnimation,
+                child: GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                  children: [
+                    _buildAttachmentOption(
+                      context,
+                      theme,
+                      icon: Icons.camera_alt_outlined,
+                      label: 'Camera',
+                      color: Colors.purple,
+                      onTap: () => _handleCameraPhoto(context),
+                    ),
+                    _buildAttachmentOption(
+                      context,
+                      theme,
+                      icon: Icons.photo_library_outlined,
+                      label: 'Gallery',
+                      color: Colors.green,
+                      onTap: () => _handleGalleryPhoto(context),
+                    ),
+                    _buildAttachmentOption(
+                      context,
+                      theme,
+                      icon: Icons.videocam_outlined,
+                      label: 'Video',
+                      color: Colors.red,
+                      onTap: () => _showVideoOptions(context),
+                    ),
+                    _buildAttachmentOption(
+                      context,
+                      theme,
+                      icon: Icons.description_outlined,
+                      label: 'Document',
+                      color: Colors.blue,
+                      onTap: () => _handleDocument(context),
+                    ),
+                    _buildAttachmentOption(
+                      context,
+                      theme,
+                      icon: Icons.audiotrack_outlined,
+                      label: 'Audio',
+                      color: Colors.orange,
+                      onTap: () => _handleAudio(context),
+                    ),
+                    _buildAttachmentOption(
+                      context,
+                      theme,
+                      icon: Icons.folder_outlined,
+                      label: 'File',
+                      color: Colors.teal,
+                      onTap: () => _handleAnyFile(context),
+                    ),
+                  ],
+                ),
+              ),
+
+              SizedBox(height: 16),
+
+              // Cancel button
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: _isUploading ? null : () => Navigator.pop(context),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.symmetric(
+                      vertical: ResponsiveHelper.getAdaptiveSpacing(
+                        context,
+                        compact: 12.0,
+                        regular: 14.0,
+                        pro: 16.0,
+                        large: 18.0,
+                        extraLarge: 20.0,
+                      ),
+                    ),
+                  ),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      fontSize: ResponsiveHelper.adaptiveFontSize(
+                        context,
+                        16.0,
+                      ),
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUploadProgress(BuildContext context, ThemeData theme) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                value: _uploadProgress,
+                strokeWidth: 2,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Uploading $_uploadingFileName...',
+                style: TextStyle(
+                  fontSize: ResponsiveHelper.adaptiveFontSize(context, 14.0),
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 8),
+        LinearProgressIndicator(
+          value: _uploadProgress,
+          color: theme.colorScheme.primary,
+          backgroundColor: theme.colorScheme.surfaceContainerHighest,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAttachmentOption(
+    BuildContext context,
+    ThemeData theme, {
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _isUploading ? null : onTap,
+        borderRadius: BorderRadius.circular(
+          ResponsiveHelper.getAdaptiveSpacing(
+            context,
+            compact: 16.0,
+            regular: 18.0,
+            pro: 20.0,
+            large: 22.0,
+            extraLarge: 24.0,
+          ),
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHigh.withValues(
+              alpha: 0.5,
+            ),
+            borderRadius: BorderRadius.circular(
+              ResponsiveHelper.getAdaptiveSpacing(
+                context,
+                compact: 16.0,
+                regular: 18.0,
+                pro: 20.0,
+                large: 22.0,
+                extraLarge: 24.0,
+              ),
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: ResponsiveHelper.adaptiveFontSize(context, 48.0),
+                height: ResponsiveHelper.adaptiveFontSize(context, 48.0),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  icon,
+                  size: ResponsiveHelper.adaptiveFontSize(context, 24.0),
+                  color: color,
+                ),
+              ),
+              SizedBox(height: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: ResponsiveHelper.adaptiveFontSize(context, 12.0),
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurface,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showVideoOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder:
+          (context) => Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(20),
+              ),
+            ),
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: Icon(Icons.videocam_outlined, color: Colors.red),
+                    title: Text('Record Video'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _handleCameraVideo(context);
+                    },
+                  ),
+                  ListTile(
+                    leading: Icon(
+                      Icons.video_library_outlined,
+                      color: Colors.red,
+                    ),
+                    title: Text('Choose from Gallery'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _handleGalleryVideo(context);
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+    );
+  }
+
+  Future<void> _handleCameraPhoto(BuildContext context) async {
+    if (!await _checkCameraPermission()) return;
+
+    try {
+      final XFile? image = await _attachmentService.pickImageFromCamera();
+      if (image != null) {
+        await _uploadFile(image.path, image.name);
+      }
+    } catch (e) {
+      widget.onError('Error taking photo: $e');
+    }
+  }
+
+  Future<void> _handleGalleryPhoto(BuildContext context) async {
+    if (!await _checkGalleryPermission()) return;
+
+    try {
+      final XFile? image = await _attachmentService.pickImageFromGallery();
+      if (image != null) {
+        await _uploadFile(image.path, image.name);
+      }
+    } catch (e) {
+      widget.onError('Error picking photo: $e');
+    }
+  }
+
+  Future<void> _handleCameraVideo(BuildContext context) async {
+    if (!await _checkCameraPermission()) return;
+
+    try {
+      final XFile? video = await _attachmentService.pickVideoFromCamera();
+      if (video != null) {
+        await _uploadFile(video.path, video.name);
+      }
+    } catch (e) {
+      widget.onError('Error recording video: $e');
+    }
+  }
+
+  Future<void> _handleGalleryVideo(BuildContext context) async {
+    if (!await _checkGalleryPermission()) return;
+
+    try {
+      final XFile? video = await _attachmentService.pickVideoFromGallery();
+      if (video != null) {
+        await _uploadFile(video.path, video.name);
+      }
+    } catch (e) {
+      widget.onError('Error picking video: $e');
+    }
+  }
+
+  Future<void> _handleDocument(BuildContext context) async {
+    try {
+      final PlatformFile? file = await _attachmentService.pickDocument();
+      if (file != null && file.path != null) {
+        await _uploadFile(file.path!, file.name);
+      }
+    } catch (e) {
+      widget.onError('Error picking document: $e');
+    }
+  }
+
+  Future<void> _handleAudio(BuildContext context) async {
+    try {
+      final PlatformFile? file = await _attachmentService.pickAudio();
+      if (file != null && file.path != null) {
+        await _uploadFile(file.path!, file.name);
+      }
+    } catch (e) {
+      widget.onError('Error picking audio: $e');
+    }
+  }
+
+  Future<void> _handleAnyFile(BuildContext context) async {
+    try {
+      final FilePickerResult? result = await FilePicker.platform.pickFiles();
+      if (result != null && result.files.isNotEmpty) {
+        final PlatformFile file = result.files.first;
+        if (file.path != null) {
+          await _uploadFile(file.path!, file.name);
+        }
+      }
+    } catch (e) {
+      widget.onError('Error picking file: $e');
+    }
+  }
+
+  Future<void> _uploadFile(String filePath, String fileName) async {
+    if (!mounted) return;
+
+    setState(() {
+      _isUploading = true;
+      _uploadProgress = 0.0;
+      _uploadingFileName = fileName;
+    });
+
+    try {
+      HapticFeedback.lightImpact();
+
+      final AttachmentData? attachment = await _attachmentService
+          .uploadAttachment(
+            filePath: filePath,
+            fileName: fileName,
+            chatType: 'general',
+            onProgress: (progress) {
+              if (mounted) {
+                setState(() {
+                  _uploadProgress = progress;
+                });
+              }
+            },
+          );
+
+      if (attachment != null && mounted) {
+        HapticFeedback.selectionClick();
+        widget.onAttachmentSelected(attachment);
+        Navigator.pop(context);
+      } else if (mounted) {
+        widget.onError('Failed to upload file');
+      }
+    } catch (e) {
+      if (mounted) {
+        widget.onError('Upload failed: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+          _uploadProgress = 0.0;
+          _uploadingFileName = '';
+        });
+      }
+    }
+  }
+
+  Future<bool> _checkCameraPermission() async {
+    final PermissionStatus status = await Permission.camera.request();
+    if (status.isDenied || status.isPermanentlyDenied) {
+      widget.onError('Camera permission is required to take photos');
+      return false;
+    }
+    return true;
+  }
+
+  Future<bool> _checkGalleryPermission() async {
+    PermissionStatus status;
+
+    if (Platform.isIOS) {
+      status = await Permission.photos.request();
+    } else {
+      // For Android, check storage permission
+      status = await Permission.storage.request();
+      if (status.isDenied) {
+        // Try with newer Android permission
+        status = await Permission.manageExternalStorage.request();
+      }
+    }
+
+    if (status.isDenied || status.isPermanentlyDenied) {
+      widget.onError('Storage permission is required to access gallery');
+      return false;
+    }
+    return true;
+  }
+}
+
+// Helper function to show attachment picker
+void showAttachmentPicker(
+  BuildContext context, {
+  required Function(AttachmentData) onAttachmentSelected,
+  required Function(String) onError,
+}) {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder:
+        (context) => AttachmentPicker(
+          onAttachmentSelected: onAttachmentSelected,
+          onError: onError,
+        ),
+  );
+}

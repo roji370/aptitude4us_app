@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rxdart/rxdart.dart';
+import '../services/attachment_service.dart';
 import '../utils/logger.dart';
 
 class ChatService {
@@ -167,7 +168,7 @@ class ChatService {
     }).toList();
   }
 
-  // Send a message to admin
+  // Send a text message to admin
   Future<Map<String, dynamic>> sendMessage({required String text}) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -192,6 +193,50 @@ class ChatService {
       return {'success': true, 'messageId': docRef.id};
     } catch (e) {
       Logger.e('Error sending message: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  // Send a message with attachment to admin
+  Future<Map<String, dynamic>> sendMessageWithAttachment({
+    required AttachmentData attachment,
+    String? text,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return {'success': false, 'error': 'User not logged in'};
+    }
+
+    try {
+      final messageType =
+          attachment.type == AttachmentType.image
+              ? 'image'
+              : attachment.type == AttachmentType.video
+              ? 'video'
+              : attachment.type == AttachmentType.audio
+              ? 'audio'
+              : attachment.type == AttachmentType.document
+              ? 'document'
+              : 'attachment';
+
+      // Create message document
+      final messageData = {
+        'text': text ?? '',
+        'senderId': user.uid,
+        'senderName': user.displayName ?? 'Student',
+        'receiverId': 'ADMIN', // Send to admin
+        'timestamp': FieldValue.serverTimestamp(),
+        'status': 'sent',
+        'type': messageType,
+        'attachment': attachment.toMap(),
+      };
+
+      // Add to Firestore
+      final docRef = await _firestore.collection('messages').add(messageData);
+
+      return {'success': true, 'messageId': docRef.id};
+    } catch (e) {
+      Logger.e('Error sending message with attachment: $e');
       return {'success': false, 'error': e.toString()};
     }
   }

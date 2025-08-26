@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/chat_service.dart';
+import '../services/attachment_service.dart';
+import '../widgets/attachment_picker.dart';
 import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
 import '../widgets/protected_course_content.dart';
@@ -638,6 +640,63 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            // Attachment button
+            Container(
+              width: ResponsiveHelper.adaptiveFontSize(context, 48.0),
+              height: ResponsiveHelper.adaptiveFontSize(context, 48.0),
+              margin: EdgeInsets.only(
+                right: ResponsiveHelper.getAdaptiveSpacing(
+                  context,
+                  compact: 8.0,
+                  regular: 12.0,
+                  pro: 16.0,
+                  large: 20.0,
+                  extraLarge: 24.0,
+                ),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap:
+                      _isSending ? null : () => _showAttachmentPicker(context),
+                  borderRadius: BorderRadius.circular(
+                    ResponsiveHelper.getAdaptiveSpacing(
+                      context,
+                      compact: 24.0,
+                      regular: 28.0,
+                      pro: 32.0,
+                      large: 36.0,
+                      extraLarge: 40.0,
+                    ),
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest
+                          .withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(
+                        ResponsiveHelper.getAdaptiveSpacing(
+                          context,
+                          compact: 24.0,
+                          regular: 28.0,
+                          pro: 32.0,
+                          large: 36.0,
+                          extraLarge: 40.0,
+                        ),
+                      ),
+                      border: Border.all(
+                        color: theme.colorScheme.outline.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.attach_file_rounded,
+                      size: ResponsiveHelper.adaptiveFontSize(context, 20.0),
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
             // Message input field
             Expanded(
               child: Container(
@@ -803,5 +862,54 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         ),
       ),
     );
+  }
+
+  void _showAttachmentPicker(BuildContext context) {
+    showAttachmentPicker(
+      context,
+      onAttachmentSelected: (AttachmentData attachment) {
+        _sendAttachment(attachment);
+      },
+      onError: (String error) {
+        _showSnackBar(error, isError: true);
+      },
+    );
+  }
+
+  Future<void> _sendAttachment(AttachmentData attachment) async {
+    setState(() => _isSending = true);
+
+    try {
+      final result = await _chatService.sendMessageWithAttachment(
+        attachment: attachment,
+        text:
+            _messageController.text.trim().isEmpty
+                ? null
+                : _messageController.text.trim(),
+      );
+
+      if (!result['success']) {
+        if (mounted) {
+          _showSnackBar('Error: ${result['error']}', isError: true);
+        }
+      } else {
+        // Clear message input
+        _messageController.clear();
+
+        // Success feedback
+        HapticFeedback.selectionClick();
+
+        // Reload messages to show the new attachment
+        _loadInitialMessages();
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('Error sending attachment: $e', isError: true);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
   }
 }
