@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -314,8 +313,6 @@ class _AttachmentPickerState extends State<AttachmentPicker>
   }
 
   Future<void> _handleGallery(BuildContext context) async {
-    if (!await _checkGalleryPermission()) return;
-
     try {
       // Show options for image or video from gallery
       final result = await showModalBottomSheet<String>(
@@ -374,19 +371,90 @@ class _AttachmentPickerState extends State<AttachmentPicker>
       );
 
       if (result == 'image') {
-        final XFile? image = await _attachmentService.pickImageFromGallery();
-        if (image != null) {
-          await _uploadFile(image.path, image.name);
-        }
+        await _handleImagePicker();
       } else if (result == 'video') {
-        final XFile? video = await _attachmentService.pickVideoFromGallery();
-        if (video != null) {
-          await _uploadFile(video.path, video.name);
-        }
+        await _handleVideoPicker();
       }
     } catch (e) {
       widget.onError('Error accessing gallery: $e');
     }
+  }
+
+  Future<void> _handleImagePicker() async {
+    try {
+      final XFile? image = await _attachmentService.pickImageFromGallery();
+      if (image != null) {
+        await _uploadFile(image.path, image.name);
+      }
+    } catch (e) {
+      final errorMessage = e.toString().toLowerCase();
+      if (errorMessage.contains('photo_access_denied') ||
+          errorMessage.contains('permission denied') ||
+          errorMessage.contains('not authorized') ||
+          errorMessage.contains('access denied')) {
+        widget.onError(
+          'Photo access required. Please allow photo access in Settings.',
+        );
+        await _showPermissionDialog();
+      } else {
+        widget.onError('Error picking image: $e');
+      }
+    }
+  }
+
+  Future<void> _handleVideoPicker() async {
+    try {
+      final XFile? video = await _attachmentService.pickVideoFromGallery();
+      if (video != null) {
+        await _uploadFile(video.path, video.name);
+      }
+    } catch (e) {
+      final errorMessage = e.toString().toLowerCase();
+      if (errorMessage.contains('photo_access_denied') ||
+          errorMessage.contains('permission denied') ||
+          errorMessage.contains('not authorized') ||
+          errorMessage.contains('access denied')) {
+        widget.onError(
+          'Photo access required. Please allow photo access in Settings.',
+        );
+        await _showPermissionDialog();
+      } else {
+        widget.onError('Error picking video: $e');
+      }
+    }
+  }
+
+  Future<void> _showPermissionDialog() async {
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Permission Required'),
+          content: Text(
+            'To select photos and videos, please:\n\n'
+            '1. Go to Settings\n'
+            '2. Find "Briffini Academy"\n'
+            '3. Tap "Photos"\n'
+            '4. Select "All Photos" or "Selected Photos"',
+          ),
+          actions: [
+            TextButton(
+              child: Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            TextButton(
+              child: Text('Open Settings'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                openAppSettings();
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _handleDocument(BuildContext context) async {
@@ -460,27 +528,6 @@ class _AttachmentPickerState extends State<AttachmentPicker>
         });
       }
     }
-  }
-
-  Future<bool> _checkGalleryPermission() async {
-    PermissionStatus status;
-
-    if (Platform.isIOS) {
-      status = await Permission.photos.request();
-    } else {
-      // For Android, check storage permission
-      status = await Permission.storage.request();
-      if (status.isDenied) {
-        // Try with newer Android permission
-        status = await Permission.manageExternalStorage.request();
-      }
-    }
-
-    if (status.isDenied || status.isPermanentlyDenied) {
-      widget.onError('Storage permission is required to access gallery');
-      return false;
-    }
-    return true;
   }
 }
 
