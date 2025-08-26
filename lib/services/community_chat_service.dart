@@ -100,7 +100,7 @@ class CommunityChatService {
           'senderName': 'System',
           'receiverId': 'COMMUNITY',
           'text':
-              'Welcome to the Community Chat! 👋 Feel free to start a conversation with your fellow students and admins.',
+              'Welcome to Student Details! 👋 Feel free to start a conversation with your fellow students and admins.',
           'timestamp': FieldValue.serverTimestamp(),
           'status': 'sent',
           'type': 'text',

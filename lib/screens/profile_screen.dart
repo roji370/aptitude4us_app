@@ -307,7 +307,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                     SizedBox(height: screenSize.height * 0.02),
 
-                    // Community Chat Card
+                    // Student Details Card
                     Padding(
                       padding: EdgeInsets.symmetric(
                         horizontal: screenSize.width * 0.05,
@@ -335,7 +335,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                           ),
                           title: Text(
-                            'Community Chat',
+                            'Student Details',
                             style: GoogleFonts.inter(
                               fontSize: screenSize.width * 0.045,
                               fontWeight: FontWeight.w500,

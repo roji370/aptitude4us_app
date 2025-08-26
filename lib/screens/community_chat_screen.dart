@@ -158,7 +158,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
       backgroundColor: theme.colorScheme.surface,
       appBar: _buildAppBar(theme),
       body: ProtectedCourseContent(
-        contentTitle: 'Community Chat',
+        contentTitle: 'Student Details',
         child: SafeArea(
           child: Column(
             children: [
@@ -176,7 +176,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
   PreferredSizeWidget _buildAppBar(ThemeData theme) {
     return AppBar(
       title: Text(
-        'Community Chat',
+        'Student Details',
         style: TextStyle(
           fontSize: ResponsiveHelper.adaptiveFontSize(context, 18.0),
           fontWeight: FontWeight.w700,
