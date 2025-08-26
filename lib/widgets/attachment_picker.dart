@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -494,6 +495,15 @@ class _AttachmentPickerState extends State<AttachmentPicker>
     try {
       HapticFeedback.lightImpact();
 
+      // Debug: Check if file exists and log file info
+      final file = File(filePath);
+      if (!await file.exists()) {
+        throw Exception('Selected file no longer exists');
+      }
+
+      final fileSize = await file.length();
+      print('📁 Starting upload: $fileName (${fileSize} bytes)');
+
       final AttachmentData? attachment = await _attachmentService
           .uploadAttachment(
             filePath: filePath,
@@ -505,19 +515,43 @@ class _AttachmentPickerState extends State<AttachmentPicker>
                   _uploadProgress = progress;
                 });
               }
+              print(
+                '📊 Upload progress: ${(progress * 100).toStringAsFixed(1)}%',
+              );
             },
           );
 
       if (attachment != null && mounted) {
+        print('✅ Upload successful: ${attachment.fileName}');
         HapticFeedback.selectionClick();
         widget.onAttachmentSelected(attachment);
         Navigator.pop(context);
       } else if (mounted) {
-        widget.onError('Failed to upload file');
+        print('❌ Upload failed: attachment is null');
+        widget.onError('Failed to upload file - please try again');
       }
     } catch (e) {
+      print('❌ Upload error: $e');
       if (mounted) {
-        widget.onError('Upload failed: $e');
+        String errorMessage = 'Upload failed';
+
+        final errorStr = e.toString().toLowerCase();
+        if (errorStr.contains('not authenticated') ||
+            errorStr.contains('permission')) {
+          errorMessage =
+              'Authentication error - please try logging out and back in';
+        } else if (errorStr.contains('network') ||
+            errorStr.contains('internet')) {
+          errorMessage = 'Network error - check your internet connection';
+        } else if (errorStr.contains('size') || errorStr.contains('large')) {
+          errorMessage = 'File too large - please select a smaller file';
+        } else if (errorStr.contains('storage')) {
+          errorMessage = 'Storage error - please contact support';
+        } else {
+          errorMessage = 'Upload failed - please try again';
+        }
+
+        widget.onError(errorMessage);
       }
     } finally {
       if (mounted) {

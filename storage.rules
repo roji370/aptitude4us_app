@@ -59,6 +59,12 @@ service firebase.storage {
       allow write: if isAdmin() || request.auth.uid == userId;
     }
     
+    // Chat attachments - users can upload their own attachments
+    match /attachments/{chatType}/{userId}/{filename} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+    
     // Default rule - deny if not matching specific rules
     match /{allPaths=**} {
       allow read, write: if isAdmin();

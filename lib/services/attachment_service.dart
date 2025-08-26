@@ -243,11 +243,14 @@ class AttachmentService {
     Function(double)? onProgress,
   }) async {
     try {
+      print('🔐 Checking authentication...');
       final User? currentUser = _auth.currentUser;
       if (currentUser == null) {
         throw Exception('User not authenticated');
       }
+      print('✅ User authenticated: ${currentUser.uid}');
 
+      print('📂 Checking file: $filePath');
       final File file = File(filePath);
       if (!await file.exists()) {
         throw Exception('File does not exist');
@@ -257,6 +260,9 @@ class AttachmentService {
       final String mimeType =
           lookupMimeType(fileName) ?? 'application/octet-stream';
       final AttachmentType type = getAttachmentType(fileName, mimeType);
+      print(
+        '📊 File info: $fileName, Size: ${formatFileSize(fileSize)}, Type: ${type.name}, MIME: $mimeType',
+      );
 
       // Validate file size
       if (!validateFileSize(fileSize, type)) {
@@ -268,23 +274,31 @@ class AttachmentService {
       final String fileExtension = fileName.split('.').last;
       final String storagePath =
           'attachments/$chatType/${currentUser.uid}/$fileId.$fileExtension';
+      print('🗂️ Storage path: $storagePath');
 
       // Upload main file
+      print('☁️ Starting upload to Firebase Storage...');
       final Reference storageRef = _storage.ref().child(storagePath);
       final UploadTask uploadTask = storageRef.putFile(file);
 
       // Monitor upload progress
       uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
         final double progress = snapshot.bytesTransferred / snapshot.totalBytes;
+        print(
+          '📈 Upload progress: ${(progress * 100).toStringAsFixed(1)}% (${snapshot.bytesTransferred}/${snapshot.totalBytes} bytes)',
+        );
         onProgress?.call(progress);
       });
 
       final TaskSnapshot snapshot = await uploadTask;
+      print('✅ Upload completed, getting download URL...');
       final String downloadUrl = await snapshot.ref.getDownloadURL();
+      print('🔗 Download URL obtained: ${downloadUrl.substring(0, 50)}...');
 
       // Generate thumbnail for video files
       String? thumbnailUrl;
       if (type == AttachmentType.video) {
+        print('🎬 Generating video thumbnail...');
         final Uint8List? thumbnailData = await generateVideoThumbnail(filePath);
         if (thumbnailData != null) {
           final String thumbnailPath =
@@ -292,6 +306,7 @@ class AttachmentService {
           final Reference thumbnailRef = _storage.ref().child(thumbnailPath);
           await thumbnailRef.putData(thumbnailData);
           thumbnailUrl = await thumbnailRef.getDownloadURL();
+          print('🖼️ Thumbnail uploaded: $thumbnailUrl');
         }
       }
 
@@ -302,13 +317,7 @@ class AttachmentService {
         'originalName': fileName,
       };
 
-      if (type == AttachmentType.image) {
-        // You could add image dimensions here if needed
-      } else if (type == AttachmentType.video) {
-        // You could add video duration here if needed
-      }
-
-      return AttachmentData(
+      final attachmentData = AttachmentData(
         id: fileId,
         fileName: fileName,
         fileUrl: downloadUrl,
@@ -318,7 +327,13 @@ class AttachmentService {
         mimeType: mimeType,
         metadata: metadata,
       );
+
+      print(
+        '🎉 AttachmentData created successfully: ${attachmentData.fileName}',
+      );
+      return attachmentData;
     } catch (e) {
+      print('💥 Upload error in AttachmentService: $e');
       Logger.e('Error uploading attachment: $e');
       return null;
     }
