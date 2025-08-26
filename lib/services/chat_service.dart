@@ -213,8 +213,6 @@ class ChatService {
               ? 'image'
               : attachment.type == AttachmentType.video
               ? 'video'
-              : attachment.type == AttachmentType.audio
-              ? 'audio'
               : attachment.type == AttachmentType.document
               ? 'document'
               : 'attachment';

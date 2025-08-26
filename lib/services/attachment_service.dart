@@ -11,7 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import '../utils/logger.dart';
 
-enum AttachmentType { image, video, audio, document, unknown }
+enum AttachmentType { image, video, document, unknown }
 
 class AttachmentData {
   final String id;
@@ -73,28 +73,11 @@ class AttachmentService {
   static const int maxImageSize = 10 * 1024 * 1024; // 10MB
   static const int maxVideoSize = 100 * 1024 * 1024; // 100MB
   static const int maxDocumentSize = 25 * 1024 * 1024; // 25MB
-  static const int maxAudioSize = 25 * 1024 * 1024; // 25MB
 
   // Image compression settings
   static const int imageQuality = 85;
   static const int maxImageWidth = 1920;
   static const int maxImageHeight = 1080;
-
-  /// Pick image from camera
-  Future<XFile?> pickImageFromCamera() async {
-    try {
-      final XFile? image = await _imagePicker.pickImage(
-        source: ImageSource.camera,
-        maxWidth: maxImageWidth.toDouble(),
-        maxHeight: maxImageHeight.toDouble(),
-        imageQuality: imageQuality,
-      );
-      return image;
-    } catch (e) {
-      Logger.e('Error picking image from camera: $e');
-      return null;
-    }
-  }
 
   /// Pick image from gallery
   Future<XFile?> pickImageFromGallery() async {
@@ -108,20 +91,6 @@ class AttachmentService {
       return image;
     } catch (e) {
       Logger.e('Error picking image from gallery: $e');
-      return null;
-    }
-  }
-
-  /// Pick video from camera
-  Future<XFile?> pickVideoFromCamera() async {
-    try {
-      final XFile? video = await _imagePicker.pickVideo(
-        source: ImageSource.camera,
-        maxDuration: const Duration(minutes: 5), // 5 minute limit
-      );
-      return video;
-    } catch (e) {
-      Logger.e('Error picking video from camera: $e');
       return null;
     }
   }
@@ -169,24 +138,6 @@ class AttachmentService {
     }
   }
 
-  /// Pick audio file
-  Future<PlatformFile?> pickAudio() async {
-    try {
-      final FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.audio,
-        allowMultiple: false,
-      );
-
-      if (result != null && result.files.isNotEmpty) {
-        return result.files.first;
-      }
-      return null;
-    } catch (e) {
-      Logger.e('Error picking audio: $e');
-      return null;
-    }
-  }
-
   /// Determine attachment type from file
   AttachmentType getAttachmentType(String fileName, String? mimeType) {
     final String extension = fileName.split('.').last.toLowerCase();
@@ -196,8 +147,6 @@ class AttachmentService {
       return AttachmentType.image;
     } else if (mime.startsWith('video/')) {
       return AttachmentType.video;
-    } else if (mime.startsWith('audio/')) {
-      return AttachmentType.audio;
     } else if (mime.startsWith('application/') || mime.startsWith('text/')) {
       return AttachmentType.document;
     }
@@ -218,13 +167,7 @@ class AttachmentService {
       case 'flv':
       case 'webm':
         return AttachmentType.video;
-      case 'mp3':
-      case 'wav':
-      case 'aac':
-      case 'flac':
-      case 'm4a':
-      case 'ogg':
-        return AttachmentType.audio;
+
       case 'pdf':
       case 'doc':
       case 'docx':
@@ -247,8 +190,6 @@ class AttachmentService {
         return fileSize <= maxImageSize;
       case AttachmentType.video:
         return fileSize <= maxVideoSize;
-      case AttachmentType.audio:
-        return fileSize <= maxAudioSize;
       case AttachmentType.document:
         return fileSize <= maxDocumentSize;
       case AttachmentType.unknown:

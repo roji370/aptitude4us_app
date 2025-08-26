@@ -65,8 +65,6 @@ class _AttachmentPreviewState extends State<AttachmentPreview> {
         return _buildImagePreview(context);
       case AttachmentType.video:
         return _buildVideoPreview(context);
-      case AttachmentType.audio:
-        return _buildAudioPreview(context);
       case AttachmentType.document:
         return _buildDocumentPreview(context);
       case AttachmentType.unknown:
@@ -274,80 +272,6 @@ class _AttachmentPreviewState extends State<AttachmentPreview> {
         Icons.video_library_outlined,
         color: theme.colorScheme.onSurfaceVariant,
         size: size * 0.3,
-      ),
-    );
-  }
-
-  Widget _buildAudioPreview(BuildContext context) {
-    final theme = Theme.of(context);
-    final AttachmentService attachmentService = AttachmentService();
-
-    return GestureDetector(
-      onTap: widget.onTap ?? () => _handleFileDownload(context),
-      child: Container(
-        width: widget.isCompact ? 120.0 : 200.0,
-        padding: EdgeInsets.all(
-          ResponsiveHelper.getAdaptiveSpacing(
-            context,
-            compact: 12.0,
-            regular: 14.0,
-            pro: 16.0,
-            large: 18.0,
-            extraLarge: 20.0,
-          ),
-        ),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(
-            ResponsiveHelper.getAdaptiveSpacing(
-              context,
-              compact: 12.0,
-              regular: 14.0,
-              pro: 16.0,
-              large: 18.0,
-              extraLarge: 20.0,
-            ),
-          ),
-          border: Border.all(
-            color: theme.colorScheme.outline.withValues(alpha: 0.3),
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.audiotrack_outlined,
-              size: widget.isCompact ? 32.0 : 48.0,
-              color: theme.colorScheme.primary,
-            ),
-            SizedBox(height: 8),
-            Text(
-              widget.attachment.fileName,
-              style: TextStyle(
-                fontSize: ResponsiveHelper.adaptiveFontSize(
-                  context,
-                  widget.isCompact ? 11.0 : 13.0,
-                ),
-                fontWeight: FontWeight.w600,
-                color: theme.colorScheme.onSurface,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: 4),
-            Text(
-              attachmentService.formatFileSize(widget.attachment.fileSize),
-              style: TextStyle(
-                fontSize: ResponsiveHelper.adaptiveFontSize(
-                  context,
-                  widget.isCompact ? 9.0 : 11.0,
-                ),
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

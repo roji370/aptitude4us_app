@@ -142,26 +142,10 @@ class _AttachmentPickerState extends State<AttachmentPicker>
                     _buildAttachmentOption(
                       context,
                       theme,
-                      icon: Icons.camera_alt_outlined,
-                      label: 'Camera',
-                      color: Colors.purple,
-                      onTap: () => _handleCameraPhoto(context),
-                    ),
-                    _buildAttachmentOption(
-                      context,
-                      theme,
                       icon: Icons.photo_library_outlined,
                       label: 'Gallery',
                       color: Colors.green,
-                      onTap: () => _handleGalleryPhoto(context),
-                    ),
-                    _buildAttachmentOption(
-                      context,
-                      theme,
-                      icon: Icons.videocam_outlined,
-                      label: 'Video',
-                      color: Colors.red,
-                      onTap: () => _showVideoOptions(context),
+                      onTap: () => _handleGallery(context),
                     ),
                     _buildAttachmentOption(
                       context,
@@ -170,14 +154,6 @@ class _AttachmentPickerState extends State<AttachmentPicker>
                       label: 'Document',
                       color: Colors.blue,
                       onTap: () => _handleDocument(context),
-                    ),
-                    _buildAttachmentOption(
-                      context,
-                      theme,
-                      icon: Icons.audiotrack_outlined,
-                      label: 'Audio',
-                      color: Colors.orange,
-                      onTap: () => _handleAudio(context),
                     ),
                     _buildAttachmentOption(
                       context,
@@ -337,98 +313,79 @@ class _AttachmentPickerState extends State<AttachmentPicker>
     );
   }
 
-  void _showVideoOptions(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder:
-          (context) => Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(20),
+  Future<void> _handleGallery(BuildContext context) async {
+    if (!await _checkGalleryPermission()) return;
+
+    try {
+      // Show options for image or video from gallery
+      final result = await showModalBottomSheet<String>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder:
+            (context) => Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
+                ),
               ),
-            ),
-            child: SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ListTile(
-                    leading: Icon(Icons.videocam_outlined, color: Colors.red),
-                    title: Text('Record Video'),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _handleCameraVideo(context);
-                    },
-                  ),
-                  ListTile(
-                    leading: Icon(
-                      Icons.video_library_outlined,
-                      color: Colors.red,
+              child: SafeArea(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 20),
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
-                    title: Text('Choose from Gallery'),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _handleGalleryVideo(context);
-                    },
-                  ),
-                ],
+                    Text(
+                      'Select from Gallery',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                    SizedBox(height: 16),
+                    ListTile(
+                      leading: Icon(Icons.photo_outlined, color: Colors.blue),
+                      title: Text('Photo'),
+                      onTap: () => Navigator.pop(context, 'image'),
+                    ),
+                    ListTile(
+                      leading: Icon(
+                        Icons.video_library_outlined,
+                        color: Colors.red,
+                      ),
+                      title: Text('Video'),
+                      onTap: () => Navigator.pop(context, 'video'),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-    );
-  }
+      );
 
-  Future<void> _handleCameraPhoto(BuildContext context) async {
-    if (!await _checkCameraPermission()) return;
-
-    try {
-      final XFile? image = await _attachmentService.pickImageFromCamera();
-      if (image != null) {
-        await _uploadFile(image.path, image.name);
+      if (result == 'image') {
+        final XFile? image = await _attachmentService.pickImageFromGallery();
+        if (image != null) {
+          await _uploadFile(image.path, image.name);
+        }
+      } else if (result == 'video') {
+        final XFile? video = await _attachmentService.pickVideoFromGallery();
+        if (video != null) {
+          await _uploadFile(video.path, video.name);
+        }
       }
     } catch (e) {
-      widget.onError('Error taking photo: $e');
-    }
-  }
-
-  Future<void> _handleGalleryPhoto(BuildContext context) async {
-    if (!await _checkGalleryPermission()) return;
-
-    try {
-      final XFile? image = await _attachmentService.pickImageFromGallery();
-      if (image != null) {
-        await _uploadFile(image.path, image.name);
-      }
-    } catch (e) {
-      widget.onError('Error picking photo: $e');
-    }
-  }
-
-  Future<void> _handleCameraVideo(BuildContext context) async {
-    if (!await _checkCameraPermission()) return;
-
-    try {
-      final XFile? video = await _attachmentService.pickVideoFromCamera();
-      if (video != null) {
-        await _uploadFile(video.path, video.name);
-      }
-    } catch (e) {
-      widget.onError('Error recording video: $e');
-    }
-  }
-
-  Future<void> _handleGalleryVideo(BuildContext context) async {
-    if (!await _checkGalleryPermission()) return;
-
-    try {
-      final XFile? video = await _attachmentService.pickVideoFromGallery();
-      if (video != null) {
-        await _uploadFile(video.path, video.name);
-      }
-    } catch (e) {
-      widget.onError('Error picking video: $e');
+      widget.onError('Error accessing gallery: $e');
     }
   }
 
@@ -440,17 +397,6 @@ class _AttachmentPickerState extends State<AttachmentPicker>
       }
     } catch (e) {
       widget.onError('Error picking document: $e');
-    }
-  }
-
-  Future<void> _handleAudio(BuildContext context) async {
-    try {
-      final PlatformFile? file = await _attachmentService.pickAudio();
-      if (file != null && file.path != null) {
-        await _uploadFile(file.path!, file.name);
-      }
-    } catch (e) {
-      widget.onError('Error picking audio: $e');
     }
   }
 
@@ -514,15 +460,6 @@ class _AttachmentPickerState extends State<AttachmentPicker>
         });
       }
     }
-  }
-
-  Future<bool> _checkCameraPermission() async {
-    final PermissionStatus status = await Permission.camera.request();
-    if (status.isDenied || status.isPermanentlyDenied) {
-      widget.onError('Camera permission is required to take photos');
-      return false;
-    }
-    return true;
   }
 
   Future<bool> _checkGalleryPermission() async {
