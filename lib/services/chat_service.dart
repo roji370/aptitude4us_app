@@ -2,12 +2,44 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rxdart/rxdart.dart';
 import '../services/attachment_service.dart';
+import '../services/auth_service.dart';
+import '../services/auth_persistence_service.dart';
 import '../utils/logger.dart';
 
 class ChatService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final AuthService _authService = AuthService();
   final int _messagesPerPage = 20; // Number of messages to load per batch
+
+  // Get the actual user display name from UserModel
+  Future<String> _getUserDisplayName() async {
+    try {
+      // Try to get from cached user data first (faster)
+      final cachedUser = await AuthPersistenceService.getUserData();
+      if (cachedUser != null && cachedUser.displayName.isNotEmpty) {
+        return cachedUser.displayName;
+      }
+
+      // Fallback to getting fresh user data from Firestore
+      final userData = await _authService.getUserData();
+      if (userData != null && userData.displayName.isNotEmpty) {
+        return userData.displayName;
+      }
+
+      // Final fallback to Firebase Auth displayName
+      final user = _auth.currentUser;
+      if (user?.displayName != null && user!.displayName!.isNotEmpty) {
+        return user.displayName!;
+      }
+
+      // Last resort fallback
+      return 'Student';
+    } catch (e) {
+      Logger.e('Error getting user display name: $e');
+      return 'Student';
+    }
+  }
 
   // Get messages with pagination
   Future<List<Map<String, dynamic>>> getMessagesPaginated({
@@ -176,11 +208,14 @@ class ChatService {
     }
 
     try {
+      // Get the actual user display name
+      final senderName = await _getUserDisplayName();
+
       // Create message document
       final messageData = {
         'text': text,
         'senderId': user.uid,
-        'senderName': user.displayName ?? 'Student',
+        'senderName': senderName,
         'receiverId': 'ADMIN', // Send to admin
         'timestamp': FieldValue.serverTimestamp(),
         'status': 'sent',
@@ -208,6 +243,9 @@ class ChatService {
     }
 
     try {
+      // Get the actual user display name
+      final senderName = await _getUserDisplayName();
+
       final messageType =
           attachment.type == AttachmentType.image
               ? 'image'
@@ -221,7 +259,7 @@ class ChatService {
       final messageData = {
         'text': text ?? '',
         'senderId': user.uid,
-        'senderName': user.displayName ?? 'Student',
+        'senderName': senderName,
         'receiverId': 'ADMIN', // Send to admin
         'timestamp': FieldValue.serverTimestamp(),
         'status': 'sent',

@@ -4,10 +4,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/community_chat_message.dart';
 import '../services/community_chat_service.dart';
 import '../services/attachment_service.dart';
+import '../services/auth_service.dart';
+import '../services/auth_persistence_service.dart';
 import '../widgets/community_chat_message_bubble.dart';
 import '../widgets/attachment_picker.dart';
 import '../widgets/protected_course_content.dart';
 import '../utils/responsive_helper.dart';
+import '../utils/logger.dart';
 
 class CommunityChatScreen extends StatefulWidget {
   const CommunityChatScreen({super.key});
@@ -19,10 +22,40 @@ class CommunityChatScreen extends StatefulWidget {
 class _CommunityChatScreenState extends State<CommunityChatScreen>
     with TickerProviderStateMixin {
   final CommunityChatService _chatService = CommunityChatService();
+  final AuthService _authService = AuthService();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
   final FocusNode _inputFocusNode = FocusNode();
+
+  // Get the actual user display name from UserModel
+  Future<String> _getUserDisplayName() async {
+    try {
+      // Try to get from cached user data first (faster)
+      final cachedUser = await AuthPersistenceService.getUserData();
+      if (cachedUser != null && cachedUser.displayName.isNotEmpty) {
+        return cachedUser.displayName;
+      }
+
+      // Fallback to getting fresh user data from Firestore
+      final userData = await _authService.getUserData();
+      if (userData != null && userData.displayName.isNotEmpty) {
+        return userData.displayName;
+      }
+
+      // Final fallback to Firebase Auth displayName
+      final user = FirebaseAuth.instance.currentUser;
+      if (user?.displayName != null && user!.displayName!.isNotEmpty) {
+        return user.displayName!;
+      }
+
+      // Last resort fallback
+      return 'Student';
+    } catch (e) {
+      Logger.e('Error getting user display name: $e');
+      return 'Student';
+    }
+  }
 
   bool _isSending = false;
 
@@ -104,9 +137,12 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     setState(() => _isSending = true);
 
     try {
+      // Get the actual user display name
+      final senderName = await _getUserDisplayName();
+
       await _chatService.sendMessage(
         senderId: user.uid,
-        senderName: user.displayName ?? 'Anonymous',
+        senderName: senderName,
         text: messageText,
       );
 
@@ -664,9 +700,12 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     setState(() => _isSending = true);
 
     try {
+      // Get the actual user display name
+      final senderName = await _getUserDisplayName();
+
       await _chatService.sendMessageWithAttachment(
         senderId: user.uid,
-        senderName: user.displayName ?? 'Anonymous',
+        senderName: senderName,
         attachment: attachment,
         text:
             _messageController.text.trim().isEmpty
