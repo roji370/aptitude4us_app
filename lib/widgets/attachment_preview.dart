@@ -4,8 +4,12 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:video_player/video_player.dart';
 import 'package:open_file/open_file.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 import '../services/attachment_service.dart';
 import '../utils/responsive_helper.dart';
+import '../utils/logger.dart';
 
 class AttachmentPreview extends StatefulWidget {
   final AttachmentData attachment;
@@ -501,6 +505,8 @@ class _AttachmentPreviewState extends State<AttachmentPreview> {
   void _handleFileDownload(BuildContext context) async {
     if (_isDownloading) return;
 
+    Logger.i('📥 Starting file download: ${widget.attachment.fileName}');
+
     setState(() {
       _isDownloading = true;
       _downloadProgress = 0.0;
@@ -513,34 +519,88 @@ class _AttachmentPreviewState extends State<AttachmentPreview> {
       );
 
       if (localPath != null && mounted) {
+        Logger.i('✅ File downloaded successfully: $localPath');
         HapticFeedback.selectionClick();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('File downloaded successfully'),
-            action: SnackBarAction(
-              label: 'Open',
-              onPressed: () => OpenFile.open(localPath),
+
+        // Try to open the file with multiple fallback options
+        final bool opened = await _openFileWithFallbacks(localPath, context);
+
+        if (opened) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'File downloaded and opened: ${widget.attachment.fileName}',
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
             ),
-          ),
-        );
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.download_done, color: Colors.white, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('File downloaded successfully')),
+                ],
+              ),
+              backgroundColor: Colors.blue,
+              duration: Duration(seconds: 3),
+              action: SnackBarAction(
+                label: 'Open',
+                textColor: Colors.white,
+                onPressed: () => _openFileWithFallbacks(localPath, context),
+              ),
+            ),
+          );
+        }
 
         if (widget.onDownload != null) {
           widget.onDownload!();
         }
       } else if (mounted) {
+        Logger.e('❌ Failed to download file: ${widget.attachment.fileName}');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to download file'),
+            content: Row(
+              children: [
+                Icon(Icons.error, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Text('Failed to download file'),
+              ],
+            ),
             backgroundColor: Theme.of(context).colorScheme.error,
+            duration: Duration(seconds: 4),
           ),
         );
       }
     } catch (e) {
+      Logger.e('❌ Error downloading file: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error downloading file: $e'),
+            content: Row(
+              children: [
+                Icon(Icons.error, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Error downloading file: ${e.toString().length > 50 ? e.toString().substring(0, 50) + "..." : e.toString()}',
+                  ),
+                ),
+              ],
+            ),
             backgroundColor: Theme.of(context).colorScheme.error,
+            duration: Duration(seconds: 4),
           ),
         );
       }
@@ -551,6 +611,101 @@ class _AttachmentPreviewState extends State<AttachmentPreview> {
           _downloadProgress = 0.0;
         });
       }
+    }
+  }
+
+  /// Attempts to open file with multiple fallback methods
+  Future<bool> _openFileWithFallbacks(
+    String filePath,
+    BuildContext context,
+  ) async {
+    Logger.i('🔄 Attempting to open file: $filePath');
+
+    // Method 1: Try opening with default app
+    try {
+      final result = await OpenFile.open(filePath);
+      Logger.d('OpenFile result: ${result.message}');
+
+      if (result.type == ResultType.done) {
+        Logger.i('✅ File opened successfully with default app');
+        return true;
+      }
+    } catch (e) {
+      Logger.w('⚠️ OpenFile failed: $e');
+    }
+
+    // Method 2: Try opening with system file manager/browser (for documents)
+    if (widget.attachment.type == AttachmentType.document) {
+      try {
+        final file = File(filePath);
+        if (await file.exists()) {
+          final uri = Uri.file(filePath);
+          if (await canLaunchUrl(uri)) {
+            final launched = await launchUrl(uri);
+            if (launched) {
+              Logger.i('✅ File opened with system browser/viewer');
+              return true;
+            }
+          }
+        }
+      } catch (e) {
+        Logger.w('⚠️ System launcher failed: $e');
+      }
+    }
+
+    // Method 3: For images, try copying to public directory and opening
+    if (widget.attachment.type == AttachmentType.image && Platform.isAndroid) {
+      try {
+        await _copyToPublicDirectory(filePath);
+        Logger.i('✅ Image copied to public directory');
+        return true;
+      } catch (e) {
+        Logger.w('⚠️ Public directory copy failed: $e');
+      }
+    }
+
+    // Method 4: Open external URL as fallback
+    try {
+      final url = Uri.parse(widget.attachment.fileUrl);
+      if (await canLaunchUrl(url)) {
+        final launched = await launchUrl(
+          url,
+          mode: LaunchMode.externalApplication,
+        );
+        if (launched) {
+          Logger.i('✅ File opened via external URL');
+          return true;
+        }
+      }
+    } catch (e) {
+      Logger.w('⚠️ External URL launch failed: $e');
+    }
+
+    Logger.w('❌ All file opening methods failed');
+    return false;
+  }
+
+  /// Copy file to public directory for Android sharing
+  Future<void> _copyToPublicDirectory(String filePath) async {
+    if (!Platform.isAndroid) return;
+
+    try {
+      final file = File(filePath);
+      final directory = await getExternalStorageDirectory();
+      if (directory != null) {
+        final publicDir = Directory(
+          '${directory.path}/Pictures/BriffiniAcademy',
+        );
+        await publicDir.create(recursive: true);
+
+        final newPath = '${publicDir.path}/${widget.attachment.fileName}';
+        await file.copy(newPath);
+
+        Logger.i('📁 File copied to public directory: $newPath');
+      }
+    } catch (e) {
+      Logger.e('❌ Error copying to public directory: $e');
+      rethrow;
     }
   }
 }
