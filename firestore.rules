@@ -95,6 +95,15 @@ service cloud.firestore {
       allow delete: if false;
     }
     
+    // Past Questions rules
+    match /pastQuestions/{messageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+        (isAdmin() || resource.data.senderId == request.auth.uid);
+      allow delete: if false;
+    }
+    
     // CRITICAL: Subscriptions collection rules (REQUIRED for subscription validation)
     match /subscriptions/{subscriptionId} {
       // Users can read their own subscriptions

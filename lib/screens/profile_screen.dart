@@ -9,6 +9,7 @@ import 'login_screen.dart';
 import 'assigned_courses_screen.dart';
 import 'chat_screen.dart';
 import 'community_chat_screen.dart';
+import 'past_questions_screen.dart';
 import 'dart:async';
 import 'terms_conditions_screen.dart';
 
@@ -352,6 +353,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               context,
                               MaterialPageRoute(
                                 builder: (_) => const CommunityChatScreen(),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+
+                    SizedBox(height: screenSize.height * 0.02),
+
+                    // Past Questions Card
+                    Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: screenSize.width * 0.05,
+                      ),
+                      child: Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: BorderSide(
+                            color: const Color(0xFFC9C8D8),
+                            width: 1,
+                          ),
+                        ),
+                        child: ListTile(
+                          leading: Container(
+                            padding: EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF323483).withAlpha(26),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.quiz_outlined,
+                              color: const Color(0xFF323483),
+                              size: screenSize.width * 0.06,
+                            ),
+                          ),
+                          title: Text(
+                            'Past Questions',
+                            style: GoogleFonts.inter(
+                              fontSize: screenSize.width * 0.045,
+                              fontWeight: FontWeight.w500,
+                              color: const Color(0xFF323483),
+                            ),
+                          ),
+                          trailing: Icon(
+                            Icons.arrow_forward_ios,
+                            color: const Color(0xFF323483),
+                            size: screenSize.width * 0.05,
+                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const PastQuestionsScreen(),
                               ),
                             );
                           },
