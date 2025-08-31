@@ -10,6 +10,7 @@ class SimpleVideoPlayer extends StatefulWidget {
   final bool autoPlay;
   final String? userName;
   final bool showWatermark;
+  final VideoPlayerController? existingController;
 
   const SimpleVideoPlayer({
     super.key,
@@ -18,6 +19,7 @@ class SimpleVideoPlayer extends StatefulWidget {
     this.autoPlay = false,
     this.userName,
     this.showWatermark = true,
+    this.existingController,
   });
 
   @override
@@ -32,13 +34,42 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
   @override
   void initState() {
     super.initState();
-    _initializePlayer();
+    if (widget.existingController != null) {
+      _useExistingController();
+    } else {
+      _initializePlayer();
+    }
   }
 
   @override
   void dispose() {
-    _controller?.dispose();
+    // Only dispose if we created the controller, not if it was provided
+    if (widget.existingController == null) {
+      _controller?.dispose();
+    }
     super.dispose();
+  }
+
+  void _useExistingController() {
+    _controller = widget.existingController!;
+    setState(() {
+      _isInitialized = _controller!.value.isInitialized;
+    });
+
+    if (widget.autoPlay && !_controller!.value.isPlaying) {
+      _controller!.play();
+    }
+
+    // Auto-hide controls after 3 seconds
+    _showControlsTemporarily();
+
+    Logger.i(
+      '✅ SimpleVideoPlayer: Using existing controller for ${widget.videoUrl}',
+    );
+    Logger.d(
+      'DEBUG: Existing controller initialized: ${_controller!.value.isInitialized}',
+    );
+    Logger.d('DEBUG: Video duration: ${_controller!.value.duration}');
   }
 
   Future<void> _initializePlayer() async {
@@ -97,37 +128,29 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
   void _toggleFullscreen() {
     if (_controller == null || !_controller!.value.isInitialized) return;
 
-    // Navigate to fullscreen player with current state
-    final currentPosition = _controller!.value.position;
+    // Pause the current player before fullscreen
     final wasPlaying = _controller!.value.isPlaying;
+    if (wasPlaying) {
+      _controller!.pause();
+    }
 
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) {
           return _FullscreenVideoPlayer(
-            videoUrl: widget.videoUrl,
+            sharedController: _controller!,
             title: widget.title,
-            initialPosition: currentPosition,
             wasPlaying: wasPlaying,
             userName: widget.userName,
             showWatermark: widget.showWatermark,
-            onExit: (exitPosition, wasPlayingOnExit) {
-              // Restore the main player's state after navigation is complete
+            onExit: (wasPlayingOnExit) {
+              // Resume playback if it was playing before
               Future.microtask(() {
                 if (mounted &&
                     _controller != null &&
-                    _controller!.value.isInitialized) {
-                  try {
-                    _controller!.seekTo(exitPosition);
-                    if (!wasPlayingOnExit) {
-                      _controller!.pause();
-                    }
-                    Logger.i(
-                      'Video player state restored: position=${exitPosition.inSeconds}s, playing=$wasPlayingOnExit',
-                    );
-                  } catch (e) {
-                    Logger.e('Error restoring video state: $e');
-                  }
+                    _controller!.value.isInitialized &&
+                    wasPlayingOnExit) {
+                  _controller!.play();
                 }
               });
             },
@@ -259,18 +282,16 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
 
 // Fullscreen video player widget
 class _FullscreenVideoPlayer extends StatefulWidget {
-  final String videoUrl;
+  final VideoPlayerController sharedController;
   final String? title;
-  final Duration initialPosition;
   final bool wasPlaying;
   final String? userName;
   final bool showWatermark;
-  final Function(Duration position, bool wasPlaying) onExit;
+  final Function(bool wasPlaying) onExit;
 
   const _FullscreenVideoPlayer({
-    required this.videoUrl,
+    required this.sharedController,
     this.title,
-    required this.initialPosition,
     required this.wasPlaying,
     this.userName,
     this.showWatermark = true,
@@ -282,20 +303,21 @@ class _FullscreenVideoPlayer extends StatefulWidget {
 }
 
 class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
-  VideoPlayerController? _controller;
-  bool _isInitialized = false;
+  late VideoPlayerController _controller;
   bool _showControls = true;
 
   @override
   void initState() {
     super.initState();
-    _initializePlayer();
+    _controller = widget.sharedController;
     _setFullscreenMode();
+    _resumePlaybackIfNeeded();
   }
 
   @override
   void dispose() {
-    _controller?.dispose();
+    // Don't dispose the shared controller, just restore system UI
+    _exitFullscreenMode();
     super.dispose();
   }
 
@@ -319,35 +341,14 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
     ]);
   }
 
-  Future<void> _initializePlayer() async {
-    try {
-      Logger.i('Initializing fullscreen video player');
-
-      _controller = VideoPlayerController.networkUrl(
-        Uri.parse(widget.videoUrl),
-      );
-
-      await _controller!.initialize();
-
-      if (mounted) {
-        // Seek to the position from the main player
-        await _controller!.seekTo(widget.initialPosition);
-
-        setState(() {
-          _isInitialized = true;
-        });
-
-        // Continue playing if it was playing before
-        if (widget.wasPlaying) {
-          await _controller!.play();
-        }
-
-        // Show controls temporarily
-        _showControlsTemporarily();
-      }
-    } catch (e) {
-      Logger.e('Error initializing fullscreen video: $e');
+  void _resumePlaybackIfNeeded() {
+    // Resume playing if it was playing before entering fullscreen
+    if (widget.wasPlaying && _controller.value.isInitialized) {
+      _controller.play();
     }
+
+    // Show controls temporarily
+    _showControlsTemporarily();
   }
 
   void _showControlsTemporarily() {
@@ -356,7 +357,7 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
     });
 
     Future.delayed(const Duration(seconds: 3), () {
-      if (mounted && _controller != null && _controller!.value.isPlaying) {
+      if (mounted && _controller.value.isPlaying) {
         setState(() {
           _showControls = false;
         });
@@ -365,56 +366,48 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
   }
 
   void _togglePlayPause() {
-    if (_controller == null || !_controller!.value.isInitialized) return;
+    if (!_controller.value.isInitialized) return;
 
     setState(() {
-      if (_controller!.value.isPlaying) {
-        _controller!.pause();
+      if (_controller.value.isPlaying) {
+        _controller.pause();
       } else {
-        _controller!.play();
+        _controller.play();
       }
     });
   }
 
   void _exitFullscreen() {
     // Capture state before any navigation changes
-    final currentPosition = _controller?.value.position ?? Duration.zero;
-    final isPlaying = _controller?.value.isPlaying ?? false;
-
-    // First, restore system UI and orientations
-    _exitFullscreenMode();
+    final isPlaying = _controller.value.isPlaying;
 
     // Navigate back
     Navigator.of(context).pop();
 
     // Delay the callback to avoid rebuilds during navigation
     Future.delayed(const Duration(milliseconds: 100), () {
-      widget.onExit(currentPosition, isPlaying);
+      widget.onExit(isPlaying);
     });
   }
 
   void _handleBackPressed() {
     // Called when hardware back button is pressed (after navigation already happened)
-    final currentPosition = _controller?.value.position ?? Duration.zero;
-    final isPlaying = _controller?.value.isPlaying ?? false;
-
-    // Restore system UI
-    _exitFullscreenMode();
+    final isPlaying = _controller.value.isPlaying;
 
     // Delay the callback to avoid rebuilds
     Future.delayed(const Duration(milliseconds: 100), () {
-      widget.onExit(currentPosition, isPlaying);
+      widget.onExit(isPlaying);
     });
   }
 
   Widget _buildFullscreenControls() {
-    if (!_showControls || !_isInitialized) {
+    if (!_showControls || !_controller.value.isInitialized) {
       return const SizedBox.shrink();
     }
 
-    final position = _controller!.value.position;
-    final duration = _controller!.value.duration;
-    final isPlaying = _controller!.value.isPlaying;
+    final position = _controller.value.position;
+    final duration = _controller.value.duration;
+    final isPlaying = _controller.value.isPlaying;
 
     return Container(
       decoration: BoxDecoration(
@@ -469,7 +462,7 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: VideoProgressIndicator(
-                  _controller!,
+                  _controller,
                   allowScrubbing: true,
                   colors: const VideoProgressColors(
                     playedColor: Colors.red,
@@ -531,7 +524,7 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
       child: Scaffold(
         backgroundColor: Colors.black,
         body:
-            _isInitialized
+            _controller.value.isInitialized
                 ? GestureDetector(
                   onTap: _showControlsTemporarily,
                   onDoubleTap: _exitFullscreen,
@@ -541,8 +534,8 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
                       // Video player
                       Center(
                         child: AspectRatio(
-                          aspectRatio: _controller!.value.aspectRatio,
-                          child: VideoPlayer(_controller!),
+                          aspectRatio: _controller.value.aspectRatio,
+                          child: VideoPlayer(_controller),
                         ),
                       ),
 

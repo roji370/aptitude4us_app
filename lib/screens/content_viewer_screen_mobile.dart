@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:video_player/video_player.dart';
 import '../widgets/simple_video_player.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +12,7 @@ import '../utils/responsive_helper.dart';
 import '../utils/accessibility_helper.dart';
 import '../widgets/adaptive_container.dart';
 import '../utils/logger.dart';
+import '../utils/content_state_manager.dart';
 
 import '../models/content_model.dart';
 import '../models/course_model.dart';
@@ -289,14 +291,10 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
   int _selectedIndex = 0; // For bottom navigation
   String _userName = ""; // Store user name
 
-  // Video player state
-  String? _currentVideoUrl;
-  String? _currentVideoTitle;
-  bool _isInitializingVideo =
-      false; // Prevent multiple simultaneous initializations
+  // Content state manager for persistent content loading (singleton instance)
+  final ContentStateManager _contentStateManager = ContentStateManager();
 
-  // PDF state variables
-  bool _isPdfLoading = false;
+  // PDF state variables (legacy - gradually being replaced by content state manager)
   String? _pdfPath;
   String? _pdfError;
   bool _isScreenProtectionEnabled = false;
@@ -304,6 +302,13 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
   @override
   void initState() {
     super.initState();
+
+    Logger.i(
+      "🏁 ContentViewerScreen initState for module: ${widget.module.id}",
+    );
+
+    // Initialize content state manager for this module
+    _contentStateManager.initForModule(widget.module.id);
 
     // Platform-specific safe area handling
     _configureForDevice();
@@ -351,7 +356,11 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
 
   @override
   void dispose() {
-    _disposeVideoControllers();
+    Logger.i("🛑 ContentViewerScreen dispose for module: ${widget.module.id}");
+
+    // Clean up old content states (older than 30 minutes) but keep current ones
+    _contentStateManager.clearOldContentStates();
+
     _removeScreenshotProtection();
 
     // iOS-optimized orientation reset with smooth transition
@@ -419,13 +428,6 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
     } else if (_isScreenProtectionEnabled) {
       _removeScreenshotProtection();
     }
-  }
-
-  void _disposeVideoControllers() {
-    // Simple Video Player handles its own disposal internally
-    // Just clear the URL references
-    _currentVideoUrl = null;
-    _currentVideoTitle = null;
   }
 
   Future<void> _loadContent() async {
@@ -510,44 +512,47 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
     }
   }
 
-  Future<void> _initializeVideoPlayer(String videoUrl) async {
+  Future<void> _initializeVideoController(ContentModel content) async {
     // Check if widget is still mounted
-    if (!mounted || _isInitializingVideo) return;
+    if (!mounted) return;
 
-    // Skip if URL is already the same
-    if (_currentVideoUrl == videoUrl) {
-      Logger.i("Video URL already set - skipping reinitialization");
+    // Check if already loading
+    if (_contentStateManager.isContentLoading(content, 'video')) {
       return;
     }
 
-    _isInitializingVideo = true;
+    _contentStateManager.setContentLoading(content, 'video', true);
 
     try {
-      Logger.i("Setting up video player for: $videoUrl");
+      Logger.i("Initializing video controller for: ${content.title}");
 
       // Basic URL validation
-      if (!videoUrl.startsWith('http')) {
+      if (!content.content.startsWith('http')) {
         throw Exception("Invalid video URL format");
       }
 
-      // Store video URL and title
-      _currentVideoUrl = videoUrl;
-      _currentVideoTitle = 'Video Content';
+      // Create and initialize the video controller
+      final controller = VideoPlayerController.networkUrl(
+        Uri.parse(content.content),
+      );
 
-      // Rebuild the UI
-      if (mounted) setState(() {});
+      await controller.initialize();
 
-      Logger.i("Video player setup completed");
-    } catch (e) {
-      Logger.e('Error setting up video player: $e');
+      // Store the controller in the content state manager
+      _contentStateManager.setVideoController(content, controller);
 
-      // Clear state on error
-      _currentVideoUrl = null;
-      _currentVideoTitle = null;
-
+      // Rebuild the UI to show the video player
       if (mounted) {
         setState(() {});
+      }
 
+      Logger.i(
+        "Video controller initialization completed for: ${content.title}",
+      );
+    } catch (e) {
+      Logger.e('Error initializing video controller: $e');
+
+      if (mounted) {
         // Show error message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -556,22 +561,58 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
             duration: const Duration(seconds: 3),
           ),
         );
+
+        // Rebuild to show error state
+        setState(() {});
       }
     } finally {
-      _isInitializingVideo = false;
+      _contentStateManager.setContentLoading(content, 'video', false);
+    }
+  }
+
+  // Load PDF using content state manager for persistence
+  Future<void> _loadPdfWithStateManager(ContentModel content) async {
+    // Check if already loading
+    if (_contentStateManager.isContentLoading(content, 'pdf')) {
+      return;
+    }
+
+    _contentStateManager.setContentLoading(content, 'pdf', true);
+
+    try {
+      Logger.i("Loading PDF for: ${content.title}");
+
+      // Use the existing PDF loading logic but store result in content state manager
+      final pdfPath = await _downloadAndSavePdf(content.content);
+
+      if (pdfPath != null) {
+        _contentStateManager.setPdfPath(content, pdfPath);
+        Logger.i("PDF loaded and cached for: ${content.title}");
+
+        // Update UI
+        if (mounted) {
+          setState(() {});
+        }
+      }
+    } catch (e) {
+      Logger.e('Error loading PDF: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not load PDF: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      _contentStateManager.setContentLoading(content, 'pdf', false);
     }
   }
 
   // Native platforms method to download PDF and save it locally with enhanced security
-  Future<void> _loadPdf(String pdfUrl) async {
-    if (_pdfPath != null) return; // Already loaded
-
-    setState(() {
-      _isPdfLoading = true;
-      _pdfPath = null;
-      _pdfError = null;
-    });
-
+  Future<String?> _downloadAndSavePdf(String pdfUrl) async {
     try {
       Logger.i("Content Viewer: Loading PDF from URL: $pdfUrl");
 
@@ -650,39 +691,23 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
 
       Logger.i("PDFLoader succeeded: $filePath");
 
-      // Update state with the file path
-      setState(() {
-        _pdfPath = filePath;
-        _isPdfLoading = false;
-      });
+      // Return the file path for content state manager
+      return filePath;
     } catch (e) {
       Logger.e('Error loading PDF: $e');
       Logger.e('Stack trace: ${StackTrace.current}');
-
-      if (mounted) {
-        setState(() {
-          _isPdfLoading = false;
-          _pdfError = e.toString();
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading PDF: ${e.toString()}'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'Retry',
-              onPressed: () => _loadPdf(pdfUrl),
-              textColor: Colors.white,
-            ),
-          ),
-        );
-      }
+      // Don't set state here - let the calling method handle the error
+      rethrow;
     }
   }
 
   // Update the _buildContentView method to handle PDF viewing with watermark
   Widget _buildContentView(ContentModel content) {
+    Logger.d(
+      "DEBUG: _buildContentView called for ${content.title} (${content.contentType})",
+    );
+    Logger.d("DEBUG: Content ID: ${content.id}");
+
     // Ensure iOS screen protection is toggled appropriately by content type
     _maybeUpdateProtectionForContentType(content.contentType);
     switch (content.contentType) {
@@ -696,40 +721,43 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
           );
         }
 
-        // Initialize video player if needed - avoid unnecessary reinitialization
-        if (_currentVideoUrl != content.content) {
-          // Only initialize if URL is genuinely different and not already initializing
-          if (!_isInitializingVideo) {
-            Logger.i(
-              "Video URL changed from $_currentVideoUrl to ${content.content}",
-            );
-            // Schedule initialization after the current frame
-            Future.microtask(() => _initializeVideoPlayer(content.content));
-          }
+        // Check if video controller already exists in content state manager
+        final existingController = _contentStateManager.getVideoController(
+          content,
+        );
 
-          // ONLY show loading if we don't have any video URL yet
-          if (_currentVideoUrl == null) {
-            return const Center(child: CircularProgressIndicator());
-          }
-        }
+        Logger.d("DEBUG: Checking video controller for ${content.title}");
+        Logger.d("DEBUG: Existing controller: ${existingController != null}");
+        Logger.d(
+          "DEBUG: Is initialized: ${existingController?.value.isInitialized}",
+        );
 
-        // Show video player if URL is ready
-        if (_currentVideoUrl != null) {
+        if (existingController != null &&
+            existingController.value.isInitialized) {
+          // Use existing controller - no reloading needed!
+          Logger.i("✅ Using existing video controller for: ${content.title}");
           return Container(
             width: double.infinity,
             height: double.infinity,
             color: Colors.black,
             child: Center(
               child: SimpleVideoPlayer(
-                key: ValueKey(_currentVideoUrl),
-                videoUrl: _currentVideoUrl!,
-                title: _currentVideoTitle ?? 'Video Content',
+                key: ValueKey("video_${content.id}_persistent"),
+                videoUrl: content.content,
+                title: content.title,
                 autoPlay: false,
                 userName: _userName,
                 showWatermark: true,
+                existingController: existingController,
               ),
             ),
           );
+        }
+
+        // Initialize new video controller if needed
+        if (!_contentStateManager.isContentLoading(content, 'video')) {
+          Logger.i("Initializing new video controller for: ${content.title}");
+          Future.microtask(() => _initializeVideoController(content));
         }
 
         // Show loading while initializing
@@ -745,13 +773,21 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
           );
         }
 
-        // Load PDF if not already loaded
-        if (_pdfPath == null && !_isPdfLoading) {
-          Future.microtask(() => _loadPdf(content.content));
+        // Check if PDF already loaded in content state manager
+        final existingPdfPath = _contentStateManager.getPdfPath(content);
+
+        if (existingPdfPath != null) {
+          Logger.i("Using existing PDF path for: ${content.title}");
+        } else {
+          // Load PDF if not already loaded and not currently loading
+          if (!_contentStateManager.isContentLoading(content, 'pdf')) {
+            Future.microtask(() => _loadPdfWithStateManager(content));
+          }
         }
 
         // Show PDF viewer when PDF is loaded
-        if (_pdfPath != null) {
+        final pdfPath = existingPdfPath ?? _pdfPath;
+        if (pdfPath != null) {
           // Wrap in a Stack to have a floating fullscreen button
           return Stack(
             children: [
@@ -760,10 +796,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
                 width: double.infinity,
                 height: double.infinity,
                 color: Colors.white,
-                child: CustomPDFViewer(
-                  filePath: _pdfPath!,
-                  userName: _userName,
-                ),
+                child: CustomPDFViewer(filePath: pdfPath, userName: _userName),
               ),
 
               // Floating fullscreen button
@@ -781,7 +814,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
                       MaterialPageRoute(
                         builder:
                             (context) => FullScreenPdfViewer(
-                              filePath: _pdfPath!,
+                              filePath: pdfPath,
                               userName: _userName,
                             ),
                       ),
@@ -865,7 +898,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
                       setState(() {
                         _pdfError = null;
                       });
-                      _loadPdf(content.content);
+                      _loadPdfWithStateManager(content);
                     },
                   ),
                   const SizedBox(width: 16),
@@ -1198,10 +1231,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
                                 ? () {
                                   setState(() {
                                     _currentContentIndex--;
-                                    // Reset controllers when changing content
-                                    _disposeVideoControllers();
-                                    _pdfPath = null;
-                                    _isPdfLoading = false;
+                                    // Note: Content state manager handles persistence across navigation
                                   });
                                 }
                                 : null,
@@ -1232,10 +1262,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
                                 ? () {
                                   setState(() {
                                     _currentContentIndex++;
-                                    // Reset controllers when changing content
-                                    _disposeVideoControllers();
-                                    _pdfPath = null;
-                                    _isPdfLoading = false;
+                                    // Note: Content state manager handles persistence across navigation
                                   });
                                 }
                                 : null,
@@ -1388,10 +1415,8 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
                             onTap: () {
                               setState(() {
                                 _currentContentIndex = i;
-                                // Reset controllers when changing content
-                                _disposeVideoControllers();
-                                _pdfPath = null;
-                                _isPdfLoading = false;
+                                // Note: No longer disposing video controllers or resetting PDF state
+                                // Content state manager handles persistence across navigation
                               });
                             },
                             leading: Icon(
