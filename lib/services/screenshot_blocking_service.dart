@@ -163,34 +163,43 @@ class ScreenshotBlockingService extends ChangeNotifier {
     }
   }
 
-  /// Set up iOS native screenshot detection
+  /// Set up native screenshot detection (iOS and Android)
   Future<void> _setupScreenshotDetection() async {
     if (_isMonitoring) return;
 
     try {
-      Logger.i('📱 Setting up iOS screenshot detection');
+      final platform = ResponsiveHelper.isIOS() ? 'iOS' : 'Android';
+      Logger.i('📱 Setting up $platform screenshot/recording detection');
 
-      // Set up method call handler for screenshot notifications from iOS
+      // Set up method call handler for notifications from native code
       _channel.setMethodCallHandler(_handleMethodCall);
 
-      // Enable screenshot monitoring on iOS side
+      // Enable screenshot monitoring on native side
       await _channel.invokeMethod('enableScreenshotMonitoring');
       _isMonitoring = true;
 
-      Logger.i('📱 Screenshot detection enabled successfully');
+      Logger.i('📱 Screenshot/recording detection enabled successfully on $platform');
     } catch (error) {
-      Logger.e('❌ Error setting up screenshot detection: $error');
+      Logger.e('❌ Error setting up screenshot/recording detection: $error');
     }
   }
 
-  /// Handle method calls from iOS native code
+  /// Handle method calls from native code (iOS/Android)
   Future<void> _handleMethodCall(MethodCall call) async {
+    final platform = ResponsiveHelper.isIOS() ? 'iOS' : 'Android';
+    Logger.i('📱 Received method call from $platform: ${call.method}');
+    
     switch (call.method) {
       case 'onScreenshotDetected':
+        Logger.w('📱 Screenshot detected from $platform');
         await _handleScreenshotDetected();
         break;
+      case 'onScreenRecordingStateChanged':
+        Logger.w('📱 Screen recording state change from $platform');
+        await _handleScreenRecordingStateChanged(call.arguments);
+        break;
       default:
-        Logger.w('📱 Unknown method call from iOS: ${call.method}');
+        Logger.w('📱 Unknown method call from $platform: ${call.method}');
     }
   }
 
@@ -272,26 +281,70 @@ class ScreenshotBlockingService extends ChangeNotifier {
 
   /// Start monitoring screenshots (call when entering protected content)
   Future<void> startMonitoring() async {
-    if (!ResponsiveHelper.isIOS()) return;
+    if (!ResponsiveHelper.isIOS() && !ResponsiveHelper.isAndroid()) return;
 
     if (!_isMonitoring) {
       await _setupScreenshotDetection();
     }
 
-    Logger.i('📱 Started screenshot monitoring');
+    final platform = ResponsiveHelper.isIOS() ? 'iOS' : 'Android';
+    Logger.i('📱 Started screenshot/recording monitoring on $platform');
   }
 
   /// Stop monitoring screenshots (call when leaving protected content)
   Future<void> stopMonitoring() async {
-    if (!ResponsiveHelper.isIOS() || !_isMonitoring) return;
+    if ((!ResponsiveHelper.isIOS() && !ResponsiveHelper.isAndroid()) || !_isMonitoring) return;
 
     try {
       await _channel.invokeMethod('disableScreenshotMonitoring');
       _isMonitoring = false;
-      Logger.i('📱 Stopped screenshot monitoring');
+      final platform = ResponsiveHelper.isIOS() ? 'iOS' : 'Android';
+      Logger.i('📱 Stopped screenshot/recording monitoring on $platform');
     } catch (error) {
       Logger.e('❌ Error stopping screenshot monitoring: $error');
     }
+  }
+
+  /// Handle screen recording state change
+  Future<void> _handleScreenRecordingStateChanged(Map<dynamic, dynamic>? arguments) async {
+    Logger.i('📱 Received screen recording state change notification');
+    
+    if (arguments == null) {
+      Logger.w('📱 No arguments provided for screen recording state change');
+      return;
+    }
+    
+    final isRecording = arguments['isRecording'] as bool? ?? false;
+    Logger.w('📱 Screen recording state changed: ${isRecording ? "Started" : "Stopped"}');
+    
+    if (isRecording && !_hasShownRecordingWarning) {
+      Logger.w('📱 Screen recording detected - showing warning (first time this session)');
+      await _showScreenRecordingWarning();
+    } else if (isRecording && _hasShownRecordingWarning) {
+      Logger.i('📱 Screen recording detected but warning already shown this session');
+    } else if (!isRecording) {
+      Logger.i('📱 Screen recording stopped - resetting warning flag');
+      _hasShownRecordingWarning = false;
+    }
+  }
+
+  /// Show screen recording warning dialog
+  Future<void> _showScreenRecordingWarning() async {
+    Logger.w('📱 Showing screen recording warning');
+    _shouldShowRecordingWarning = true;
+    notifyListeners();
+  }
+
+  /// Check if screen recording warning should be shown
+  bool get shouldShowScreenRecordingWarning => _shouldShowRecordingWarning;
+  bool _shouldShowRecordingWarning = false;
+  bool _hasShownRecordingWarning = false;
+
+  /// Mark screen recording warning as shown
+  void markScreenRecordingWarningShown() {
+    _shouldShowRecordingWarning = false;
+    _hasShownRecordingWarning = true;
+    notifyListeners();
   }
 
   /// Reset the screenshot count and blocking state (for testing or admin reset)

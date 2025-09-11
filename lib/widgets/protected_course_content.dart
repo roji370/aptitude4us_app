@@ -6,6 +6,7 @@ import '../services/screenshot_blocking_service.dart';
 import '../screens/subscription_expired_screen.dart';
 import '../screens/screenshot_warning_screen.dart';
 import '../screens/screenshot_blocked_screen.dart';
+import './screen_recording_warning_dialog.dart';
 import '../utils/logger.dart';
 import '../utils/app_colors.dart';
 import '../utils/responsive_helper.dart';
@@ -45,6 +46,7 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
   String? _errorMessage;
   bool _isNavigatingToSubscription = false;
   bool _showingScreenshotWarning = false;
+  bool _showingScreenRecordingWarning = false;
 
   @override
   void initState() {
@@ -72,7 +74,7 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
         '🔄 App resumed - re-checking subscription access with fresh data',
       );
 
-      // Check for admin reset when app resumes
+      // Check for admin reset when app resumes (iOS only feature)
       if (ResponsiveHelper.isIOS()) {
         _screenshotService.checkForAdminReset();
       }
@@ -231,8 +233,8 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
 
   /// Initialize the screenshot blocking service
   Future<void> _initializeScreenshotService() async {
-    // Only initialize on iOS
-    if (!ResponsiveHelper.isIOS()) {
+    // Initialize on both iOS and Android
+    if (!ResponsiveHelper.isIOS() && !ResponsiveHelper.isAndroid()) {
       Logger.i('📱 Screenshot blocking not available on this platform');
       return;
     }
@@ -271,6 +273,12 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     // Check if we should show warning (first screenshot)
     if (_screenshotService.shouldShowWarning() && !_showingScreenshotWarning) {
       _showScreenshotWarning();
+    }
+
+    // Check if we should show screen recording warning
+    if (_screenshotService.shouldShowScreenRecordingWarning && !_showingScreenRecordingWarning) {
+      Logger.w('📱 Triggering screen recording warning dialog');
+      _showScreenRecordingWarning();
     }
 
     // Check if access should be blocked (second screenshot)
@@ -334,6 +342,32 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     );
   }
 
+  /// Show screen recording warning dialog
+  void _showScreenRecordingWarning() {
+    if (_showingScreenRecordingWarning) return;
+
+    setState(() {
+      _showingScreenRecordingWarning = true;
+    });
+
+    Logger.w('📱 Showing screen recording warning dialog');
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Force user to acknowledge
+      builder: (BuildContext context) {
+        return ScreenRecordingWarningDialog(
+          onDismiss: () {
+            setState(() {
+              _showingScreenRecordingWarning = false;
+            });
+            _screenshotService.markScreenRecordingWarningShown();
+          },
+        );
+      },
+    );
+  }
+
   /// Show access restored message when admin resets violations
   void _showAccessRestoredMessage() {
     Logger.i('🎉 Showing access restored message');
@@ -365,7 +399,7 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
 
   @override
   Widget build(BuildContext context) {
-    // Check for screenshot blocking first (iOS only)
+    // Check for screenshot blocking first (iOS only - Android uses FLAG_SECURE)
     if (ResponsiveHelper.isIOS() && _screenshotService.shouldBlockAccess()) {
       Logger.e('📱 Access blocked due to screenshot violations');
       return const ScreenshotBlockedScreen();

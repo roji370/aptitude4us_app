@@ -5,14 +5,10 @@ import '../models/course_model.dart';
 import '../models/module_model.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
-import '../utils/app_colors.dart';
 import '../utils/logger.dart';
-import '../utils/responsive_helper.dart';
 import '../utils/route_transitions.dart';
 import '../widgets/custom_bottom_navigation.dart';
-import 'assigned_courses_screen.dart';
 import 'content_viewer_screen_mobile.dart';
-import 'profile_screen.dart';
 
 class ModuleListScreen extends StatefulWidget {
   final CourseModel course;
@@ -137,6 +133,22 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: Text(
+          widget.course.title,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        backgroundColor: const Color(0xFF323483),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
       body:
           _isLoading
               ? const Center(child: CircularProgressIndicator())

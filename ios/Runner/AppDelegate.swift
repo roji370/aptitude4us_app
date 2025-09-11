@@ -17,6 +17,7 @@ final class ScreenProtectionManager {
   private var isEnabled: Bool = false
   private var isScreenshotMonitoringEnabled: Bool = false
   private var flutterChannel: FlutterMethodChannel?
+  private var hasNotifiedRecordingThisSession: Bool = false
 
   private init() {}
 
@@ -34,6 +35,8 @@ final class ScreenProtectionManager {
       queue: .main
     ) { [weak self] _ in
       self?.updateShield(on: window)
+      // Notify Flutter about screen recording state change
+      self?.notifyFlutterOfScreenRecording()
     }
 
     // Optional: react to screenshots by briefly overlaying
@@ -144,6 +147,20 @@ final class ScreenProtectionManager {
       self?.notifyFlutterOfScreenshot()
     }
     
+    // IMPORTANT: Also set up screen recording detection here
+    // This should work independently of screenshot protection
+    if captureObserver == nil {
+      captureObserver = NotificationCenter.default.addObserver(
+        forName: UIScreen.capturedDidChangeNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        print("📱 Screen recording state changed in monitoring mode")
+        self?.notifyFlutterOfScreenRecording()
+      }
+      print("📱 Screen recording detection enabled")
+    }
+    
     print("📱 Screenshot monitoring enabled")
   }
   
@@ -155,6 +172,16 @@ final class ScreenProtectionManager {
       NotificationCenter.default.removeObserver(screenshotMonitoringObserver)
       self.screenshotMonitoringObserver = nil
     }
+    
+    // Only remove capture observer if screen protection is not enabled
+    if !isEnabled, let captureObserver = captureObserver {
+      NotificationCenter.default.removeObserver(captureObserver)
+      self.captureObserver = nil
+      print("📱 Screen recording detection disabled")
+    }
+    
+    // Reset notification flag when disabling
+    hasNotifiedRecordingThisSession = false
     
     print("📱 Screenshot monitoring disabled")
   }
@@ -172,6 +199,38 @@ final class ScreenProtectionManager {
       } else {
         print("✅ Successfully notified Flutter of screenshot")
       }
+    }
+  }
+  
+  private func notifyFlutterOfScreenRecording() {
+    guard let channel = flutterChannel else {
+      print("❌ No Flutter channel available to notify of screen recording")
+      return
+    }
+    
+    let isRecording = UIScreen.main.isCaptured
+    print("📱 Screen recording state changed: \(isRecording ? "Started" : "Stopped")")
+    
+    // Only notify if recording started and we haven't notified this session
+    // OR if recording stopped (always notify stop)
+    if (isRecording && !hasNotifiedRecordingThisSession) || !isRecording {
+      if isRecording {
+        hasNotifiedRecordingThisSession = true
+        print("📱 Notifying Flutter of screen recording start (first time this session)")
+      } else {
+        hasNotifiedRecordingThisSession = false
+        print("📱 Notifying Flutter of screen recording stop (resetting session flag)")
+      }
+      
+      channel.invokeMethod("onScreenRecordingStateChanged", arguments: ["isRecording": isRecording]) { result in
+        if let error = result as? FlutterError {
+          print("❌ Error notifying Flutter of screen recording: \(error.message ?? "Unknown error")")
+        } else {
+          print("✅ Successfully notified Flutter of screen recording state")
+        }
+      }
+    } else if isRecording && hasNotifiedRecordingThisSession {
+      print("📱 Screen recording detected but already notified this session")
     }
   }
 }
@@ -210,6 +269,7 @@ final class ScreenProtectionManager {
 
       // Set the Flutter channel reference in ScreenProtectionManager
       ScreenProtectionManager.shared.setFlutterChannel(channel)
+      print("📱 Flutter method channel established for screen protection")
       
       channel.setMethodCallHandler { [weak self] call, result in
         guard let self = self else { result(FlutterError(code: "UNAVAILABLE", message: "AppDelegate deallocated", details: nil)); return }
@@ -226,9 +286,11 @@ final class ScreenProtectionManager {
             result(FlutterError(code: "BAD_ARGS", message: "Expected Bool for preventScreenshots", details: nil))
           }
         case "enableScreenshotMonitoring":
+          print("📱 Flutter requested to enable screenshot monitoring")
           ScreenProtectionManager.shared.enableScreenshotMonitoring()
           result(true)
         case "disableScreenshotMonitoring":
+          print("📱 Flutter requested to disable screenshot monitoring")
           ScreenProtectionManager.shared.disableScreenshotMonitoring()
           result(true)
         default:

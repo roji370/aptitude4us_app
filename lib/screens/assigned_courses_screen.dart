@@ -286,11 +286,14 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                             }
 
                             final courses = courseSnapshot.data ?? [];
+                            // Sort courses alphabetically by title
+                            courses.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+                            
                             Logger.i(
                               "📋 Course data received: ${courses.length} courses",
                             );
                             Logger.i(
-                              "🎨 AssignedCoursesScreen: Building main UI with ${courses.length} courses",
+                              "🎨 AssignedCoursesScreen: Building main UI with ${courses.length} courses (sorted alphabetically)",
                             );
 
                             return Container(

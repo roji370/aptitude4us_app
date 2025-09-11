@@ -983,10 +983,20 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
       extendBodyBehindAppBar: false,
       extendBody: false,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        title: Text(
+          widget.module.title,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        backgroundColor: const Color(0xFF323483),
+        foregroundColor: Colors.white,
         elevation: 0,
-        toolbarHeight:
-            0, // Zero height app bar to respect status bar but not take space
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
       ),
       body: SafeArea(
         child:
