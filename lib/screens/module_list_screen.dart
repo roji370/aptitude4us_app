@@ -24,6 +24,7 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   bool _isLoading = true;
   int _selectedIndex = 0; // For bottom navigation
   Map<String, dynamic> _customClaims = {}; // Store user's custom claims
+  int _totalModulesCount = 0; // Track total modules vs published modules
 
   @override
   void initState() {
@@ -78,6 +79,16 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
       });
 
       final modules = await _modulesFuture;
+      
+      // Also check total modules count to distinguish between no modules vs inactive modules
+      try {
+        final allModules = await firestoreService.getModules(courseId);
+        _totalModulesCount = allModules.length;
+        Logger.d("Total modules: $_totalModulesCount, Published modules: ${modules.length}");
+      } catch (e) {
+        Logger.w("Could not fetch total modules count: $e");
+        _totalModulesCount = modules.length;
+      }
 
       // If we have specific module permissions, we should filter the modules
       if (allowedModuleIds != null && allowedModuleIds.isNotEmpty) {
@@ -106,6 +117,99 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
       _selectedIndex = index;
     });
     CustomBottomNavigation.handleNavigation(context, index);
+  }
+
+  Widget _buildEmptyModulesState(Size screenSize) {
+    // Determine if modules exist but are inactive vs no modules at all
+    final bool hasInactiveModules = _totalModulesCount > 0;
+    
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: screenSize.width * 0.25,
+              height: screenSize.width * 0.25,
+              decoration: BoxDecoration(
+                color: hasInactiveModules ? Colors.orange[50] : Colors.grey[100],
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                hasInactiveModules ? Icons.schedule : Icons.book_outlined,
+                size: screenSize.width * 0.12,
+                color: hasInactiveModules ? Colors.orange[400] : Colors.grey[400],
+              ),
+            ),
+            SizedBox(height: 24),
+            Text(
+              hasInactiveModules 
+                ? 'Modules Currently Inactive'
+                : 'No Modules Available',
+              style: GoogleFonts.inter(
+                fontSize: screenSize.width * 0.05,
+                color: hasInactiveModules ? Colors.orange[700] : Colors.grey[700],
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: hasInactiveModules ? Colors.orange[50] : Colors.grey[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: hasInactiveModules ? Colors.orange[200]! : Colors.grey[200]!,
+                  width: 1,
+                ),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    hasInactiveModules
+                      ? 'This course has modules, but they are currently not active. The modules may be scheduled for future release or are temporarily unavailable.'
+                      : 'This course doesn\'t have any modules yet. New modules will appear here when they become available.',
+                    style: GoogleFonts.inter(
+                      fontSize: screenSize.width * 0.035,
+                      color: hasInactiveModules ? Colors.orange[600] : Colors.grey[600],
+                      height: 1.4,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  if (hasInactiveModules) ...[
+                    SizedBox(height: 12),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 16,
+                          color: Colors.orange[600],
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Contact your instructor for more information about when these modules will be available.',
+                            style: GoogleFonts.inter(
+                              fontSize: screenSize.width * 0.032,
+                              color: Colors.orange[600],
+                              fontStyle: FontStyle.italic,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -231,29 +335,7 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
 
                                   // Modules List
                                   modules.isEmpty
-                                      ? Center(
-                                        child: Column(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            Icon(
-                                              Icons.book_outlined,
-                                              size: screenSize.width * 0.2,
-                                              color: Colors.grey,
-                                            ),
-                                            SizedBox(height: 16),
-                                            Text(
-                                              'No modules available for this course.',
-                                              style: GoogleFonts.inter(
-                                                fontSize:
-                                                    screenSize.width * 0.045,
-                                                color: Colors.grey[600],
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      )
+                                      ? _buildEmptyModulesState(screenSize)
                                       : Column(
                                         children:
                                             modules.map((module) {

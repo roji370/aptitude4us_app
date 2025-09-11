@@ -290,6 +290,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
   int _currentContentIndex = 0;
   int _selectedIndex = 0; // For bottom navigation
   String _userName = ""; // Store user name
+  int _totalContentCount = 0; // Track total content vs available content
 
   // Content state manager for persistent content loading (singleton instance)
   final ContentStateManager _contentStateManager = ContentStateManager();
@@ -478,6 +479,9 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
 
       final contentList = await _contentFuture;
       Logger.i("Loaded ${contentList.length} content items");
+      
+      // Store content count for empty state logic
+      _totalContentCount = contentList.length;
 
       // Print detailed info for debugging
       for (int i = 0; i < contentList.length; i++) {
@@ -1068,26 +1072,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
 
                     final contentList = snapshot.data ?? [];
                     if (contentList.isEmpty) {
-                      return Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(
-                              Icons.folder_open,
-                              size: 48,
-                              color: Colors.grey,
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'No content available for this module.',
-                              style: GoogleFonts.inter(
-                                fontSize: 16,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
+                      return _buildEmptyContentState();
                     }
 
                     // Ensure current index is valid
@@ -1484,5 +1469,104 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
       default:
         return Icons.article;
     }
+  }
+
+  Widget _buildEmptyContentState() {
+    // For now, we'll assume content is inactive rather than non-existent
+    // This can be enhanced with more sophisticated logic if needed
+    final bool hasInactiveContent = widget.module.isPublished; // Module is published but no content
+    
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 120,
+              height: 120,
+              decoration: BoxDecoration(
+                color: hasInactiveContent ? Colors.amber[50] : Colors.grey[100],
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                hasInactiveContent ? Icons.schedule : Icons.folder_open,
+                size: 60,
+                color: hasInactiveContent ? Colors.amber[400] : Colors.grey[400],
+              ),
+            ),
+            SizedBox(height: 24),
+            Text(
+              hasInactiveContent 
+                ? 'Content Currently Inactive'
+                : 'No Content Available',
+              style: GoogleFonts.inter(
+                fontSize: 20,
+                color: hasInactiveContent ? Colors.amber[700] : Colors.grey[700],
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: hasInactiveContent ? Colors.amber[50] : Colors.grey[50],
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: hasInactiveContent ? Colors.amber[200]! : Colors.grey[200]!,
+                  width: 1,
+                ),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    hasInactiveContent
+                      ? 'This module has content that is currently not active. The content may be scheduled for future release or is temporarily unavailable.'
+                      : 'This module doesn\'t have any content yet. New content will appear here when it becomes available.',
+                    style: GoogleFonts.inter(
+                      fontSize: 16,
+                      color: hasInactiveContent ? Colors.amber[600] : Colors.grey[600],
+                      height: 1.5,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 16),
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: hasInactiveContent ? Colors.amber[100] : Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 20,
+                          color: hasInactiveContent ? Colors.amber[700] : Colors.grey[600],
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Please contact your instructor for more information about when this content will be available.',
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              color: hasInactiveContent ? Colors.amber[700] : Colors.grey[600],
+                              fontWeight: FontWeight.w500,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

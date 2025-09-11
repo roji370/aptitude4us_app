@@ -77,6 +77,54 @@ class FirestoreService {
     }
   }
 
+  // Get only published courses for a user (for student view)
+  Future<List<CourseModel>> getPublishedAssignedCourses(List<String> courseIds) async {
+    if (!_isFirestoreAvailable || courseIds.isEmpty) {
+      Logger.w("Firestore not available or no course IDs provided");
+      return [];
+    }
+
+    try {
+      List<CourseModel> publishedCourses = [];
+      List<CourseModel> allCourses = [];
+
+      for (String courseId in courseIds) {
+        try {
+          DocumentSnapshot courseDoc =
+              await _firestore!.collection('courses').doc(courseId).get();
+
+          if (courseDoc.exists) {
+            CourseModel course = CourseModel.fromJson(
+              courseDoc.data() as Map<String, dynamic>,
+              courseDoc.id,
+            );
+            
+            allCourses.add(course);
+            
+            // Only add to published list if course is published
+            if (course.isPublished) {
+              publishedCourses.add(course);
+            } else {
+              Logger.i("Course ${course.title} (${course.id}) exists but is not published");
+              Logger.d("Course data: ${courseDoc.data()}"); // Debug actual fields
+            }
+          }
+        } catch (e) {
+          Logger.w(
+            "Failed to fetch course $courseId: $e - continuing with others",
+          );
+          continue;
+        }
+      }
+
+      Logger.i("Found ${allCourses.length} total assigned courses, ${publishedCourses.length} published");
+      return publishedCourses;
+    } catch (e) {
+      Logger.e("Error getting published assigned courses: $e");
+      rethrow;
+    }
+  }
+
   // Get modules for a course
   Future<List<ModuleModel>> getModules(String courseId) async {
     if (!_isFirestoreAvailable) {

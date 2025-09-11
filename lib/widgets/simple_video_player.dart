@@ -30,6 +30,8 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
   VideoPlayerController? _controller;
   bool _isInitialized = false;
   bool _showControls = true;
+  double _volume = 1.0;
+  bool _isMuted = false;
 
   @override
   void initState() {
@@ -125,6 +127,34 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
     });
   }
 
+  void _toggleMute() {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    setState(() {
+      _isMuted = !_isMuted;
+      if (_isMuted) {
+        _controller!.setVolume(0.0);
+      } else {
+        _controller!.setVolume(_volume);
+      }
+    });
+  }
+
+  void _setVolume(double volume) {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    setState(() {
+      _volume = volume;
+      if (!_isMuted) {
+        _controller!.setVolume(volume);
+      }
+      // If user adjusts volume while muted, unmute
+      if (_isMuted && volume > 0) {
+        _isMuted = false;
+      }
+    });
+  }
+
   void _toggleFullscreen() {
     if (_controller == null || !_controller!.value.isInitialized) return;
 
@@ -154,6 +184,8 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
                 }
               });
             },
+            volume: _volume,
+            isMuted: _isMuted,
           );
         },
         transitionDuration: const Duration(milliseconds: 300),
@@ -222,6 +254,45 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
 
                 const Spacer(),
 
+                // Volume control
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      onPressed: _toggleMute,
+                      icon: Icon(
+                        _isMuted 
+                          ? Icons.volume_off 
+                          : _volume > 0.5 
+                            ? Icons.volume_up 
+                            : Icons.volume_down,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 80,
+                      child: SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: 2,
+                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                          overlayShape: SliderComponentShape.noOverlay,
+                        ),
+                        child: Slider(
+                          value: _isMuted ? 0.0 : _volume,
+                          min: 0.0,
+                          max: 1.0,
+                          onChanged: _setVolume,
+                          activeColor: Colors.white,
+                          inactiveColor: Colors.white30,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(width: 8),
+
                 // Fullscreen button
                 IconButton(
                   onPressed: _toggleFullscreen,
@@ -288,6 +359,8 @@ class _FullscreenVideoPlayer extends StatefulWidget {
   final String? userName;
   final bool showWatermark;
   final Function(bool wasPlaying) onExit;
+  final double volume;
+  final bool isMuted;
 
   const _FullscreenVideoPlayer({
     required this.sharedController,
@@ -296,6 +369,8 @@ class _FullscreenVideoPlayer extends StatefulWidget {
     this.userName,
     this.showWatermark = true,
     required this.onExit,
+    required this.volume,
+    required this.isMuted,
   });
 
   @override
@@ -305,11 +380,15 @@ class _FullscreenVideoPlayer extends StatefulWidget {
 class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
   late VideoPlayerController _controller;
   bool _showControls = true;
+  late double _volume;
+  late bool _isMuted;
 
   @override
   void initState() {
     super.initState();
     _controller = widget.sharedController;
+    _volume = widget.volume;
+    _isMuted = widget.isMuted;
     _setFullscreenMode();
     _resumePlaybackIfNeeded();
   }
@@ -373,6 +452,34 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
         _controller.pause();
       } else {
         _controller.play();
+      }
+    });
+  }
+
+  void _toggleMute() {
+    if (!_controller.value.isInitialized) return;
+
+    setState(() {
+      _isMuted = !_isMuted;
+      if (_isMuted) {
+        _controller.setVolume(0.0);
+      } else {
+        _controller.setVolume(_volume);
+      }
+    });
+  }
+
+  void _setVolume(double volume) {
+    if (!_controller.value.isInitialized) return;
+
+    setState(() {
+      _volume = volume;
+      if (!_isMuted) {
+        _controller.setVolume(volume);
+      }
+      // If user adjusts volume while muted, unmute
+      if (_isMuted && volume > 0) {
+        _isMuted = false;
       }
     });
   }
@@ -496,6 +603,43 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
                     ),
 
                     const Spacer(),
+
+                    // Volume control
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          onPressed: _toggleMute,
+                          icon: Icon(
+                            _isMuted 
+                              ? Icons.volume_off 
+                              : _volume > 0.5 
+                                ? Icons.volume_up 
+                                : Icons.volume_down,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                        ),
+                        SizedBox(
+                          width: 120,
+                          child: SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              trackHeight: 3,
+                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                              overlayShape: SliderComponentShape.noOverlay,
+                            ),
+                            child: Slider(
+                              value: _isMuted ? 0.0 : _volume,
+                              min: 0.0,
+                              max: 1.0,
+                              onChanged: _setVolume,
+                              activeColor: Colors.white,
+                              inactiveColor: Colors.white30,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),

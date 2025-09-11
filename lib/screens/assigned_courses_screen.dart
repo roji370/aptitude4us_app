@@ -26,6 +26,7 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
   bool _isLoading = true;
   int _selectedIndex = 0;
   bool _hasLoadedData = false;
+  int _totalAssignedCourses = 0; // Track total vs published courses
 
   @override
   void initState() {
@@ -89,12 +90,16 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
 
         if (assignedCourseIds.isNotEmpty) {
           Logger.i("🔄 Fetching courses from Firestore...");
-          _coursesFuture = firestoreService.getAssignedCourses(
+          _coursesFuture = firestoreService.getPublishedAssignedCourses(
             assignedCourseIds,
           );
+          
+          // Also get total assigned courses count for inactive course detection
+          _loadTotalCoursesCount(firestoreService, assignedCourseIds);
         } else {
           Logger.w("⚠️ No courses assigned to this user");
           _coursesFuture = Future.value([]);
+          _totalAssignedCourses = 0;
         }
       });
     } catch (e) {
@@ -184,6 +189,208 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _loadTotalCoursesCount(FirestoreService firestoreService, List<String> assignedCourseIds) async {
+    try {
+      final allCourses = await firestoreService.getAssignedCourses(assignedCourseIds);
+      _totalAssignedCourses = allCourses.length;
+      Logger.d("Total assigned courses: $_totalAssignedCourses");
+    } catch (e) {
+      Logger.w("Could not fetch total courses count: $e");
+      _totalAssignedCourses = 0;
+    }
+  }
+
+  Widget _buildEmptyCoursesState(Size screenSize, List<CourseModel> courses) {
+    // Determine if courses exist but are inactive vs no courses at all
+    final bool hasInactiveCourses = _totalAssignedCourses > courses.length;
+    
+    if (hasInactiveCourses) {
+      // Show inactive courses message
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: ResponsiveHelper.adaptiveFontSize(context, 100.0),
+                height: ResponsiveHelper.adaptiveFontSize(context, 100.0),
+                decoration: BoxDecoration(
+                  color: Colors.orange[50],
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.schedule,
+                  size: ResponsiveHelper.adaptiveFontSize(context, 50.0),
+                  color: Colors.orange[400],
+                ),
+              ),
+              SizedBox(
+                height: ResponsiveHelper.getAdaptiveSpacing(context, compact: 20.0, regular: 24.0),
+              ),
+              Text(
+                'Courses Temporarily Inactive',
+                style: GoogleFonts.inter(
+                  fontSize: ResponsiveHelper.adaptiveFontSize(context, 20.0),
+                  fontWeight: FontWeight.bold,
+                  color: Colors.orange[700],
+                ),
+                textAlign: TextAlign.center,
+              ),
+              SizedBox(
+                height: ResponsiveHelper.getAdaptiveSpacing(context, compact: 12.0, regular: 16.0),
+              ),
+              Container(
+                padding: EdgeInsets.all(ResponsiveHelper.getAdaptiveSpacing(context, compact: 16.0, regular: 20.0)),
+                margin: EdgeInsets.symmetric(horizontal: ResponsiveHelper.getAdaptiveSpacing(context, compact: 20.0, regular: 32.0)),
+                decoration: BoxDecoration(
+                  color: Colors.orange[50],
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.orange[200]!, width: 1),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      'Your assigned courses are currently inactive for updates and improvements. They will be available again soon.',
+                      style: GoogleFonts.inter(
+                        fontSize: ResponsiveHelper.adaptiveFontSize(context, 14.0),
+                        color: Colors.orange[600],
+                        height: 1.4,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: ResponsiveHelper.getAdaptiveSpacing(context, compact: 12.0, regular: 16.0)),
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: ResponsiveHelper.getAdaptiveSpacing(context, compact: 12.0, regular: 16.0),
+                        vertical: ResponsiveHelper.getAdaptiveSpacing(context, compact: 8.0, regular: 12.0),
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[100],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            size: 16,
+                            color: Colors.orange[700],
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Please check back later or contact your instructor for updates.',
+                              style: GoogleFonts.inter(
+                                fontSize: ResponsiveHelper.adaptiveFontSize(context, 12.0),
+                                color: Colors.orange[700],
+                                fontWeight: FontWeight.w500,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    // Show no courses assigned message (existing code)
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: ResponsiveHelper.adaptiveFontSize(context, 100.0),
+            height: ResponsiveHelper.adaptiveFontSize(context, 100.0),
+            decoration: BoxDecoration(
+              color: Colors.blue[50],
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.school_outlined,
+              size: ResponsiveHelper.adaptiveFontSize(context, 50.0),
+              color: Colors.blue[400],
+            ),
+          ),
+          SizedBox(
+            height: ResponsiveHelper.getAdaptiveSpacing(context, compact: 20.0, regular: 24.0),
+          ),
+          Text(
+            'No Courses Assigned',
+            style: GoogleFonts.inter(
+              fontSize: ResponsiveHelper.adaptiveFontSize(context, 20.0),
+              fontWeight: FontWeight.bold,
+              color: Colors.blue[700],
+            ),
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(
+            height: ResponsiveHelper.getAdaptiveSpacing(context, compact: 12.0, regular: 16.0),
+          ),
+          Container(
+            padding: EdgeInsets.all(ResponsiveHelper.getAdaptiveSpacing(context, compact: 16.0, regular: 20.0)),
+            margin: EdgeInsets.symmetric(horizontal: ResponsiveHelper.getAdaptiveSpacing(context, compact: 20.0, regular: 32.0)),
+            decoration: BoxDecoration(
+              color: Colors.blue[50],
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.blue[200]!, width: 1),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  'You don\'t have any courses assigned to your account yet. Contact your administrator or instructor to get courses assigned to start your learning journey.',
+                  style: GoogleFonts.inter(
+                    fontSize: ResponsiveHelper.adaptiveFontSize(context, 14.0),
+                    color: Colors.blue[600],
+                    height: 1.4,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: ResponsiveHelper.getAdaptiveSpacing(context, compact: 12.0, regular: 16.0)),
+                Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: ResponsiveHelper.getAdaptiveSpacing(context, compact: 12.0, regular: 16.0),
+                    vertical: ResponsiveHelper.getAdaptiveSpacing(context, compact: 8.0, regular: 12.0),
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[100],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.contact_support_outlined,
+                        size: 16,
+                        color: Colors.blue[700],
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        'Need help? Contact your administrator',
+                        style: GoogleFonts.inter(
+                          fontSize: ResponsiveHelper.adaptiveFontSize(context, 12.0),
+                          color: Colors.blue[700],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -581,64 +788,7 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                                     Expanded(
                                       child:
                                           courses.isEmpty
-                                              ? Center(
-                                                child: Column(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.center,
-                                                  children: [
-                                                    Icon(
-                                                      Icons.school_outlined,
-                                                      size:
-                                                          ResponsiveHelper.adaptiveFontSize(
-                                                            context,
-                                                            64.0,
-                                                          ),
-                                                      color: Colors.grey[400],
-                                                    ),
-                                                    SizedBox(
-                                                      height:
-                                                          ResponsiveHelper.getAdaptiveSpacing(
-                                                            context,
-                                                          ),
-                                                    ),
-                                                    Text(
-                                                      'No courses assigned',
-                                                      style: GoogleFonts.inter(
-                                                        fontSize:
-                                                            ResponsiveHelper.adaptiveFontSize(
-                                                              context,
-                                                              18.0,
-                                                            ),
-                                                        fontWeight:
-                                                            FontWeight.w500,
-                                                        color: Colors.grey[600],
-                                                      ),
-                                                    ),
-                                                    SizedBox(
-                                                      height:
-                                                          ResponsiveHelper.getAdaptiveSpacing(
-                                                            context,
-                                                            compact: 4.0,
-                                                            regular: 6.0,
-                                                            large: 8.0,
-                                                          ),
-                                                    ),
-                                                    Text(
-                                                      'Contact your administrator to get courses assigned.',
-                                                      style: GoogleFonts.inter(
-                                                        fontSize:
-                                                            ResponsiveHelper.adaptiveFontSize(
-                                                              context,
-                                                              14.0,
-                                                            ),
-                                                        color: Colors.grey[500],
-                                                      ),
-                                                      textAlign:
-                                                          TextAlign.center,
-                                                    ),
-                                                  ],
-                                                ),
-                                              )
+                                            ? _buildEmptyCoursesState(MediaQuery.of(context).size, courses)
                                               : ListView.builder(
                                                 physics:
                                                     const AlwaysScrollableScrollPhysics(),
