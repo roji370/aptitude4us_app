@@ -1,4 +1,4 @@
-package com.example.student_app
+package com.briffini.academy
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -13,6 +13,7 @@ import android.os.Build
 import android.media.AudioAttributes
 import android.net.Uri
 import android.media.AudioManager
+import android.media.AudioDeviceInfo
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -183,7 +184,7 @@ class MainActivity : FlutterActivity() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     // Check if any app is recording audio
                     manager.getDevices(AudioManager.GET_DEVICES_INPUTS).any { device ->
-                        device.type == AudioManager.DEVICE_IN_BUILTIN_MIC
+                        device.type == AudioDeviceInfo.TYPE_BUILTIN_MIC
                     }
                 } else {
                     false
@@ -251,16 +252,19 @@ class MainActivity : FlutterActivity() {
         try {
             val arguments = mapOf("isRecording" to isRecording)
             
-            methodChannel?.invokeMethod("onScreenRecordingStateChanged", arguments) { result ->
-                when (result) {
-                    is Exception -> {
-                        Log.e("ScreenProtection", "Error notifying Flutter: ${result.message}")
-                    }
-                    else -> {
-                        Log.d("ScreenProtection", "Successfully notified Flutter of recording state: $isRecording")
-                    }
+            methodChannel?.invokeMethod("onScreenRecordingStateChanged", arguments, object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    Log.d("ScreenProtection", "Successfully notified Flutter of recording state: $isRecording")
                 }
-            }
+                
+                override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                    Log.e("ScreenProtection", "Error notifying Flutter: $errorMessage")
+                }
+                
+                override fun notImplemented() {
+                    Log.w("ScreenProtection", "Method not implemented")
+                }
+            })
         } catch (e: Exception) {
             Log.e("ScreenProtection", "Error in notifyFlutterOfScreenRecording: ${e.message}")
         }
