@@ -69,6 +69,19 @@ class NotificationService {
           soundSource: 'resource://raw/notification_sound',
           playSound: true,
         ),
+        NotificationChannel(
+          channelKey: 'course_assignments',
+          channelName: 'Course Assignments',
+          channelDescription: 'Notifications for new course assignments',
+          defaultColor: Colors.green,
+          ledColor: Colors.green,
+          importance: NotificationImportance.High,
+          channelShowBadge: true,
+          enableVibration: true,
+          enableLights: true,
+          soundSource: 'resource://raw/notification_sound',
+          playSound: true,
+        ),
       ],
     );
 
@@ -945,7 +958,15 @@ class NotificationService {
       return;
     }
 
-    // Handle both notification and data-only messages
+    // Check notification type to handle course assignments
+    String notificationType = message.data['type'] ?? '';
+    
+    if (notificationType == 'course_assignment') {
+      await _handleCourseAssignmentNotification(message, isBackground: false);
+      return;
+    }
+
+    // Handle both notification and data-only messages (existing chat logic)
     String title = message.notification?.title ?? 'New Message';
     String body = message.notification?.body ?? '';
 
@@ -979,18 +1000,148 @@ class NotificationService {
     }
   }
 
+  /// Handle course assignment notification (public for testing)
+  Future<void> handleCourseAssignmentNotification(RemoteMessage message, {bool isBackground = false}) async {
+    await _handleCourseAssignmentNotification(message, isBackground: isBackground);
+  }
+
+  /// Handle course assignment notification
+  Future<void> _handleCourseAssignmentNotification(RemoteMessage message, {bool isBackground = false}) async {
+    try {
+      // Extract course assignment data from payload
+      final courseId = message.data['courseId'] ?? '';
+      final courseName = message.data['courseName'] ?? 'New Course';
+      final assignmentDate = message.data['assignmentDate'] ?? '';
+      final action = message.data['action'] ?? 'open_course';
+      
+      Logger.i('Course assignment notification received:');
+      Logger.i('  Course ID: $courseId');
+      Logger.i('  Course Name: $courseName');
+      Logger.i('  Assignment Date: $assignmentDate');
+      Logger.i('  Action: $action');
+      
+      // Create notification with course assignment channel
+      final notificationId = DateTime.now().millisecondsSinceEpoch.remainder(100000);
+      
+      await AwesomeNotifications().createNotification(
+        content: NotificationContent(
+          id: notificationId,
+          channelKey: 'course_assignments',
+          title: 'New Course Assigned! 📚',
+          body: 'You have been assigned to "$courseName". Tap to open the course.',
+          notificationLayout: NotificationLayout.Default,
+          payload: {
+            'type': 'course_assignment',
+            'courseId': courseId,
+            'courseName': courseName,
+            'assignmentDate': assignmentDate,
+            'action': action,
+          },
+          category: NotificationCategory.Social,
+          wakeUpScreen: true,
+          criticalAlert: false,
+          actionType: ActionType.Default,
+        ),
+        actionButtons: [
+          NotificationActionButton(
+            key: 'open_course',
+            label: 'Open Course',
+            actionType: ActionType.Default,
+            autoDismissible: true,
+          ),
+          NotificationActionButton(
+            key: 'dismiss',
+            label: 'Later',
+            actionType: ActionType.DismissAction,
+            autoDismissible: true,
+          ),
+        ],
+      );
+      
+      Logger.i('Course assignment notification created successfully');
+      
+    } catch (e) {
+      Logger.e('Error handling course assignment notification: $e');
+    }
+  }
+
   /// Handle notification action
   @pragma('vm:entry-point')
   static Future<void> _onNotificationAction(
     ReceivedAction receivedAction,
   ) async {
-    Logger.i('Notification action received: ${receivedAction.toString()}');
+    Logger.i('Notification action received: ${receivedAction.buttonKeyPressed}');
+    Logger.i('Notification payload: ${receivedAction.payload}');
+
+    // Handle course assignment notifications
+    if (receivedAction.payload?['type'] == 'course_assignment') {
+      await _handleCourseAssignmentAction(receivedAction);
+      return;
+    }
+
+    // Handle chat notifications (existing logic)
     if (receivedAction.payload != null &&
         receivedAction.payload!['type'] == 'chat') {
       final String? chatId = receivedAction.payload!['chatId'];
       if (chatId != null && globalNavigatorKey.currentState != null) {
         globalNavigatorKey.currentState!.pushNamed('/chat', arguments: chatId);
       }
+    }
+  }
+
+  /// Handle course assignment notification action
+  static Future<void> _handleCourseAssignmentAction(ReceivedAction receivedAction) async {
+    try {
+      final courseId = receivedAction.payload?['courseId'] ?? '';
+      final courseName = receivedAction.payload?['courseName'] ?? '';
+      final action = receivedAction.payload?['action'] ?? 'open_course';
+      
+      Logger.i('Handling course assignment action:');
+      Logger.i('  Button pressed: ${receivedAction.buttonKeyPressed}');
+      Logger.i('  Course ID: $courseId');
+      Logger.i('  Course Name: $courseName');
+      Logger.i('  Action: $action');
+      
+      // Handle different button actions
+      if (receivedAction.buttonKeyPressed == 'open_course' || receivedAction.buttonKeyPressed.isEmpty) {
+        // Navigate to the specific course
+        if (globalNavigatorKey.currentContext != null && courseId.isNotEmpty) {
+          await _navigateToCourse(courseId, courseName);
+        } else {
+          Logger.w('Cannot navigate to course: context unavailable or courseId empty');
+        }
+      } else if (receivedAction.buttonKeyPressed == 'dismiss') {
+        Logger.i('Course assignment notification dismissed');
+      }
+      
+    } catch (e) {
+      Logger.e('Error handling course assignment action: $e');
+    }
+  }
+
+  /// Navigate to a specific course
+  static Future<void> _navigateToCourse(String courseId, String courseName) async {
+    try {
+      final context = globalNavigatorKey.currentContext;
+      if (context == null) {
+        Logger.w('Navigator context not available for course navigation');
+        return;
+      }
+      
+      Logger.i('Navigating to course: $courseName (ID: $courseId)');
+      
+      // Navigate to assigned courses screen
+      // The user can then select the specific course
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        '/', 
+        (route) => false,
+      );
+      
+      // Log successful navigation attempt
+      Logger.i('Course navigation initiated successfully');
+      
+    } catch (e) {
+      Logger.e('Error navigating to course: $e');
     }
   }
 
@@ -1515,7 +1666,15 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     return;
   }
 
-  // Handle both notification and data-only messages
+  // Check notification type to handle course assignments
+  String notificationType = message.data['type'] ?? '';
+  
+  if (notificationType == 'course_assignment') {
+    await _handleCourseAssignmentNotificationBackground(message);
+    return;
+  }
+
+  // Handle both notification and data-only messages (existing chat logic)
   String title = message.notification?.title ?? 'New Message';
   String body = message.notification?.body ?? '';
 
@@ -1545,5 +1704,65 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     );
   } catch (e) {
     debugPrint('Failed to create background notification: $e');
+  }
+}
+
+/// Handle course assignment notification in background
+Future<void> _handleCourseAssignmentNotificationBackground(RemoteMessage message) async {
+  try {
+    // Extract course assignment data from payload
+    final courseId = message.data['courseId'] ?? '';
+    final courseName = message.data['courseName'] ?? 'New Course';
+    final assignmentDate = message.data['assignmentDate'] ?? '';
+    final action = message.data['action'] ?? 'open_course';
+    
+    debugPrint('Background course assignment notification:');
+    debugPrint('  Course ID: $courseId');
+    debugPrint('  Course Name: $courseName');
+    debugPrint('  Assignment Date: $assignmentDate');
+    debugPrint('  Action: $action');
+    
+    // Create notification with course assignment channel
+    final notificationId = DateTime.now().millisecondsSinceEpoch.remainder(100000);
+    
+    await AwesomeNotifications().createNotification(
+      content: NotificationContent(
+        id: notificationId,
+        channelKey: 'course_assignments',
+        title: 'New Course Assigned! 📚',
+        body: 'You have been assigned to "$courseName". Tap to open the course.',
+        notificationLayout: NotificationLayout.Default,
+        payload: {
+          'type': 'course_assignment',
+          'courseId': courseId,
+          'courseName': courseName,
+          'assignmentDate': assignmentDate,
+          'action': action,
+        },
+        category: NotificationCategory.Social,
+        wakeUpScreen: true,
+        criticalAlert: false,
+        actionType: ActionType.Default,
+      ),
+      actionButtons: [
+        NotificationActionButton(
+          key: 'open_course',
+          label: 'Open Course',
+          actionType: ActionType.Default,
+          autoDismissible: true,
+        ),
+        NotificationActionButton(
+          key: 'dismiss',
+          label: 'Later',
+          actionType: ActionType.DismissAction,
+          autoDismissible: true,
+        ),
+      ],
+    );
+    
+    debugPrint('Background course assignment notification created successfully');
+    
+  } catch (e) {
+    debugPrint('Error handling background course assignment notification: $e');
   }
 }
