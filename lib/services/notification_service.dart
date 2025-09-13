@@ -1,6 +1,5 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -171,8 +170,8 @@ class NotificationService {
     // Handle foreground messages
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
 
-    // Handle background messages
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    // Background message handler is registered in main.dart for universal push notifications
+    // FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
     // Handle when app is opened from terminated state
     if (_firebaseMessaging != null) {
@@ -946,22 +945,28 @@ class NotificationService {
   }
 
   Future<void> _handleForegroundMessage(RemoteMessage message) async {
-    Logger.i('Got a message whilst in the foreground!');
-    Logger.i('Message data: ${message.data}');
+    Logger.i('🔔 Got a message whilst in the foreground!');
+    Logger.i('📋 Message data: ${message.data}');
+    Logger.i('📋 Message notification: ${message.notification?.toMap()}');
+    Logger.i('📋 Message messageId: ${message.messageId}');
+    Logger.i('📋 Message from: ${message.from}');
 
     // Get current FCM token
     String? currentToken = await _firebaseMessaging?.getToken();
+    Logger.i('🔑 Current FCM token: ${currentToken?.substring(0, 20)}...');
 
     // Check if this is a self-notification (from the same device)
     if (message.data['senderFcmToken'] == currentToken) {
-      Logger.i('Ignoring self-notification from same device');
+      Logger.i('⚠️ Ignoring self-notification from same device');
       return;
     }
 
     // Check notification type to handle course assignments
     String notificationType = message.data['type'] ?? '';
+    Logger.i('📬 Notification type: $notificationType');
     
     if (notificationType == 'course_assignment') {
+      Logger.i('🎓 Processing course assignment notification...');
       await _handleCourseAssignmentNotification(message, isBackground: false);
       return;
     }
@@ -1008,6 +1013,9 @@ class NotificationService {
   /// Handle course assignment notification
   Future<void> _handleCourseAssignmentNotification(RemoteMessage message, {bool isBackground = false}) async {
     try {
+      Logger.i('🎓 _handleCourseAssignmentNotification called - isBackground: $isBackground');
+      Logger.i('🔧 Full message payload: ${message.data}');
+      
       // Extract course assignment data from payload - Support both our format and admin team format
       final courseId = message.data['courseId'] ?? '';
       
@@ -1663,136 +1671,4 @@ class NotificationService {
   }
 }
 
-// This needs to be a top-level function
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Initialize Firebase if not already initialized
-  await Firebase.initializeApp();
-
-  // Using debugPrint in background handlers because Logger might not be accessible
-  debugPrint('Handling a background message: ${message.messageId}');
-  debugPrint('Background message data: ${message.data}');
-
-  // Get current FCM token
-  final FirebaseMessaging messaging = FirebaseMessaging.instance;
-  String? currentToken = await messaging.getToken();
-
-  // Check if this is a self-notification (from the same device)
-  if (message.data['senderFcmToken'] == currentToken) {
-    debugPrint('Ignoring self-notification from same device in background');
-    return;
-  }
-
-  // Check notification type to handle course assignments
-  String notificationType = message.data['type'] ?? '';
-  
-  if (notificationType == 'course_assignment') {
-    await _handleCourseAssignmentNotificationBackground(message);
-    return;
-  }
-
-  // Handle both notification and data-only messages (existing chat logic)
-  String title = message.notification?.title ?? 'New Message';
-  String body = message.notification?.body ?? '';
-
-  // For data-only messages or if notification fields are empty, try to use data fields
-  if (title == 'New Message' && message.data.containsKey('title')) {
-    title = message.data['title'] ?? title;
-  }
-
-  if (body.isEmpty && message.data.containsKey('body')) {
-    body = message.data['body'] ?? '';
-  }
-
-  // Create a notification even in background
-  try {
-    await AwesomeNotifications().createNotification(
-      content: NotificationContent(
-        id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-        channelKey: 'chat_channel',
-        title: title,
-        body: body,
-        notificationLayout: NotificationLayout.Default,
-        payload: Map<String, String>.from(message.data),
-        category: NotificationCategory.Message,
-        wakeUpScreen: true,
-        criticalAlert: true,
-      ),
-    );
-  } catch (e) {
-    debugPrint('Failed to create background notification: $e');
-  }
-}
-
-/// Handle course assignment notification in background
-Future<void> _handleCourseAssignmentNotificationBackground(RemoteMessage message) async {
-  try {
-    // Extract course assignment data from payload - Support both our format and admin team format
-    final courseId = message.data['courseId'] ?? '';
-    
-    // Admin team uses "courseTitle", we use "courseName" - support both
-    final courseName = message.data['courseTitle'] ?? message.data['courseName'] ?? 'New Course';
-    
-    final assignmentDate = message.data['assignmentDate'] ?? '';
-    final assignedBy = message.data['assignedBy'] ?? '';
-    final clickAction = message.data['click_action'] ?? '';
-    final link = message.data['link'] ?? '';
-    final action = message.data['action'] ?? 'open_course';
-    
-    debugPrint('Background course assignment notification:');
-    debugPrint('  Course ID: $courseId');
-    debugPrint('  Course Name: $courseName');
-    debugPrint('  Assignment Date: $assignmentDate');
-    debugPrint('  Assigned By: $assignedBy');
-    debugPrint('  Click Action: $clickAction');
-    debugPrint('  Link: $link');
-    debugPrint('  Action: $action');
-    
-    // Create notification with course assignment channel
-    final notificationId = DateTime.now().millisecondsSinceEpoch.remainder(100000);
-    
-    await AwesomeNotifications().createNotification(
-      content: NotificationContent(
-        id: notificationId,
-        channelKey: 'course_assignments',
-        title: 'New Course Assigned! 📚',
-        body: 'You have been assigned to "$courseName". Tap to open the course.',
-        notificationLayout: NotificationLayout.Default,
-        payload: {
-          'type': 'course_assignment',
-          'courseId': courseId,
-          'courseName': courseName,
-          'courseTitle': courseName, // Also include admin team's field name
-          'assignmentDate': assignmentDate,
-          'assignedBy': assignedBy,
-          'click_action': clickAction,
-          'link': link,
-          'action': action,
-        },
-        category: NotificationCategory.Social,
-        wakeUpScreen: true,
-        criticalAlert: false,
-        actionType: ActionType.Default,
-      ),
-      actionButtons: [
-        NotificationActionButton(
-          key: 'open_course',
-          label: 'Open Course',
-          actionType: ActionType.Default,
-          autoDismissible: true,
-        ),
-        NotificationActionButton(
-          key: 'dismiss',
-          label: 'Later',
-          actionType: ActionType.DismissAction,
-          autoDismissible: true,
-        ),
-      ],
-    );
-    
-    debugPrint('Background course assignment notification created successfully');
-    
-  } catch (e) {
-    debugPrint('Error handling background course assignment notification: $e');
-  }
-}
+// Background message handler moved to main.dart for universal push notification support

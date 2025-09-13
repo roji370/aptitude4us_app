@@ -1,8 +1,10 @@
 import 'dart:async'; // Add this for StreamSubscription
 import 'dart:io' show Platform;
 
+import 'package:awesome_notifications/awesome_notifications.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Add for SystemChrome
@@ -26,6 +28,97 @@ import 'utils/app_theme.dart';
 import 'utils/global_keys.dart';
 import 'utils/logger.dart';
 import 'utils/text_scale_calculator.dart';
+
+// Global notification service instance for universal push notifications
+NotificationService? _globalNotificationService;
+
+// Background message handler - MUST be top-level function
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Initialize Firebase if not already initialized
+  await Firebase.initializeApp();
+
+  // Using debugPrint in background handlers because Logger might not be accessible
+  debugPrint('🔔 Background notification received: ${message.messageId}');
+  debugPrint('📋 Background message data: ${message.data}');
+
+  // Check notification type to handle course assignments
+  String notificationType = message.data['type'] ?? '';
+  debugPrint('📬 Background notification type: $notificationType');
+  
+  if (notificationType == 'course_assignment') {
+    debugPrint('🎓 Processing course assignment notification in background...');
+    
+    // Extract course data
+    final courseTitle = message.data['courseTitle'] ?? message.data['courseName'] ?? 'New Course';
+    final assignedBy = message.data['assignedBy'] ?? 'Admin';
+    
+    // Create local notification for course assignment
+    try {
+      await AwesomeNotifications().createNotification(
+        content: NotificationContent(
+          id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
+          channelKey: 'course_assignments',
+          title: 'New Course Assigned',
+          body: 'You have been assigned to "$courseTitle" by $assignedBy',
+          notificationLayout: NotificationLayout.Default,
+          payload: Map<String, String>.from(message.data),
+          category: NotificationCategory.Social,
+          wakeUpScreen: true,
+          criticalAlert: false,
+        ),
+        actionButtons: [
+          NotificationActionButton(
+            key: 'open_course',
+            label: 'Open Course',
+            autoDismissible: true,
+          ),
+          NotificationActionButton(
+            key: 'later',
+            label: 'Later',
+            autoDismissible: true,
+          ),
+        ],
+      );
+      debugPrint('✅ Background course assignment notification created');
+    } catch (e) {
+      debugPrint('❌ Error creating background notification: $e');
+    }
+    return;
+  }
+
+  // Handle regular chat messages in background
+  String title = message.notification?.title ?? 'New Message';
+  String body = message.notification?.body ?? '';
+
+  // For data-only messages, use data fields
+  if (title == 'New Message' && message.data.containsKey('title')) {
+    title = message.data['title'] ?? title;
+  }
+  if (body.isEmpty && message.data.containsKey('body')) {
+    body = message.data['body'] ?? '';
+  }
+
+  // Create chat notification
+  try {
+    await AwesomeNotifications().createNotification(
+      content: NotificationContent(
+        id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
+        channelKey: 'chat_channel',
+        title: title,
+        body: body,
+        notificationLayout: NotificationLayout.Default,
+        payload: Map<String, String>.from(message.data),
+        category: NotificationCategory.Message,
+        wakeUpScreen: true,
+        criticalAlert: false,
+      ),
+    );
+    debugPrint('✅ Background chat notification created');
+  } catch (e) {
+    debugPrint('❌ Error creating background chat notification: $e');
+  }
+}
 
 // Firebase initialization state manager
 class FirebaseInitState {
@@ -92,6 +185,35 @@ void main() async {
   // Configure immediate UI to prevent white screen
   await _configureImmediateUI();
 
+  // CRITICAL: Initialize Firebase and Notifications IMMEDIATELY for universal push notifications
+  // This ensures notifications work regardless of login status or app state
+  Logger.i('🚀 Initializing Firebase and notifications for universal push support...');
+  
+  try {
+    // Initialize Firebase first
+    bool firebaseReady = await FirebaseInitHelper.ensureInitialized();
+    
+    if (firebaseReady) {
+      Logger.i('✅ Firebase initialized successfully');
+      
+      // Register background message handler FIRST - this must happen before any other FCM setup
+      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      Logger.i('📱 Background message handler registered');
+      
+      // Initialize notification service immediately for universal push notifications
+      final notificationService = NotificationService();
+      await notificationService.initialize();
+      Logger.i('✅ NotificationService initialized - push notifications ready');
+      
+      // Store globally accessible notification service instance
+      _globalNotificationService = notificationService;
+    } else {
+      Logger.w('⚠️ Firebase initialization failed - notifications may not work');
+    }
+  } catch (e) {
+    Logger.e('❌ Error initializing Firebase/Notifications: $e');
+  }
+
   // Configure system UI properties for iPhone 11+ compatibility
   final Brightness statusBarIconBrightness =
       Platform.isIOS ? Brightness.light : Brightness.light;
@@ -105,7 +227,7 @@ void main() async {
     navigationBarIconBrightness: navBarIconBrightness,
   );
 
-  // Start app - Firebase initialization happens in splash screen
+  // Start app
   runApp(
     MultiProvider(
       providers: [
@@ -117,8 +239,8 @@ void main() async {
         ),
         Provider<StorageService>(create: (_) => StorageService(), lazy: true),
         Provider<NotificationService>(
-          create: (_) => NotificationService(),
-          lazy: true,
+          create: (_) => _globalNotificationService ?? NotificationService(),
+          lazy: false, // Not lazy - we want immediate access
         ),
       ],
       child: const MyApp(),
@@ -268,27 +390,27 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ProxyProvider0<AuthService>(
           lazy: true,
           create: (_) => AuthService(),
-          update: (_, __) => AuthService(),
+          update: (_, previous) => AuthService(),
         ),
         ProxyProvider0<FirestoreService>(
           lazy: true,
           create: (_) => FirestoreService(),
-          update: (_, __) => FirestoreService(),
+          update: (_, previous) => FirestoreService(),
         ),
         ProxyProvider0<StorageService>(
           lazy: true,
           create: (_) => StorageService(),
-          update: (_, __) => StorageService(),
+          update: (_, previous) => StorageService(),
         ),
         ProxyProvider0<NotificationService>(
           lazy: true,
           create: (_) => NotificationService(),
-          update: (_, __) => NotificationService(),
+          update: (_, previous) => NotificationService(),
         ),
         ProxyProvider0<SubscriptionService>(
           lazy: true,
           create: (_) => SubscriptionService(),
-          update: (_, __) => SubscriptionService(),
+          update: (_, previous) => SubscriptionService(),
         ),
       ],
       child: MaterialApp(

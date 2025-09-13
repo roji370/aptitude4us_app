@@ -155,7 +155,7 @@ class _SplashScreenState extends State<SplashScreen>
       // Check auth and navigate
       await _checkAuthAndNavigate();
     } finally {
-      timeoutTimer?.cancel();
+      timeoutTimer.cancel();
     }
   }
 
@@ -194,7 +194,7 @@ class _SplashScreenState extends State<SplashScreen>
         // User is already logged in through Firebase Auth
         Logger.i("User already logged in via Firebase Auth");
 
-        // Setup notification handling first
+        // Setup user-specific notification handling
         if (mounted) {
           final notificationService = Provider.of<NotificationService>(
             context,
