@@ -1008,16 +1008,25 @@ class NotificationService {
   /// Handle course assignment notification
   Future<void> _handleCourseAssignmentNotification(RemoteMessage message, {bool isBackground = false}) async {
     try {
-      // Extract course assignment data from payload
+      // Extract course assignment data from payload - Support both our format and admin team format
       final courseId = message.data['courseId'] ?? '';
-      final courseName = message.data['courseName'] ?? 'New Course';
+      
+      // Admin team uses "courseTitle", we use "courseName" - support both
+      final courseName = message.data['courseTitle'] ?? message.data['courseName'] ?? 'New Course';
+      
       final assignmentDate = message.data['assignmentDate'] ?? '';
+      final assignedBy = message.data['assignedBy'] ?? '';
+      final clickAction = message.data['click_action'] ?? '';
+      final link = message.data['link'] ?? '';
       final action = message.data['action'] ?? 'open_course';
       
       Logger.i('Course assignment notification received:');
       Logger.i('  Course ID: $courseId');
       Logger.i('  Course Name: $courseName');
       Logger.i('  Assignment Date: $assignmentDate');
+      Logger.i('  Assigned By: $assignedBy');
+      Logger.i('  Click Action: $clickAction');
+      Logger.i('  Link: $link');
       Logger.i('  Action: $action');
       
       // Create notification with course assignment channel
@@ -1034,7 +1043,11 @@ class NotificationService {
             'type': 'course_assignment',
             'courseId': courseId,
             'courseName': courseName,
+            'courseTitle': courseName, // Also include admin team's field name
             'assignmentDate': assignmentDate,
+            'assignedBy': assignedBy,
+            'click_action': clickAction,
+            'link': link,
             'action': action,
           },
           category: NotificationCategory.Social,
@@ -1093,22 +1106,27 @@ class NotificationService {
   static Future<void> _handleCourseAssignmentAction(ReceivedAction receivedAction) async {
     try {
       final courseId = receivedAction.payload?['courseId'] ?? '';
-      final courseName = receivedAction.payload?['courseName'] ?? '';
+      // Support both admin team's field name and our field name
+      final courseName = receivedAction.payload?['courseTitle'] ?? receivedAction.payload?['courseName'] ?? '';
       final action = receivedAction.payload?['action'] ?? 'open_course';
+      final link = receivedAction.payload?['link'] ?? '';
+      final assignedBy = receivedAction.payload?['assignedBy'] ?? '';
       
       Logger.i('Handling course assignment action:');
       Logger.i('  Button pressed: ${receivedAction.buttonKeyPressed}');
       Logger.i('  Course ID: $courseId');
       Logger.i('  Course Name: $courseName');
       Logger.i('  Action: $action');
+      Logger.i('  Link: $link');
+      Logger.i('  Assigned By: $assignedBy');
       
       // Handle different button actions
       if (receivedAction.buttonKeyPressed == 'open_course' || receivedAction.buttonKeyPressed.isEmpty) {
-        // Navigate to the specific course
-        if (globalNavigatorKey.currentContext != null && courseId.isNotEmpty) {
+        // Navigate to courses list
+        if (globalNavigatorKey.currentContext != null) {
           await _navigateToCourse(courseId, courseName);
         } else {
-          Logger.w('Cannot navigate to course: context unavailable or courseId empty');
+          Logger.w('Cannot navigate: context unavailable');
         }
       } else if (receivedAction.buttonKeyPressed == 'dismiss') {
         Logger.i('Course assignment notification dismissed');
@@ -1119,7 +1137,7 @@ class NotificationService {
     }
   }
 
-  /// Navigate to a specific course
+  /// Navigate to courses list when notification is tapped
   static Future<void> _navigateToCourse(String courseId, String courseName) async {
     try {
       final context = globalNavigatorKey.currentContext;
@@ -1128,20 +1146,19 @@ class NotificationService {
         return;
       }
       
-      Logger.i('Navigating to course: $courseName (ID: $courseId)');
+      Logger.i('Course assignment notification: $courseName (ID: $courseId) - navigating to courses list');
       
-      // Navigate to assigned courses screen
-      // The user can then select the specific course
+      // Navigate to main courses screen where user can see their assigned courses
       Navigator.of(context).pushNamedAndRemoveUntil(
         '/', 
         (route) => false,
       );
       
       // Log successful navigation attempt
-      Logger.i('Course navigation initiated successfully');
+      Logger.i('Navigation to courses list completed successfully');
       
     } catch (e) {
-      Logger.e('Error navigating to course: $e');
+      Logger.e('Error navigating to courses list: $e');
     }
   }
 
@@ -1710,16 +1727,25 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 /// Handle course assignment notification in background
 Future<void> _handleCourseAssignmentNotificationBackground(RemoteMessage message) async {
   try {
-    // Extract course assignment data from payload
+    // Extract course assignment data from payload - Support both our format and admin team format
     final courseId = message.data['courseId'] ?? '';
-    final courseName = message.data['courseName'] ?? 'New Course';
+    
+    // Admin team uses "courseTitle", we use "courseName" - support both
+    final courseName = message.data['courseTitle'] ?? message.data['courseName'] ?? 'New Course';
+    
     final assignmentDate = message.data['assignmentDate'] ?? '';
+    final assignedBy = message.data['assignedBy'] ?? '';
+    final clickAction = message.data['click_action'] ?? '';
+    final link = message.data['link'] ?? '';
     final action = message.data['action'] ?? 'open_course';
     
     debugPrint('Background course assignment notification:');
     debugPrint('  Course ID: $courseId');
     debugPrint('  Course Name: $courseName');
     debugPrint('  Assignment Date: $assignmentDate');
+    debugPrint('  Assigned By: $assignedBy');
+    debugPrint('  Click Action: $clickAction');
+    debugPrint('  Link: $link');
     debugPrint('  Action: $action');
     
     // Create notification with course assignment channel
@@ -1736,7 +1762,11 @@ Future<void> _handleCourseAssignmentNotificationBackground(RemoteMessage message
           'type': 'course_assignment',
           'courseId': courseId,
           'courseName': courseName,
+          'courseTitle': courseName, // Also include admin team's field name
           'assignmentDate': assignmentDate,
+          'assignedBy': assignedBy,
+          'click_action': clickAction,
+          'link': link,
           'action': action,
         },
         category: NotificationCategory.Social,
