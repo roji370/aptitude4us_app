@@ -386,7 +386,7 @@ class NotificationService {
       Logger.e("Error cleaning up orphaned tokens: $e");
     }
 
-    // 4. Save the new token using admin team's required structure
+    // 4. Save the new token using admin team's EXACT required structure
     try {
       await FirebaseFirestore.instance
           .collection('users')
@@ -400,9 +400,9 @@ class NotificationService {
             'createdAt': FieldValue.serverTimestamp(),
             'lastUsed': FieldValue.serverTimestamp(),
           });
-      Logger.i("Saved FCM token to users/{userId}/fcm_tokens/{tokenId}: $token");
+      Logger.i("FCM token saved successfully to admin app structure");
     } catch (e) {
-      Logger.e('Error saving token to fcm_tokens collection: $e');
+      Logger.e('Error saving FCM token: $e');
     }
 
     // Also maintain backward compatibility with existing structure
@@ -426,21 +426,7 @@ class NotificationService {
       Logger.e('Error saving token to users collection: $e');
     }
 
-    try {
-      await FirebaseFirestore.instance
-          .collection('user_tokens')
-          .doc(token)
-          .set({
-            'token': token,
-            'userId': userId,
-            'lastUpdated': FieldValue.serverTimestamp(),
-            'platform': defaultTargetPlatform.toString(),
-            'isActive': true,
-          });
-      Logger.i("Saved new token to user_tokens collection: $token");
-    } catch (e) {
-      Logger.e('Error saving token to user_tokens collection: $e');
-    }
+    // Note: Removed user_tokens collection storage as admin app uses users/{userId}/fcm_tokens structure
 
     // 5. Verify token was saved properly by checking if only one token exists
     try {
@@ -530,7 +516,7 @@ class NotificationService {
     return await _firebaseMessaging!.getToken();
   }
 
-  /// Check notification permissions status and return a detailed report
+  /// Check notification permissions status
   Future<Map<String, dynamic>> checkNotificationPermissions() async {
     Map<String, dynamic> report = {};
 
@@ -557,13 +543,12 @@ class NotificationService {
       String? userId = _auth?.currentUser?.uid;
       if (userId != null) {
         try {
-          var doc =
-              await FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(userId)
-                  .collection('tokens')
-                  .doc(token)
-                  .get();
+          var doc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(userId)
+              .collection('fcm_tokens')
+              .doc(token)
+              .get();
           report['tokenInFirestore'] = doc.exists;
         } catch (e) {
           report['tokenInFirestore'] = false;
@@ -580,7 +565,7 @@ class NotificationService {
       report['awesomeNotificationsAllowed'] = false;
     }
 
-    Logger.i('Notification permissions report: $report');
+    Logger.i('Notification permissions check completed');
     return report;
   }
 
