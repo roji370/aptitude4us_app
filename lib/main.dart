@@ -46,12 +46,35 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   String notificationType = message.data['type'] ?? '';
   debugPrint('📬 Background notification type: $notificationType');
   
-  if (notificationType == 'course_assignment') {
+  if (notificationType == 'course_assignment' || notificationType == 'consolidated_course_assignment') {
     debugPrint('🎓 Processing course assignment notification in background...');
     
-    // Extract course data
-    final courseTitle = message.data['courseTitle'] ?? message.data['courseName'] ?? 'New Course';
+    // Extract course data using admin team's format
+    final courseCount = message.data['courseCount'] ?? '1';
+    final courseId = message.data['courseId'] ?? '';
+    final courseName = message.data['courseName'] ?? message.data['courseTitle'] ?? 'New Course';
+    final courseIds = message.data['courseIds'] ?? '';
+    final courseTitles = message.data['courseTitles'] ?? '';
     final assignedBy = message.data['assignedBy'] ?? 'Admin';
+    final assignedAt = message.data['assignedAt'] ?? DateTime.now().toIso8601String();
+    final deepLink = message.data['deepLink'] ?? '';
+    
+    // Determine notification content based on course count
+    String title;
+    String body;
+    String actionButtonLabel;
+    
+    if (courseCount == '1') {
+      // Single course assignment
+      title = 'New Course Assigned! 📚';
+      body = 'You have been assigned to "$courseName" by $assignedBy';
+      actionButtonLabel = 'Open Course';
+    } else {
+      // Multiple course assignments
+      title = 'New Courses Assigned! 📚';
+      body = 'You have been assigned to $courseCount new courses by $assignedBy';
+      actionButtonLabel = 'View Courses';
+    }
     
     // Create local notification for course assignment
     try {
@@ -59,10 +82,20 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         content: NotificationContent(
           id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
           channelKey: 'course_assignments',
-          title: 'New Course Assigned',
-          body: 'You have been assigned to "$courseTitle" by $assignedBy',
+          title: title,
+          body: body,
           notificationLayout: NotificationLayout.Default,
-          payload: Map<String, String>.from(message.data),
+          payload: {
+            'type': notificationType,
+            'courseCount': courseCount,
+            'courseId': courseId,
+            'courseName': courseName,
+            'courseIds': courseIds,
+            'courseTitles': courseTitles,
+            'assignedBy': assignedBy,
+            'assignedAt': assignedAt,
+            'deepLink': deepLink,
+          },
           category: NotificationCategory.Social,
           wakeUpScreen: true,
           criticalAlert: false,
@@ -70,7 +103,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         actionButtons: [
           NotificationActionButton(
             key: 'open_course',
-            label: 'Open Course',
+            label: actionButtonLabel,
             autoDismissible: true,
           ),
           NotificationActionButton(

@@ -386,7 +386,26 @@ class NotificationService {
       Logger.e("Error cleaning up orphaned tokens: $e");
     }
 
-    // 4. Save the new token
+    // 4. Save the new token using admin team's required structure
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('fcm_tokens')  // Admin team requires 'fcm_tokens' collection
+          .doc(token)  // Use token as document ID
+          .set({
+            'token': token,
+            'platform': defaultTargetPlatform.toString().split('.').last, // 'ios' or 'android'
+            'isActive': true,
+            'createdAt': FieldValue.serverTimestamp(),
+            'lastUsed': FieldValue.serverTimestamp(),
+          });
+      Logger.i("Saved FCM token to users/{userId}/fcm_tokens/{tokenId}: $token");
+    } catch (e) {
+      Logger.e('Error saving token to fcm_tokens collection: $e');
+    }
+
+    // Also maintain backward compatibility with existing structure
     try {
       await FirebaseFirestore.instance
           .collection('users')
@@ -965,7 +984,7 @@ class NotificationService {
     String notificationType = message.data['type'] ?? '';
     Logger.i('📬 Notification type: $notificationType');
     
-    if (notificationType == 'course_assignment') {
+    if (notificationType == 'course_assignment' || notificationType == 'consolidated_course_assignment') {
       Logger.i('🎓 Processing course assignment notification...');
       await _handleCourseAssignmentNotification(message, isBackground: false);
       return;
@@ -1016,47 +1035,70 @@ class NotificationService {
       Logger.i('🎓 _handleCourseAssignmentNotification called - isBackground: $isBackground');
       Logger.i('🔧 Full message payload: ${message.data}');
       
-      // Extract course assignment data from payload - Support both our format and admin team format
+      // Extract course assignment data from payload - Support admin team's consolidated format
+      final notificationType = message.data['type'] ?? '';
+      final courseCount = message.data['courseCount'] ?? '1';
+      
+      // For single course assignment
       final courseId = message.data['courseId'] ?? '';
+      final courseName = message.data['courseName'] ?? message.data['courseTitle'] ?? 'New Course';
       
-      // Admin team uses "courseTitle", we use "courseName" - support both
-      final courseName = message.data['courseTitle'] ?? message.data['courseName'] ?? 'New Course';
+      // For multiple course assignments
+      final courseIds = message.data['courseIds'] ?? '';
+      final courseTitles = message.data['courseTitles'] ?? '';
       
-      final assignmentDate = message.data['assignmentDate'] ?? '';
-      final assignedBy = message.data['assignedBy'] ?? '';
-      final clickAction = message.data['click_action'] ?? '';
-      final link = message.data['link'] ?? '';
-      final action = message.data['action'] ?? 'open_course';
+      final assignedBy = message.data['assignedBy'] ?? 'Admin';
+      final assignedAt = message.data['assignedAt'] ?? DateTime.now().toIso8601String();
+      final deepLink = message.data['deepLink'] ?? '';
       
       Logger.i('Course assignment notification received:');
+      Logger.i('  Notification Type: $notificationType');
+      Logger.i('  Course Count: $courseCount');
       Logger.i('  Course ID: $courseId');
       Logger.i('  Course Name: $courseName');
-      Logger.i('  Assignment Date: $assignmentDate');
+      Logger.i('  Course IDs: $courseIds');
+      Logger.i('  Course Titles: $courseTitles');
       Logger.i('  Assigned By: $assignedBy');
-      Logger.i('  Click Action: $clickAction');
-      Logger.i('  Link: $link');
-      Logger.i('  Action: $action');
+      Logger.i('  Assigned At: $assignedAt');
+      Logger.i('  Deep Link: $deepLink');
       
       // Create notification with course assignment channel
       final notificationId = DateTime.now().millisecondsSinceEpoch.remainder(100000);
+      
+      // Determine notification content based on course count
+      String title;
+      String body;
+      String actionButtonLabel;
+      
+      if (courseCount == '1') {
+        // Single course assignment
+        title = 'New Course Assigned! 📚';
+        body = 'You have been assigned to "$courseName" by $assignedBy';
+        actionButtonLabel = 'Open Course';
+      } else {
+        // Multiple course assignments
+        title = 'New Courses Assigned! 📚';
+        body = 'You have been assigned to $courseCount new courses by $assignedBy';
+        actionButtonLabel = 'View Courses';
+      }
       
       await AwesomeNotifications().createNotification(
         content: NotificationContent(
           id: notificationId,
           channelKey: 'course_assignments',
-          title: 'New Course Assigned! 📚',
-          body: 'You have been assigned to "$courseName". Tap to open the course.',
+          title: title,
+          body: body,
           notificationLayout: NotificationLayout.Default,
           payload: {
-            'type': 'course_assignment',
+            'type': notificationType,
+            'courseCount': courseCount,
             'courseId': courseId,
             'courseName': courseName,
-            'courseTitle': courseName, // Also include admin team's field name
-            'assignmentDate': assignmentDate,
+            'courseIds': courseIds,
+            'courseTitles': courseTitles,
             'assignedBy': assignedBy,
-            'click_action': clickAction,
-            'link': link,
-            'action': action,
+            'assignedAt': assignedAt,
+            'deepLink': deepLink,
           },
           category: NotificationCategory.Social,
           wakeUpScreen: true,
@@ -1066,7 +1108,7 @@ class NotificationService {
         actionButtons: [
           NotificationActionButton(
             key: 'open_course',
-            label: 'Open Course',
+            label: actionButtonLabel,
             actionType: ActionType.Default,
             autoDismissible: true,
           ),
@@ -1113,26 +1155,37 @@ class NotificationService {
   /// Handle course assignment notification action
   static Future<void> _handleCourseAssignmentAction(ReceivedAction receivedAction) async {
     try {
+      final notificationType = receivedAction.payload?['type'] ?? '';
+      final courseCount = receivedAction.payload?['courseCount'] ?? '1';
       final courseId = receivedAction.payload?['courseId'] ?? '';
-      // Support both admin team's field name and our field name
-      final courseName = receivedAction.payload?['courseTitle'] ?? receivedAction.payload?['courseName'] ?? '';
-      final action = receivedAction.payload?['action'] ?? 'open_course';
-      final link = receivedAction.payload?['link'] ?? '';
+      final courseName = receivedAction.payload?['courseName'] ?? receivedAction.payload?['courseTitle'] ?? '';
+      final courseIds = receivedAction.payload?['courseIds'] ?? '';
+      final courseTitles = receivedAction.payload?['courseTitles'] ?? '';
       final assignedBy = receivedAction.payload?['assignedBy'] ?? '';
+      final deepLink = receivedAction.payload?['deepLink'] ?? '';
       
       Logger.i('Handling course assignment action:');
       Logger.i('  Button pressed: ${receivedAction.buttonKeyPressed}');
+      Logger.i('  Notification Type: $notificationType');
+      Logger.i('  Course Count: $courseCount');
       Logger.i('  Course ID: $courseId');
       Logger.i('  Course Name: $courseName');
-      Logger.i('  Action: $action');
-      Logger.i('  Link: $link');
+      Logger.i('  Course IDs: $courseIds');
+      Logger.i('  Course Titles: $courseTitles');
       Logger.i('  Assigned By: $assignedBy');
+      Logger.i('  Deep Link: $deepLink');
       
       // Handle different button actions
       if (receivedAction.buttonKeyPressed == 'open_course' || receivedAction.buttonKeyPressed.isEmpty) {
-        // Navigate to courses list
+        // Navigate based on course count and deep link
         if (globalNavigatorKey.currentContext != null) {
-          await _navigateToCourse(courseId, courseName);
+          await _navigateToCourse(
+            courseCount: courseCount,
+            courseId: courseId,
+            courseName: courseName,
+            courseIds: courseIds,
+            deepLink: deepLink,
+          );
         } else {
           Logger.w('Cannot navigate: context unavailable');
         }
@@ -1145,8 +1198,14 @@ class NotificationService {
     }
   }
 
-  /// Navigate to courses list when notification is tapped
-  static Future<void> _navigateToCourse(String courseId, String courseName) async {
+  /// Navigate to appropriate screen when notification is tapped
+  static Future<void> _navigateToCourse({
+    required String courseCount,
+    required String courseId,
+    required String courseName,
+    required String courseIds,
+    required String deepLink,
+  }) async {
     try {
       final context = globalNavigatorKey.currentContext;
       if (context == null) {
@@ -1154,13 +1213,25 @@ class NotificationService {
         return;
       }
       
-      Logger.i('Course assignment notification: $courseName (ID: $courseId) - navigating to courses list');
+      Logger.i('Course assignment notification: $courseName (ID: $courseId) - navigating based on course count: $courseCount');
       
-      // Navigate to main courses screen where user can see their assigned courses
-      Navigator.of(context).pushNamedAndRemoveUntil(
-        '/', 
-        (route) => false,
-      );
+      if (courseCount == '1') {
+        // Single course assignment - navigate to main courses list
+        // User can then tap on the specific course to view details
+        Logger.i('Single course assignment - navigating to courses list');
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/', 
+          (route) => false,
+        );
+      } else {
+        // Multiple course assignments - navigate to main courses list
+        // User can see all their assigned courses
+        Logger.i('Multiple course assignments - navigating to courses list');
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/', 
+          (route) => false,
+        );
+      }
       
       // Log successful navigation attempt
       Logger.i('Navigation to courses list completed successfully');
