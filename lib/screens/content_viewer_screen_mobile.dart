@@ -1497,7 +1497,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
+                color: Theme.of(context).primaryColor.withOpacity(0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -1570,14 +1570,18 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
         throw FormatException('Invalid URL format');
       }
       
-      // Open in external browser
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(
-          uri,
-          mode: LaunchMode.externalApplication,
-        );
-      } else {
-        _showErrorDialog('Cannot open link');
+      // Open in external browser with error handling
+      try {
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(
+            uri,
+            mode: LaunchMode.externalApplication,
+          );
+        } else {
+          _showErrorDialog('Cannot open link: $url');
+        }
+      } catch (launchError) {
+        _showErrorDialog('Failed to open link: ${launchError.toString()}');
       }
     } catch (e) {
       _showErrorDialog('Invalid link URL: ${e.toString()}');

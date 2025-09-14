@@ -49,7 +49,7 @@
             android:value="2" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="course_assignments" />
+            android:value="chat_channel" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_sound"
             android:resource="@raw/notification_sound" />
