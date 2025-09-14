@@ -157,6 +157,8 @@
       <string>ms-excel</string>
       <string>ms-powerpoint</string>
       <string>com.adobe.Adobe-Reader</string>
+      <string>https</string>
+      <string>http</string>
     </array>
   </dict>
 </plist>

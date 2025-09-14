@@ -44,6 +44,8 @@ class ContentModel {
         contentTypeValue = 'video';
       } else if (contentValue.toLowerCase().contains('.pdf')) {
         contentTypeValue = 'pdf';
+      } else if (contentValue.toLowerCase().startsWith('http')) {
+        contentTypeValue = 'link';
       } else {
         contentTypeValue = 'text';
       }

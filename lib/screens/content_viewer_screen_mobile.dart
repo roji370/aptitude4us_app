@@ -23,6 +23,7 @@ import '../utils/pdf_loader.dart';
 import '../widgets/custom_pdf_viewer.dart';
 import '../services/firestore_service.dart';
 import '../widgets/custom_bottom_navigation.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // Watermark overlay widget for PDFs
 class BriffiniWatermark extends StatelessWidget {
@@ -956,6 +957,9 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
           ),
         );
 
+      case 'link':
+        return _buildLinkContent(content);
+        
       case 'text':
       default:
         return Stack(
@@ -1464,11 +1468,137 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
         return Icons.video_library;
       case 'pdf':
         return Icons.picture_as_pdf;
+      case 'link':
+        return Icons.link;
       case 'text':
         return Icons.text_snippet;
       default:
         return Icons.article;
     }
+  }
+
+  // Build link content widget
+  Widget _buildLinkContent(ContentModel content) {
+    if (content.content.isEmpty) {
+      return const Center(
+        child: Text(
+          'No link URL available.',
+          style: TextStyle(color: Colors.red),
+        ),
+      );
+    }
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.link,
+                size: 64,
+                color: Theme.of(context).primaryColor,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              content.title,
+              style: const TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            if (content.content.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  content.content,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[600],
+                    fontFamily: 'monospace',
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+            ElevatedButton.icon(
+              onPressed: () => _openLink(content.content),
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Open Link'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 16,
+                ),
+                textStyle: const TextStyle(fontSize: 16),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'This link will open in your browser',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[500],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Open link in external browser
+  Future<void> _openLink(String url) async {
+    try {
+      // Validate URL
+      final uri = Uri.parse(url);
+      if (uri.scheme.isEmpty || (!uri.scheme.startsWith('http'))) {
+        throw FormatException('Invalid URL format');
+      }
+      
+      // Open in external browser
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(
+          uri,
+          mode: LaunchMode.externalApplication,
+        );
+      } else {
+        _showErrorDialog('Cannot open link');
+      }
+    } catch (e) {
+      _showErrorDialog('Invalid link URL: ${e.toString()}');
+    }
+  }
+
+  // Show error dialog
+  void _showErrorDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Error'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildEmptyContentState() {
