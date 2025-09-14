@@ -435,11 +435,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           create: (_) => StorageService(),
           update: (_, previous) => StorageService(),
         ),
-        ProxyProvider0<NotificationService>(
-          lazy: true,
-          create: (_) => NotificationService(),
-          update: (_, previous) => NotificationService(),
-        ),
         ProxyProvider0<SubscriptionService>(
           lazy: true,
           create: (_) => SubscriptionService(),

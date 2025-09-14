@@ -479,6 +479,12 @@ class NotificationService {
           arguments: courseId,
         );
       }
+    } else if (message.data['type'] == 'course_assignment' || 
+               message.data['type'] == 'consolidated_course_assignment') {
+      // Navigate to courses screen for course assignments
+      if (globalNavigatorKey.currentState != null) {
+        globalNavigatorKey.currentState!.pushNamed('/');
+      }
     } else if (message.data['type'] == 'announcement') {
       // Navigate to announcements screen
       if (globalNavigatorKey.currentState != null) {
@@ -1122,7 +1128,8 @@ class NotificationService {
     Logger.i('Notification payload: ${receivedAction.payload}');
 
     // Handle course assignment notifications
-    if (receivedAction.payload?['type'] == 'course_assignment') {
+    if (receivedAction.payload?['type'] == 'course_assignment' || 
+        receivedAction.payload?['type'] == 'consolidated_course_assignment') {
       await _handleCourseAssignmentAction(receivedAction);
       return;
     }
