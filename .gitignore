@@ -166,3 +166,19 @@ lib/generated_plugin_registrant.dart
 # Release artifacts
 release/
 briffini-academy-*.apk
+
+# iOS Project files to ignore
+ios/Runner.xcodeproj/*
+!ios/Runner.xcodeproj/project.pbxproj
+ios/Runner.xcworkspace/*
+!ios/Runner.xcworkspace/contents.xcworkspacedata
+
+# CocoaPods files to ignore
+ios/Podfile.lock
+ios/Pods/
+
+#all config files
+ios/*.xcodeproj
+ios/*.xcworkspace
+ios/Podfile.lock
+ios/Pods/
