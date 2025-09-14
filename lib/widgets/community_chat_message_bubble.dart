@@ -1,28 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 import '../models/community_chat_message.dart';
 import '../services/attachment_service.dart';
 import '../widgets/attachment_preview.dart';
 import '../utils/responsive_helper.dart';
 
+/// Enhanced message bubble widget for community chat with reply support
+/// Similar to WhatsApp's message bubble design
 class CommunityChatMessageBubble extends StatefulWidget {
   final CommunityChatMessage message;
   final bool isCurrentUser;
-  final VoidCallback? onReply;
+  final VoidCallback onReply;
+  final Function(String messageId)? onScrollToMessage;
   final bool showAvatar;
 
   const CommunityChatMessageBubble({
     super.key,
     required this.message,
     required this.isCurrentUser,
-    this.onReply,
+    required this.onReply,
+    this.onScrollToMessage,
     this.showAvatar = true,
   });
 
   @override
-  State<CommunityChatMessageBubble> createState() =>
-      _CommunityChatMessageBubbleState();
+  State<CommunityChatMessageBubble> createState() => _CommunityChatMessageBubbleState();
 }
 
 class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
@@ -35,28 +37,22 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
   void initState() {
     super.initState();
     _animationController = AnimationController(
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 200),
       vsync: this,
     );
 
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.elasticOut),
+    _scaleAnimation = Tween<double>(begin: 0.95, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOutBack),
     );
 
     _slideAnimation = Tween<Offset>(
-      begin:
-          widget.isCurrentUser ? const Offset(0.5, 0) : const Offset(-0.5, 0),
+      begin: widget.isCurrentUser ? const Offset(0.3, 0) : const Offset(-0.3, 0),
       end: Offset.zero,
     ).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeOutCubic),
     );
 
-    // Start animation with a slight delay for staggered effect
-    Future.delayed(const Duration(milliseconds: 50), () {
-      if (mounted) {
-        _animationController.forward();
-      }
-    });
+    _animationController.forward();
   }
 
   @override
@@ -69,7 +65,6 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final time = DateFormat('HH:mm').format(widget.message.timestamp.toDate());
 
     return SlideTransition(
       position: _slideAnimation,
@@ -77,77 +72,74 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
         scale: _scaleAnimation,
         child: Padding(
           padding: EdgeInsets.only(
-            left:
-                widget.isCurrentUser
-                    ? ResponsiveHelper.getAdaptiveSpacing(
-                      context,
-                      compact: 20.0,
-                      regular: 25.0,
-                      pro: 30.0,
-                      large: 35.0,
-                      extraLarge: 40.0,
-                    )
-                    : ResponsiveHelper.getAdaptiveSpacing(
-                      context,
-                      compact: 8.0,
-                      regular: 10.0,
-                      pro: 12.0,
-                      large: 12.0,
-                      extraLarge: 14.0,
-                    ),
-            right:
-                widget.isCurrentUser
-                    ? ResponsiveHelper.getAdaptiveSpacing(
-                      context,
-                      compact: 6.0,
-                      regular: 8.0,
-                      pro: 10.0,
-                      large: 10.0,
-                      extraLarge: 12.0,
-                    )
-                    : ResponsiveHelper.getAdaptiveSpacing(
-                      context,
-                      compact: 3.0,
-                      regular: 4.0,
-                      pro: 5.0,
-                      large: 5.0,
-                      extraLarge: 6.0,
-                    ),
+            left: widget.isCurrentUser
+                ? ResponsiveHelper.getAdaptiveSpacing(
+                    context,
+                    compact: 20.0,
+                    regular: 25.0,
+                    pro: 30.0,
+                    large: 35.0,
+                    extraLarge: 40.0,
+                  )
+                : ResponsiveHelper.getAdaptiveSpacing(
+                    context,
+                    compact: 8.0,
+                    regular: 10.0,
+                    pro: 12.0,
+                    large: 12.0,
+                    extraLarge: 14.0,
+                  ),
+            right: widget.isCurrentUser
+                ? ResponsiveHelper.getAdaptiveSpacing(
+                    context,
+                    compact: 6.0,
+                    regular: 8.0,
+                    pro: 10.0,
+                    large: 10.0,
+                    extraLarge: 12.0,
+                  )
+                : ResponsiveHelper.getAdaptiveSpacing(
+                    context,
+                    compact: 3.0,
+                    regular: 4.0,
+                    pro: 5.0,
+                    large: 5.0,
+                    extraLarge: 6.0,
+                  ),
             top: ResponsiveHelper.getAdaptiveSpacing(
               context,
-              compact: 4.0,
-              regular: 6.0,
+              compact: 6.0,
+              regular: 8.0,
               pro: 8.0,
               large: 10.0,
               extraLarge: 12.0,
             ),
             bottom: ResponsiveHelper.getAdaptiveSpacing(
               context,
-              compact: 4.0,
-              regular: 6.0,
+              compact: 6.0,
+              regular: 8.0,
               pro: 8.0,
               large: 10.0,
               extraLarge: 12.0,
             ),
           ),
           child: Row(
-            mainAxisAlignment:
-                widget.isCurrentUser
-                    ? MainAxisAlignment.end
-                    : MainAxisAlignment.start,
+            mainAxisAlignment: widget.isCurrentUser 
+                ? MainAxisAlignment.end 
+                : MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              // Avatar for other users' messages
+              // Avatar for received messages
               if (!widget.isCurrentUser && widget.showAvatar) ...[
-                _buildUserAvatar(context, colorScheme),
+                _buildAvatar(context),
                 SizedBox(
                   width: ResponsiveHelper.getAdaptiveSpacing(
                     context,
                     compact: 8.0,
-                    regular: 12.0,
-                    pro: 14.0,
-                    large: 16.0,
-                    extraLarge: 18.0,
+                    regular: 10.0,
+                    pro: 12.0,
+                    large: 12.0,
+                    extraLarge: 14.0,
                   ),
                 ),
               ],
@@ -155,31 +147,32 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
               // Message content
               Flexible(
                 child: Column(
-                  crossAxisAlignment:
-                      widget.isCurrentUser
-                          ? CrossAxisAlignment.end
-                          : CrossAxisAlignment.start,
+                  crossAxisAlignment: widget.isCurrentUser
+                      ? CrossAxisAlignment.end
+                      : CrossAxisAlignment.start,
                   children: [
-                    // Message bubble
-                    _buildMessageBubble(context, theme, colorScheme),
+                    // Reply indicator (quoted message preview)
+                    if (widget.message.isReply)
+                      _buildReplyIndicator(context),
 
-                    // Timestamp
+                    // Main message bubble
+                    _buildMessageContent(context, theme, colorScheme),
+
+                    // Timestamp and status
                     SizedBox(
                       height: ResponsiveHelper.getAdaptiveSpacing(
                         context,
                         compact: 4.0,
                         regular: 6.0,
-                        pro: 8.0,
-                        large: 10.0,
-                        extraLarge: 12.0,
+                        pro: 6.0,
+                        large: 8.0,
+                        extraLarge: 8.0,
                       ),
                     ),
-                    _buildTimestamp(context, theme, time),
+                    _buildMessageMeta(context, theme),
                   ],
                 ),
               ),
-
-              // No spacer needed for current user messages since they don't show avatars
             ],
           ),
         ),
@@ -187,17 +180,9 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
     );
   }
 
-  Widget _buildUserAvatar(BuildContext context, ColorScheme colorScheme) {
-    final avatarSize = ResponsiveHelper.adaptiveFontSize(context, 36.0);
-    final initials =
-        widget.message.senderName.isNotEmpty
-            ? widget.message.senderName[0].toUpperCase()
-            : '?';
-
-    // Generate consistent color based on sender name
-    final colorIndex =
-        widget.message.senderName.hashCode % _avatarColors.length;
-    final avatarColors = _avatarColors[colorIndex.abs()];
+  Widget _buildAvatar(BuildContext context) {
+    final senderName = widget.message.senderName;
+    final avatarSize = ResponsiveHelper.adaptiveFontSize(context, 32.0);
 
     return Container(
       width: avatarSize,
@@ -206,12 +191,15 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: avatarColors,
+          colors: [
+            Theme.of(context).colorScheme.primary,
+            Theme.of(context).colorScheme.primaryContainer,
+          ],
         ),
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
-            color: avatarColors[0].withValues(alpha: 0.3),
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
             blurRadius: ResponsiveHelper.getAdaptiveElevation(context),
             offset: const Offset(0, 2),
           ),
@@ -219,52 +207,217 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
       ),
       child: Center(
         child: Text(
-          initials,
+          senderName.isNotEmpty ? senderName[0].toUpperCase() : '?',
           style: TextStyle(
-            color: Colors.white,
-            fontSize: ResponsiveHelper.adaptiveFontSize(context, 16.0),
-            fontWeight: FontWeight.w700,
+            color: Theme.of(context).colorScheme.onPrimary,
+            fontSize: ResponsiveHelper.adaptiveFontSize(context, 14.0),
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),
     );
   }
 
-  Widget _buildMessageBubble(
+  Widget _buildReplyIndicator(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return GestureDetector(
+      onTap: () {
+        // Scroll to the original message
+        if (widget.onScrollToMessage != null && widget.message.replyToMessageId != null) {
+          widget.onScrollToMessage!(widget.message.replyToMessageId!);
+        }
+      },
+      child: Container(
+        margin: EdgeInsets.only(
+          bottom: ResponsiveHelper.getAdaptiveSpacing(
+            context,
+            compact: 6.0,
+            regular: 8.0,
+            pro: 8.0,
+            large: 10.0,
+            extraLarge: 12.0,
+          ),
+        ),
+        padding: EdgeInsets.all(
+          ResponsiveHelper.getAdaptiveSpacing(
+            context,
+            compact: 8.0,
+            regular: 10.0,
+            pro: 12.0,
+            large: 12.0,
+            extraLarge: 14.0,
+          ),
+        ),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(
+            ResponsiveHelper.getAdaptiveSpacing(
+              context,
+              compact: 12.0,
+              regular: 14.0,
+              pro: 16.0,
+              large: 16.0,
+              extraLarge: 18.0,
+            ),
+          ),
+          border: Border.all(
+            color: colorScheme.outline.withValues(alpha: 0.3),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            // Vertical line indicator
+            Container(
+              width: 3,
+              height: 30,
+              decoration: BoxDecoration(
+                color: colorScheme.primary,
+                borderRadius: BorderRadius.circular(1.5),
+              ),
+            ),
+            
+            SizedBox(
+              width: ResponsiveHelper.getAdaptiveSpacing(
+                context,
+                compact: 8.0,
+                regular: 10.0,
+                pro: 12.0,
+                large: 12.0,
+                extraLarge: 14.0,
+              ),
+            ),
+            
+            // Quoted message content
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Replying to ${widget.message.replyToMessage?.senderName ?? 'Unknown'}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.primary,
+                      fontSize: ResponsiveHelper.adaptiveFontSize(context, 11.0),
+                    ),
+                  ),
+                  SizedBox(
+                    height: ResponsiveHelper.getAdaptiveSpacing(
+                      context,
+                      compact: 2.0,
+                      regular: 3.0,
+                      pro: 4.0,
+                      large: 4.0,
+                      extraLarge: 5.0,
+                    ),
+                  ),
+                  _buildQuotedContent(context),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuotedContent(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final quotedMessage = widget.message.replyToMessage;
+
+    if (quotedMessage == null) {
+      return Text(
+        'Message not found',
+        style: TextStyle(
+          color: colorScheme.onSurfaceVariant,
+          fontSize: ResponsiveHelper.adaptiveFontSize(context, 12.0),
+          fontStyle: FontStyle.italic,
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    if (quotedMessage.hasAttachment) {
+      // Show attachment preview
+      return Row(
+        children: [
+          Icon(
+            _getAttachmentIcon(quotedMessage.attachmentType),
+            size: ResponsiveHelper.adaptiveFontSize(context, 14.0),
+            color: colorScheme.onSurfaceVariant,
+          ),
+          SizedBox(
+            width: ResponsiveHelper.getAdaptiveSpacing(
+              context,
+              compact: 4.0,
+              regular: 6.0,
+              pro: 8.0,
+              large: 8.0,
+              extraLarge: 10.0,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              quotedMessage.attachment?.fileName ?? 'Attachment',
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: ResponsiveHelper.adaptiveFontSize(context, 12.0),
+                fontStyle: FontStyle.italic,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      );
+    } else {
+      // Show text content
+      return Text(
+        quotedMessage.text,
+        style: TextStyle(
+          color: colorScheme.onSurfaceVariant,
+          fontSize: ResponsiveHelper.adaptiveFontSize(context, 12.0),
+        ),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+  }
+
+  Widget _buildMessageContent(
     BuildContext context,
     ThemeData theme,
     ColorScheme colorScheme,
   ) {
-    final isCurrentUser = widget.isCurrentUser;
+    final isMe = widget.isCurrentUser;
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onLongPress: () {
-          if (widget.onReply != null) {
-            HapticFeedback.mediumImpact();
-            widget.onReply!();
-          }
-        },
-        onTap: () {
           HapticFeedback.selectionClick();
+          widget.onReply();
         },
         borderRadius: BorderRadius.circular(
           ResponsiveHelper.getAdaptiveSpacing(
             context,
-            compact: 20.0,
-            regular: 24.0,
-            pro: 28.0,
-            large: 32.0,
-            extraLarge: 36.0,
+            compact: 18.0,
+            regular: 20.0,
+            pro: 22.0,
+            large: 24.0,
+            extraLarge: 26.0,
           ),
         ),
         child: Container(
           constraints: BoxConstraints(
             maxWidth: MediaQuery.of(context).size.width * 0.75,
           ),
-          padding: EdgeInsets.all(
-            ResponsiveHelper.getAdaptiveSpacing(
+          padding: EdgeInsets.symmetric(
+            horizontal: ResponsiveHelper.getAdaptiveSpacing(
               context,
               compact: 14.0,
               regular: 16.0,
@@ -272,112 +425,117 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
               large: 20.0,
               extraLarge: 22.0,
             ),
+            vertical: ResponsiveHelper.getAdaptiveSpacing(
+              context,
+              compact: 10.0,
+              regular: 12.0,
+              pro: 14.0,
+              large: 16.0,
+              extraLarge: 18.0,
+            ),
           ),
           decoration: BoxDecoration(
-            gradient:
-                isCurrentUser
-                    ? LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        colorScheme.primary,
-                        colorScheme.primary.withValues(alpha: 0.85),
-                      ],
-                    )
-                    : null,
-            color: isCurrentUser ? null : colorScheme.surfaceContainerHigh,
+            gradient: isMe
+                ? LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      colorScheme.primary,
+                      colorScheme.primary.withValues(alpha: 0.9),
+                    ],
+                  )
+                : null,
+            color: isMe ? null : colorScheme.surfaceContainerHigh,
             borderRadius: BorderRadius.only(
               topLeft: Radius.circular(
                 ResponsiveHelper.getAdaptiveSpacing(
                   context,
-                  compact: 20.0,
-                  regular: 24.0,
-                  pro: 28.0,
-                  large: 32.0,
-                  extraLarge: 36.0,
+                  compact: 18.0,
+                  regular: 20.0,
+                  pro: 22.0,
+                  large: 24.0,
+                  extraLarge: 26.0,
                 ),
               ),
               topRight: Radius.circular(
                 ResponsiveHelper.getAdaptiveSpacing(
                   context,
-                  compact: 20.0,
-                  regular: 24.0,
-                  pro: 28.0,
-                  large: 32.0,
-                  extraLarge: 36.0,
+                  compact: 18.0,
+                  regular: 20.0,
+                  pro: 22.0,
+                  large: 24.0,
+                  extraLarge: 26.0,
                 ),
               ),
               bottomLeft: Radius.circular(
-                isCurrentUser
+                isMe
                     ? ResponsiveHelper.getAdaptiveSpacing(
-                      context,
-                      compact: 20.0,
-                      regular: 24.0,
-                      pro: 28.0,
-                      large: 32.0,
-                      extraLarge: 36.0,
-                    )
+                        context,
+                        compact: 18.0,
+                        regular: 20.0,
+                        pro: 22.0,
+                        large: 24.0,
+                        extraLarge: 26.0,
+                      )
                     : ResponsiveHelper.getAdaptiveSpacing(
-                      context,
-                      compact: 6.0,
-                      regular: 8.0,
-                      pro: 10.0,
-                      large: 12.0,
-                      extraLarge: 14.0,
-                    ),
+                        context,
+                        compact: 4.0,
+                        regular: 6.0,
+                        pro: 8.0,
+                        large: 8.0,
+                        extraLarge: 10.0,
+                      ),
               ),
               bottomRight: Radius.circular(
-                isCurrentUser
+                isMe
                     ? ResponsiveHelper.getAdaptiveSpacing(
-                      context,
-                      compact: 6.0,
-                      regular: 8.0,
-                      pro: 10.0,
-                      large: 12.0,
-                      extraLarge: 14.0,
-                    )
+                        context,
+                        compact: 4.0,
+                        regular: 6.0,
+                        pro: 8.0,
+                        large: 8.0,
+                        extraLarge: 10.0,
+                      )
                     : ResponsiveHelper.getAdaptiveSpacing(
-                      context,
-                      compact: 20.0,
-                      regular: 24.0,
-                      pro: 28.0,
-                      large: 32.0,
-                      extraLarge: 36.0,
-                    ),
+                        context,
+                        compact: 18.0,
+                        regular: 20.0,
+                        pro: 22.0,
+                        large: 24.0,
+                        extraLarge: 26.0,
+                      ),
               ),
             ),
             boxShadow: [
               BoxShadow(
-                color: (isCurrentUser
-                        ? colorScheme.primary
-                        : colorScheme.shadow)
-                    .withValues(alpha: 0.15),
+                color: (isMe ? colorScheme.primary : colorScheme.shadow)
+                    .withValues(alpha: 0.1),
                 blurRadius: ResponsiveHelper.getAdaptiveElevation(context),
-                offset: const Offset(0, 3),
+                offset: const Offset(0, 2),
               ),
             ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Sender name for other users
-              if (!isCurrentUser) ...[
+              // Sender name for received messages
+              if (!isMe) ...[
                 Text(
                   widget.message.senderName,
                   style: TextStyle(
-                    fontSize: ResponsiveHelper.adaptiveFontSize(context, 13.0),
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                     color: colorScheme.primary,
+                    fontSize: ResponsiveHelper.adaptiveFontSize(context, 12.0),
                   ),
                 ),
                 SizedBox(
                   height: ResponsiveHelper.getAdaptiveSpacing(
                     context,
-                    compact: 6.0,
-                    regular: 8.0,
-                    pro: 10.0,
-                    large: 12.0,
-                    extraLarge: 14.0,
+                    compact: 4.0,
+                    regular: 6.0,
+                    pro: 6.0,
+                    large: 8.0,
+                    extraLarge: 8.0,
                   ),
                 ),
               ],
@@ -403,13 +561,10 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
 
               // Message text
               if (widget.message.text.isNotEmpty)
-                SelectableText(
+                Text(
                   widget.message.text,
                   style: TextStyle(
-                    color:
-                        isCurrentUser
-                            ? colorScheme.onPrimary
-                            : colorScheme.onSurface,
+                    color: isMe ? colorScheme.onPrimary : colorScheme.onSurface,
                     fontSize: ResponsiveHelper.adaptiveFontSize(context, 15.0),
                     height: 1.4,
                     fontWeight: FontWeight.w400,
@@ -422,40 +577,93 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
     );
   }
 
-  Widget _buildTimestamp(BuildContext context, ThemeData theme, String time) {
-    return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: ResponsiveHelper.getAdaptiveSpacing(
-          context,
-          compact: 4.0,
-          regular: 6.0,
-          pro: 8.0,
-          large: 10.0,
-          extraLarge: 12.0,
+  Widget _buildMessageMeta(BuildContext context, ThemeData theme) {
+    final timestamp = _formatTimestamp(widget.message.timestamp.toDate());
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          timestamp,
+          style: TextStyle(
+            fontSize: ResponsiveHelper.adaptiveFontSize(context, 11.0),
+            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+            fontWeight: FontWeight.w500,
+          ),
         ),
-      ),
-      child: Text(
-        time,
-        style: TextStyle(
-          fontSize: ResponsiveHelper.adaptiveFontSize(context, 11.0),
-          color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
-          fontWeight: FontWeight.w500,
-        ),
-      ),
+        if (widget.isCurrentUser) ...[
+          SizedBox(
+            width: ResponsiveHelper.getAdaptiveSpacing(
+              context,
+              compact: 4.0,
+              regular: 6.0,
+              pro: 6.0,
+              large: 8.0,
+              extraLarge: 8.0,
+            ),
+          ),
+          _buildStatusIcon(context, theme),
+        ],
+      ],
     );
   }
 
-  // Predefined avatar color combinations for consistent user identification
-  static const List<List<Color>> _avatarColors = [
-    [Color(0xFF6366F1), Color(0xFF8B5CF6)], // Indigo to Purple
-    [Color(0xFF10B981), Color(0xFF059669)], // Emerald
-    [Color(0xFFF59E0B), Color(0xFFD97706)], // Amber
-    [Color(0xFFEF4444), Color(0xFFDC2626)], // Red
-    [Color(0xFF3B82F6), Color(0xFF2563EB)], // Blue
-    [Color(0xFF8B5CF6), Color(0xFF7C3AED)], // Purple
-    [Color(0xFF06B6D4), Color(0xFF0891B2)], // Cyan
-    [Color(0xFFEC4899), Color(0xFFDB2777)], // Pink
-    [Color(0xFF84CC16), Color(0xFF65A30D)], // Lime
-    [Color(0xFFF97316), Color(0xFFEA580C)], // Orange
-  ];
+  Widget _buildStatusIcon(BuildContext context, ThemeData theme) {
+    IconData iconData;
+    Color iconColor;
+
+    switch (widget.message.status) {
+      case 'sending':
+        iconData = Icons.schedule;
+        iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5);
+        break;
+      case 'sent':
+        iconData = Icons.check;
+        iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7);
+        break;
+      case 'delivered':
+        iconData = Icons.done_all;
+        iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7);
+        break;
+      case 'read':
+        iconData = Icons.done_all;
+        iconColor = theme.colorScheme.primary;
+        break;
+      default:
+        iconData = Icons.check;
+        iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5);
+    }
+
+    return Icon(
+      iconData,
+      size: ResponsiveHelper.adaptiveFontSize(context, 14.0),
+      color: iconColor,
+    );
+  }
+
+  String _formatTimestamp(DateTime timestamp) {
+    final now = DateTime.now();
+    final diff = now.difference(timestamp);
+    final hour = timestamp.hour;
+    final minute = timestamp.minute;
+
+    if (diff.inDays > 0) {
+      return '${timestamp.day}/${timestamp.month} ${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
+    } else {
+      return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
+    }
+  }
+
+  IconData _getAttachmentIcon(AttachmentType? type) {
+    switch (type) {
+      case AttachmentType.image:
+        return Icons.image;
+      case AttachmentType.video:
+        return Icons.videocam;
+      case AttachmentType.document:
+        return Icons.description;
+      default:
+        return Icons.attach_file;
+    }
+  }
 }

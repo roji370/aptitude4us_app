@@ -201,7 +201,10 @@ class ChatService {
   }
 
   // Send a text message to admin
-  Future<Map<String, dynamic>> sendMessage({required String text}) async {
+  Future<Map<String, dynamic>> sendMessage({
+    required String text,
+    String? replyToMessageId,
+  }) async {
     final user = _auth.currentUser;
     if (user == null) {
       return {'success': false, 'error': 'User not logged in'};
@@ -222,6 +225,11 @@ class ChatService {
         'type': 'text',
       };
 
+      // Add reply information if provided
+      if (replyToMessageId != null) {
+        messageData['replyToMessageId'] = replyToMessageId;
+      }
+
       // Add to Firestore
       final docRef = await _firestore.collection('messages').add(messageData);
 
@@ -236,6 +244,7 @@ class ChatService {
   Future<Map<String, dynamic>> sendMessageWithAttachment({
     required AttachmentData attachment,
     String? text,
+    String? replyToMessageId,
   }) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -266,6 +275,11 @@ class ChatService {
         'type': messageType,
         'attachment': attachment.toMap(),
       };
+
+      // Add reply information if provided
+      if (replyToMessageId != null) {
+        messageData['replyToMessageId'] = replyToMessageId;
+      }
 
       // Add to Firestore
       final docRef = await _firestore.collection('messages').add(messageData);

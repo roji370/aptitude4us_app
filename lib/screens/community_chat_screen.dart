@@ -9,6 +9,7 @@ import '../services/auth_persistence_service.dart';
 import '../widgets/community_chat_message_bubble.dart';
 import '../widgets/attachment_picker.dart';
 import '../widgets/protected_course_content.dart';
+import '../widgets/reply_input_widget.dart';
 import '../utils/responsive_helper.dart';
 import '../utils/logger.dart';
 
@@ -27,6 +28,11 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
   final ScrollController _scrollController = ScrollController();
 
   final FocusNode _inputFocusNode = FocusNode();
+
+  // Reply functionality state
+  CommunityChatMessage? _replyingToMessage;
+  bool _isSendingReply = false;
+  final GlobalKey<AnimatedListState> _messageListKey = GlobalKey<AnimatedListState>();
 
   // Get the actual user display name from UserModel
   Future<String> _getUserDisplayName() async {
@@ -116,7 +122,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
   }
 
   Future<void> _sendMessage() async {
-    if (_messageController.text.trim().isEmpty || _isSending) return;
+    if (_messageController.text.trim().isEmpty || _isSending || _isSendingReply) return;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -134,7 +140,10 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     // Clear message input immediately for responsiveness
     _messageController.clear();
 
-    setState(() => _isSending = true);
+    setState(() {
+      _isSending = true;
+      _isSendingReply = _replyingToMessage != null;
+    });
 
     try {
       // Get the actual user display name
@@ -144,10 +153,18 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
         senderId: user.uid,
         senderName: senderName,
         text: messageText,
+        replyToMessageId: _replyingToMessage?.id,
       );
 
       // Success feedback
       HapticFeedback.selectionClick();
+      
+      // Clear reply state after successful send
+      if (_replyingToMessage != null) {
+        setState(() {
+          _replyingToMessage = null;
+        });
+      }
     } catch (e) {
       if (mounted) {
         _showSnackBar('Failed to send message: ${e.toString()}', isError: true);
@@ -156,9 +173,33 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
       }
     } finally {
       if (mounted) {
-        setState(() => _isSending = false);
+        setState(() {
+          _isSending = false;
+          _isSendingReply = false;
+        });
       }
     }
+  }
+
+  // Reply functionality methods
+  void _startReply(CommunityChatMessage message) {
+    setState(() {
+      _replyingToMessage = message;
+    });
+    _inputFocusNode.requestFocus();
+  }
+
+  void _cancelReply() {
+    setState(() {
+      _replyingToMessage = null;
+    });
+  }
+
+  void _scrollToMessage(String messageId) {
+    // This would scroll to the specific message
+    // Implementation depends on how messages are displayed
+    // For now, we'll just show a snackbar
+    _showSnackBar('Scrolling to message...');
   }
 
   void _showSnackBar(String message, {bool isError = false}) {
@@ -276,7 +317,8 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
               key: ValueKey(message.id),
               message: message,
               isCurrentUser: isCurrentUser,
-              onReply: () => HapticFeedback.selectionClick(),
+              onReply: () => _startReply(message),
+              onScrollToMessage: _scrollToMessage,
             );
           },
         );
@@ -452,9 +494,25 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
           ),
         ),
       ),
-      child: ScaleTransition(
-        scale: _inputScaleAnimation,
-        child: Row(
+      child: Column(
+        children: [
+          // Reply input widget (if replying)
+          ReplyInputWidget(
+            quotedMessage: _replyingToMessage,
+            onCancelReply: _cancelReply,
+            onSendReply: (text) {
+              _messageController.text = text;
+              _sendMessage();
+            },
+            textController: _messageController,
+            focusNode: _inputFocusNode,
+            isSending: _isSendingReply,
+          ),
+          
+          // Regular message input
+          ScaleTransition(
+            scale: _inputScaleAnimation,
+            child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             // Attachment button
@@ -677,6 +735,8 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
             ),
           ],
         ),
+        ),
+        ],
       ),
     );
   }

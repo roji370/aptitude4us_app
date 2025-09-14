@@ -402,7 +402,7 @@ class _PastQuestionsMessageBubbleState extends State<PastQuestionsMessageBubble>
 
               // Message text
               if (widget.message.text.isNotEmpty)
-                SelectableText(
+                Text(
                   widget.message.text,
                   style: TextStyle(
                     color:

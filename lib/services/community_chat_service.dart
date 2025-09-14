@@ -26,9 +26,10 @@ class CommunityChatService {
     required String senderId,
     required String senderName,
     required String text,
+    String? replyToMessageId,
   }) async {
     try {
-      await _firestore.collection(_collection).add({
+      final messageData = {
         'senderId': senderId,
         'senderName': senderName,
         'receiverId': 'COMMUNITY',
@@ -37,7 +38,14 @@ class CommunityChatService {
         'status': 'sent',
         'type': 'text',
         'isCommunity': true,
-      });
+      };
+
+      // Add reply information if provided
+      if (replyToMessageId != null) {
+        messageData['replyToMessageId'] = replyToMessageId;
+      }
+
+      await _firestore.collection(_collection).add(messageData);
     } catch (e) {
       throw Exception('Failed to send message: $e');
     }
@@ -49,6 +57,7 @@ class CommunityChatService {
     required String senderName,
     required AttachmentData attachment,
     String? text,
+    String? replyToMessageId,
   }) async {
     try {
       final messageType =
@@ -60,7 +69,7 @@ class CommunityChatService {
               ? 'document'
               : 'attachment';
 
-      await _firestore.collection(_collection).add({
+      final messageData = {
         'senderId': senderId,
         'senderName': senderName,
         'receiverId': 'COMMUNITY',
@@ -70,9 +79,30 @@ class CommunityChatService {
         'type': messageType,
         'isCommunity': true,
         'attachment': attachment.toMap(),
-      });
+      };
+
+      // Add reply information if provided
+      if (replyToMessageId != null) {
+        messageData['replyToMessageId'] = replyToMessageId;
+      }
+
+      await _firestore.collection(_collection).add(messageData);
     } catch (e) {
       throw Exception('Failed to send message with attachment: $e');
+    }
+  }
+
+  // Get a specific message by ID
+  Future<CommunityChatMessage?> getMessageById(String messageId) async {
+    try {
+      final doc = await _firestore.collection(_collection).doc(messageId).get();
+      if (doc.exists) {
+        return CommunityChatMessage.fromFirestore(doc);
+      }
+      return null;
+    } catch (e) {
+      Logger.e('Error getting message by ID: $e');
+      return null;
     }
   }
 

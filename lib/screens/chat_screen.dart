@@ -10,6 +10,7 @@ import '../utils/responsive_helper.dart';
 import '../widgets/protected_course_content.dart';
 
 import '../widgets/message_bubble.dart';
+import '../widgets/reply_input_widget.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -33,6 +34,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   DocumentSnapshot? _lastDocument;
   String? _error;
   final int _messagesPerBatch = 20;
+
+  // Reply functionality state
+  Map<String, dynamic>? _replyingToMessage;
+  bool _isSendingReply = false;
 
   late AnimationController _inputAnimationController;
   late AnimationController _fabAnimationController;
@@ -160,7 +165,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
-    if (text.isEmpty || _isSending) return;
+    if (text.isEmpty || _isSending || _isSendingReply) return;
 
     // Haptic feedback
     HapticFeedback.lightImpact();
@@ -172,6 +177,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
     setState(() {
       _isSending = true;
+      _isSendingReply = _replyingToMessage != null;
     });
 
     // Optimistic UI: insert a temporary bubble
@@ -196,7 +202,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
 
     try {
-      final result = await _chatService.sendMessage(text: text);
+      final result = await _chatService.sendMessage(
+        text: text,
+        replyToMessageId: _replyingToMessage?['id'],
+      );
 
       if (!result['success']) {
         if (mounted) {
@@ -222,6 +231,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             if (newId != null) {
               _messages.first['id'] = newId;
             }
+          }
+          // Clear reply state after successful send
+          if (_replyingToMessage != null) {
+            _replyingToMessage = null;
           }
         });
         // Keep scrolled to newest
@@ -249,9 +262,31 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       if (mounted) {
         setState(() {
           _isSending = false;
+          _isSendingReply = false;
         });
       }
     }
+  }
+
+  // Reply functionality methods
+  void _startReply(Map<String, dynamic> message) {
+    setState(() {
+      _replyingToMessage = message;
+    });
+    _inputFocusNode.requestFocus();
+  }
+
+  void _cancelReply() {
+    setState(() {
+      _replyingToMessage = null;
+    });
+  }
+
+  void _scrollToMessage(String messageId) {
+    // This would scroll to the specific message
+    // Implementation depends on how messages are displayed
+    // For now, we'll just show a snackbar
+    _showSnackBar('Scrolling to message...');
   }
 
   void _showSnackBar(String message, {bool isError = false}) {
@@ -552,7 +587,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       message: message,
       isMe: isMe,
       status: 'sent',
-      onReply: () => HapticFeedback.selectionClick(),
+      onReply: () => _startReply(message),
     );
   }
 
@@ -635,9 +670,16 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           ),
         ),
       ),
-      child: ScaleTransition(
-        scale: _inputScaleAnimation,
-        child: Row(
+      child: Column(
+        children: [
+          // Reply input widget (if replying)
+          if (_replyingToMessage != null)
+            _buildReplyInputWidget(),
+          
+          // Regular message input
+          ScaleTransition(
+            scale: _inputScaleAnimation,
+            child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             // Attachment button
@@ -858,8 +900,140 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                 ),
               ),
             ),
-          ],
+            ],
+          ),
         ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReplyInputWidget() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      margin: EdgeInsets.only(
+        bottom: ResponsiveHelper.getAdaptiveSpacing(
+          context,
+          compact: 8.0,
+          regular: 10.0,
+          pro: 12.0,
+          large: 14.0,
+          extraLarge: 16.0,
+        ),
+      ),
+      padding: EdgeInsets.all(
+        ResponsiveHelper.getAdaptiveSpacing(
+          context,
+          compact: 12.0,
+          regular: 14.0,
+          pro: 16.0,
+          large: 18.0,
+          extraLarge: 20.0,
+        ),
+      ),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(
+          ResponsiveHelper.getAdaptiveSpacing(
+            context,
+            compact: 12.0,
+            regular: 14.0,
+            pro: 16.0,
+            large: 18.0,
+            extraLarge: 20.0,
+          ),
+        ),
+        border: Border.all(
+          color: colorScheme.primary.withValues(alpha: 0.3),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          // Vertical line indicator
+          Container(
+            width: 4,
+            height: 40,
+            decoration: BoxDecoration(
+              color: colorScheme.primary,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          
+          SizedBox(
+            width: ResponsiveHelper.getAdaptiveSpacing(
+              context,
+              compact: 12.0,
+              regular: 14.0,
+              pro: 16.0,
+              large: 18.0,
+              extraLarge: 20.0,
+            ),
+          ),
+          
+          // Quoted message content
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Sender name
+                Text(
+                  'Replying to ${_replyingToMessage?['senderName'] ?? 'Unknown'}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.primary,
+                    fontSize: ResponsiveHelper.adaptiveFontSize(context, 12.0),
+                  ),
+                ),
+                
+                SizedBox(
+                  height: ResponsiveHelper.getAdaptiveSpacing(
+                    context,
+                    compact: 4.0,
+                    regular: 6.0,
+                    pro: 8.0,
+                    large: 8.0,
+                    extraLarge: 10.0,
+                  ),
+                ),
+                
+                // Quoted message text
+                Text(
+                  _replyingToMessage?['text'] ?? '',
+                  style: TextStyle(
+                    color: colorScheme.onSurfaceVariant,
+                    fontSize: ResponsiveHelper.adaptiveFontSize(context, 12.0),
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          
+          // Cancel reply button
+          IconButton(
+            onPressed: _cancelReply,
+            icon: Icon(
+              Icons.close,
+              size: ResponsiveHelper.adaptiveFontSize(context, 20.0),
+              color: colorScheme.onSurfaceVariant,
+            ),
+            padding: EdgeInsets.all(
+              ResponsiveHelper.getAdaptiveSpacing(
+                context,
+                compact: 4.0,
+                regular: 6.0,
+                pro: 8.0,
+                large: 8.0,
+                extraLarge: 10.0,
+              ),
+            ),
+            constraints: const BoxConstraints(),
+          ),
+        ],
       ),
     );
   }
@@ -913,3 +1087,4 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 }
+

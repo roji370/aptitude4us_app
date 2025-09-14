@@ -12,6 +12,8 @@ class CommunityChatMessage {
   final String type;
   final bool isCommunity;
   final AttachmentData? attachment;
+  final String? replyToMessageId;
+  final CommunityChatMessage? replyToMessage;
 
   CommunityChatMessage({
     required this.id,
@@ -24,6 +26,8 @@ class CommunityChatMessage {
     required this.type,
     this.isCommunity = true,
     this.attachment,
+    this.replyToMessageId,
+    this.replyToMessage,
   });
 
   factory CommunityChatMessage.fromFirestore(DocumentSnapshot doc) {
@@ -47,6 +51,8 @@ class CommunityChatMessage {
       type: data['type'] ?? 'text',
       isCommunity: data['isCommunity'] ?? true,
       attachment: attachment,
+      replyToMessageId: data['replyToMessageId'],
+      replyToMessage: null, // Will be populated separately if needed
     );
   }
 
@@ -61,6 +67,7 @@ class CommunityChatMessage {
       'type': type,
       'isCommunity': isCommunity,
       'attachment': attachment?.toMap(),
+      'replyToMessageId': replyToMessageId,
     };
   }
 
@@ -75,4 +82,38 @@ class CommunityChatMessage {
 
   /// Check if message is attachment only (no text)
   bool get isAttachmentOnly => attachment != null && text.isEmpty;
+
+  /// Check if this message is a reply to another message
+  bool get isReply => replyToMessageId != null;
+
+  /// Get a copy of this message with updated reply information
+  CommunityChatMessage copyWith({
+    String? id,
+    String? senderId,
+    String? senderName,
+    String? receiverId,
+    String? text,
+    Timestamp? timestamp,
+    String? status,
+    String? type,
+    bool? isCommunity,
+    AttachmentData? attachment,
+    String? replyToMessageId,
+    CommunityChatMessage? replyToMessage,
+  }) {
+    return CommunityChatMessage(
+      id: id ?? this.id,
+      senderId: senderId ?? this.senderId,
+      senderName: senderName ?? this.senderName,
+      receiverId: receiverId ?? this.receiverId,
+      text: text ?? this.text,
+      timestamp: timestamp ?? this.timestamp,
+      status: status ?? this.status,
+      type: type ?? this.type,
+      isCommunity: isCommunity ?? this.isCommunity,
+      attachment: attachment ?? this.attachment,
+      replyToMessageId: replyToMessageId ?? this.replyToMessageId,
+      replyToMessage: replyToMessage ?? this.replyToMessage,
+    );
+  }
 }

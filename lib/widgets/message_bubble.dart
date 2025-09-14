@@ -485,7 +485,7 @@ class _MessageBubbleState extends State<MessageBubble>
 
               // Message text
               if (messageText.isNotEmpty)
-                SelectableText(
+                Text(
                   messageText,
                   style: TextStyle(
                     color: isMe ? colorScheme.onPrimary : colorScheme.onSurface,
