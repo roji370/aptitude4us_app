@@ -357,6 +357,93 @@ class FirestoreService {
               }
             }
           }
+
+          // Handle links
+          if (content.containsKey('links')) {
+            Logger.i("Processing inline links");
+            final links = content['links'] as List;
+            for (var link in links) {
+              if (link is Map) {
+                Logger.d("Processing link: $link");
+                String linkUrl = link['url'] ?? link['content'] ?? '';
+                if (linkUrl.isNotEmpty) {
+                  Logger.i("Found link URL: $linkUrl");
+                  allContents.add(
+                    ContentModel.fromJson(
+                      {
+                        ...link,
+                        'type': 'link',
+                        'contentType': 'link',
+                        'content': linkUrl,
+                      },
+                      link['id'] ??
+                          DateTime.now().millisecondsSinceEpoch.toString(),
+                    ),
+                  );
+                } else {
+                  Logger.w("Warning: Empty link URL in link data: $link");
+                }
+              }
+            }
+          }
+
+          // Handle images
+          if (content.containsKey('images')) {
+            Logger.i("Processing inline images");
+            final images = content['images'] as List;
+            for (var image in images) {
+              if (image is Map) {
+                Logger.d("Processing image: $image");
+                String imageUrl = image['url'] ?? image['content'] ?? '';
+                if (imageUrl.isNotEmpty) {
+                  Logger.i("Found image URL: $imageUrl");
+                  allContents.add(
+                    ContentModel.fromJson(
+                      {
+                        ...image,
+                        'type': 'image',
+                        'contentType': 'image',
+                        'content': imageUrl,
+                      },
+                      image['id'] ??
+                          DateTime.now().millisecondsSinceEpoch.toString(),
+                    ),
+                  );
+                } else {
+                  Logger.w("Warning: Empty image URL in image data: $image");
+                }
+              }
+            }
+          }
+
+          // Handle PPTs
+          if (content.containsKey('ppts')) {
+            Logger.i("Processing inline PPTs");
+            final ppts = content['ppts'] as List;
+            for (var ppt in ppts) {
+              if (ppt is Map) {
+                Logger.d("Processing PPT: $ppt");
+                String pptUrl = ppt['url'] ?? ppt['content'] ?? '';
+                if (pptUrl.isNotEmpty) {
+                  Logger.i("Found PPT URL: $pptUrl");
+                  allContents.add(
+                    ContentModel.fromJson(
+                      {
+                        ...ppt,
+                        'type': 'ppt',
+                        'contentType': 'ppt',
+                        'content': pptUrl,
+                      },
+                      ppt['id'] ??
+                          DateTime.now().millisecondsSinceEpoch.toString(),
+                    ),
+                  );
+                } else {
+                  Logger.w("Warning: Empty PPT URL in PPT data: $ppt");
+                }
+              }
+            }
+          }
         }
       } catch (e) {
         Logger.e("Error reading inline content: $e");

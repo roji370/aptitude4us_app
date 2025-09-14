@@ -1490,72 +1490,102 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
 
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
+        padding: const EdgeInsets.all(16.0),
+        child: GestureDetector(
+          onTap: () => _openLink(content.content),
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+            // Compact link icon
             Container(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Theme.of(context).primaryColor.withOpacity(0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.link,
-                size: 64,
+                size: 40,
                 color: Theme.of(context).primaryColor,
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            
+            // Link title
             Text(
               content.title,
               style: const TextStyle(
-                fontSize: 24,
+                fontSize: 20,
                 fontWeight: FontWeight.bold,
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+            
+            // Compact URL preview
             if (content.content.isNotEmpty) ...[
               Container(
-                padding: const EdgeInsets.all(16),
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.grey[100],
+                  color: Colors.grey[50],
                   borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey[300]!),
                 ),
                 child: Text(
                   content.content,
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 12,
                     color: Colors.grey[600],
                     fontFamily: 'monospace',
                   ),
                   textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
             ],
-            ElevatedButton.icon(
-              onPressed: () => _openLink(content.content),
-              icon: const Icon(Icons.open_in_new),
-              label: const Text('Open Link'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 16,
+            
+            // Primary action button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => _openLink(content.content),
+                icon: const Icon(Icons.open_in_new, size: 18),
+                label: const Text('Open Link'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
-                textStyle: const TextStyle(fontSize: 16),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
+            
+            // Subtle hint text
             Text(
-              'This link will open in your browser',
+              'Tap anywhere to open',
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 11,
                 color: Colors.grey[500],
               ),
             ),
-          ],
+              ],
+            ),
+          ),
         ),
       ),
     );
