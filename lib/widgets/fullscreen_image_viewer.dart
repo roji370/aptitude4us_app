@@ -54,17 +54,23 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer>
   }
 
   void _resetZoom() {
+    final Matrix4 currentMatrix = _transformationController.value;
+    final double currentScale = currentMatrix.getMaxScaleOnAxis();
+    
+    // If already close to identity scale, no need to animate
+    if ((currentScale - 1.0).abs() < 0.1) {
+      return;
+    }
+    
     _animation = Matrix4Tween(
-      begin: _transformationController.value,
+      begin: currentMatrix,
       end: Matrix4.identity(),
     ).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
     
     _animationController.reset();
-    _animationController.forward().then((_) {
-      _transformationController.value = Matrix4.identity();
-    });
+    _animationController.forward();
   }
 
   void _onDoubleTap() {
@@ -228,16 +234,6 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer>
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  actions: [
-                    IconButton(
-                      icon: const Icon(Icons.zoom_out_map, color: Colors.white),
-                      onPressed: () {
-                        HapticFeedback.mediumImpact();
-                        _resetZoom();
-                      },
-                      tooltip: 'Reset zoom',
-                    ),
-                  ],
                 ),
               ),
             ),

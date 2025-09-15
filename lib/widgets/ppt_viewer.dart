@@ -79,6 +79,39 @@ class _PptViewerState extends State<PptViewer> {
           ),
         )
         ..loadRequest(Uri.parse(viewerUrl));
+      
+      // Inject CSS to hide external navigation elements after page loads
+      Future.delayed(const Duration(seconds: 3), () {
+        _controller.runJavaScript('''
+          var style = document.createElement('style');
+          style.innerHTML = \`
+            /* Hide external link button and other navigation elements */
+            .ndfHFb-c4YZDc-GSWXbd-LgbsSe,
+            .ndfHFb-c4YZDc-to915-LgbsSe,
+            .ndfHFb-c4YZDc-Wrql6b-LgbsSe,
+            .ndfHFb-c4YZDc-Wrql6b,
+            .ndfHFb-c4YZDc-GSWXbd,
+            .ndfHFb-c4YZDc-to915,
+            [aria-label*="Open"],
+            [aria-label*="Download"],
+            [title*="Open"],
+            [title*="Download"],
+            .docs-icon-open-in-new,
+            .docs-icon-download,
+            /* Hide the circular external link button */
+            .ndfHFb-c4YZDc-LgbsSe[data-tooltip*="Open"],
+            .ndfHFb-c4YZDc-LgbsSe[title*="Open"],
+            /* Additional selectors for external link buttons */
+            .ndfHFb-c4YZDc-LgbsSe.ndfHFb-c4YZDc-to915-LgbsSe,
+            .ndfHFb-c4YZDc-LgbsSe.ndfHFb-c4YZDc-GSWXbd-LgbsSe {
+              display: none !important;
+              visibility: hidden !important;
+              opacity: 0 !important;
+            }
+          \`;
+          document.head.appendChild(style);
+        ''');
+      });
     } catch (e) {
       Logger.e('Error initializing PPT viewer: $e');
       if (mounted) {
@@ -324,6 +357,39 @@ class _FullscreenPptViewerState extends State<FullscreenPptViewer> {
           ),
         )
         ..loadRequest(Uri.parse(viewerUrl));
+      
+      // Inject CSS to hide external navigation elements after page loads
+      Future.delayed(const Duration(seconds: 3), () {
+        _controller.runJavaScript('''
+          var style = document.createElement('style');
+          style.innerHTML = \`
+            /* Hide external link button and other navigation elements */
+            .ndfHFb-c4YZDc-GSWXbd-LgbsSe,
+            .ndfHFb-c4YZDc-to915-LgbsSe,
+            .ndfHFb-c4YZDc-Wrql6b-LgbsSe,
+            .ndfHFb-c4YZDc-Wrql6b,
+            .ndfHFb-c4YZDc-GSWXbd,
+            .ndfHFb-c4YZDc-to915,
+            [aria-label*="Open"],
+            [aria-label*="Download"],
+            [title*="Open"],
+            [title*="Download"],
+            .docs-icon-open-in-new,
+            .docs-icon-download,
+            /* Hide the circular external link button */
+            .ndfHFb-c4YZDc-LgbsSe[data-tooltip*="Open"],
+            .ndfHFb-c4YZDc-LgbsSe[title*="Open"],
+            /* Additional selectors for external link buttons */
+            .ndfHFb-c4YZDc-LgbsSe.ndfHFb-c4YZDc-to915-LgbsSe,
+            .ndfHFb-c4YZDc-LgbsSe.ndfHFb-c4YZDc-GSWXbd-LgbsSe {
+              display: none !important;
+              visibility: hidden !important;
+              opacity: 0 !important;
+            }
+          \`;
+          document.head.appendChild(style);
+        ''');
+      });
     } catch (e) {
       Logger.e('Error initializing fullscreen PPT viewer: $e');
       if (mounted) {
@@ -357,19 +423,6 @@ class _FullscreenPptViewerState extends State<FullscreenPptViewer> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: () {
-              setState(() {
-                _hasError = false;
-                _isLoading = true;
-              });
-              _initializeWebView();
-            },
-            tooltip: 'Refresh',
-          ),
-        ],
       ),
       body: Stack(
         children: [
