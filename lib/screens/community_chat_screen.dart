@@ -21,7 +21,7 @@ class CommunityChatScreen extends StatefulWidget {
 }
 
 class _CommunityChatScreenState extends State<CommunityChatScreen>
-    with TickerProviderStateMixin {
+with TickerProviderStateMixin {
   final CommunityChatService _chatService = CommunityChatService();
   final AuthService _authService = AuthService();
   final TextEditingController _messageController = TextEditingController();
@@ -33,6 +33,15 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
   CommunityChatMessage? _replyingToMessage;
   bool _isSendingReply = false;
   final GlobalKey<AnimatedListState> _messageListKey = GlobalKey<AnimatedListState>();
+
+  // Message highlighting state
+  String? _highlightedMessageId;
+  late AnimationController _highlightAnimationController;
+  late Animation<double> _highlightAnimation;
+
+  // Scroll-to-message state
+  bool _isScrollingToMessage = false;
+  String? _searchingForMessageId;
 
   // Get the actual user display name from UserModel
   Future<String> _getUserDisplayName() async {
@@ -79,6 +88,19 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
   }
 
   void _initializeAnimations() {
+    // Initialize highlight animation for scroll-to-message
+    _highlightAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 2000),
+      vsync: this,
+    );
+    _highlightAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _highlightAnimationController,
+      curve: Curves.easeInOut,
+    ));
+
     _inputAnimationController = AnimationController(
       duration: const Duration(milliseconds: 200),
       vsync: this,
@@ -118,6 +140,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     _inputFocusNode.dispose();
     _inputAnimationController.dispose();
     _fabAnimationController.dispose();
+    _highlightAnimationController.dispose();
     super.dispose();
   }
 
@@ -195,11 +218,136 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
     });
   }
 
-  void _scrollToMessage(String messageId) {
-    // This would scroll to the specific message
-    // Implementation depends on how messages are displayed
-    // For now, we'll just show a snackbar
-    _showSnackBar('Scrolling to message...');
+  /// Enhanced scroll-to-message functionality with smooth scrolling and highlighting
+  /// Implements WhatsApp-style message navigation with visual feedback
+  Future<void> _scrollToMessage(String messageId) async {
+    Logger.i('Community Chat - Scroll-to-message requested for ID: $messageId');
+    
+    if (_isScrollingToMessage || messageId.isEmpty) {
+      Logger.w('Scroll operation already in progress or empty messageId');
+      return;
+    }
+
+    setState(() {
+      _isScrollingToMessage = true;
+      _searchingForMessageId = messageId;
+    });
+
+    try {
+      // Get current messages from the stream
+      final messages = await _chatService.getCommunityMessages().first;
+      Logger.i('Community Chat - Got ${messages.length} messages from stream');
+      
+      // Find the target message index
+      final messageIndex = messages.indexWhere((msg) => msg.id == messageId);
+      Logger.i('Community Chat - Message index found: $messageIndex out of ${messages.length} messages');
+      
+      if (messageIndex == -1) {
+        // Message not found in current loaded messages
+        Logger.w('Message not found in current loaded messages');
+        await _handleMessageNotFound(messageId);
+        return;
+      }
+
+      // Calculate scroll position
+      // Since ListView is reversed, we need to calculate from the end
+      final itemHeight = _estimateMessageHeight();
+      final targetScrollOffset = messageIndex * itemHeight;
+      Logger.i('Community Chat - Calculated scroll offset: $targetScrollOffset (itemHeight: $itemHeight)');
+      
+      // Smooth scroll to the target message
+      await _performSmoothScroll(targetScrollOffset);
+      
+      // Highlight the message
+      await _highlightMessage(messageId);
+      
+      Logger.i('Community Chat - Scroll-to-message completed successfully');
+    } catch (e) {
+      Logger.e('Error scrolling to message: $e');
+      _showSnackBar('Could not find the message', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isScrollingToMessage = false;
+          _searchingForMessageId = null;
+        });
+      }
+    }
+  }
+
+  /// Estimates the average height of a message bubble for scroll calculations
+  /// This is a rough estimate - in a production app, you might want to measure actual heights
+  double _estimateMessageHeight() {
+    // Base message bubble height + padding + margins
+    // This is an approximation - actual heights vary based on content
+    return ResponsiveHelper.getAdaptiveSpacing(
+      context,
+      compact: 80.0,
+      regular: 90.0,
+      pro: 100.0,
+      large: 110.0,
+      extraLarge: 120.0,
+    );
+  }
+
+  /// Performs smooth scrolling to the target offset with easing animation
+  Future<void> _performSmoothScroll(double targetOffset) async {
+    if (!_scrollController.hasClients) return;
+
+    // Clamp the offset to valid scroll bounds
+    final maxScrollExtent = _scrollController.position.maxScrollExtent;
+    final clampedOffset = targetOffset.clamp(0.0, maxScrollExtent);
+    
+    // Animate to the target position with smooth easing
+    await _scrollController.animateTo(
+      clampedOffset,
+      duration: const Duration(milliseconds: 800),
+      curve: Curves.easeInOutCubic,
+    );
+    
+    // Small delay to ensure the scroll is complete before highlighting
+    await Future.delayed(const Duration(milliseconds: 100));
+  }
+
+  /// Highlights the target message with a subtle animation
+  Future<void> _highlightMessage(String messageId) async {
+    if (!mounted) return;
+    
+    setState(() {
+      _highlightedMessageId = messageId;
+    });
+    
+    // Start the highlight animation
+    await _highlightAnimationController.forward();
+    
+    // Wait for 1.5 seconds to show the highlight
+    await Future.delayed(const Duration(milliseconds: 1500));
+    
+    // Fade out the highlight
+    await _highlightAnimationController.reverse();
+    
+    // Clear the highlighted message
+    if (mounted) {
+      setState(() {
+        _highlightedMessageId = null;
+      });
+    }
+  }
+
+  /// Handles the case when a message is not found in currently loaded messages
+  /// In a production app, this might trigger loading more messages or searching history
+  Future<void> _handleMessageNotFound(String messageId) async {
+    Logger.w('Message not found in current view: $messageId');
+    
+    // For now, show an error message
+    // In a full implementation, you might:
+    // 1. Load more messages from history
+    // 2. Search in the database
+    // 3. Show a "message not available" dialog
+    _showSnackBar('Message not found or may have been deleted', isError: true);
+    
+    // You could implement pagination loading here:
+    // await _loadMoreMessagesUntilFound(messageId);
   }
 
   void _showSnackBar(String message, {bool isError = false}) {
@@ -319,6 +467,8 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
               isCurrentUser: isCurrentUser,
               onReply: () => _startReply(message),
               onScrollToMessage: _scrollToMessage,
+              isHighlighted: _highlightedMessageId == message.id,
+              highlightAnimation: _highlightAnimation,
             );
           },
         );

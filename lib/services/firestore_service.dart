@@ -546,10 +546,26 @@ class FirestoreService {
         }
       }
 
-      // If we found content, validate URLs and return sorted
+      // If we found content, deduplicate, validate URLs and return sorted
       if (allContents.isNotEmpty) {
         Logger.i("\nContent validation and summary:");
-        Logger.i("Total content items found: ${allContents.length}");
+        Logger.i("Total content items found before deduplication: ${allContents.length}");
+
+        // Deduplicate content based on URL and title to prevent duplicates
+        final Map<String, ContentModel> uniqueContent = {};
+        for (var content in allContents) {
+          // Create a unique key based on content URL and title
+          final key = '${content.contentType}_${content.content}_${content.title}';
+          if (!uniqueContent.containsKey(key)) {
+            uniqueContent[key] = content;
+          } else {
+            Logger.d("Duplicate content removed: ${content.title} (${content.contentType})");
+          }
+        }
+        
+        // Update allContents with deduplicated list
+        allContents = uniqueContent.values.toList();
+        Logger.i("Total content items after deduplication: ${allContents.length}");
 
         // Validate and log each content item
         for (var content in allContents) {

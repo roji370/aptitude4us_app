@@ -23,6 +23,8 @@ import '../utils/pdf_loader.dart';
 import '../widgets/custom_pdf_viewer.dart';
 import '../services/firestore_service.dart';
 import '../widgets/custom_bottom_navigation.dart';
+import '../widgets/fullscreen_image_viewer.dart';
+import '../widgets/ppt_viewer.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // Watermark overlay widget for PDFs
@@ -959,6 +961,12 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
 
       case 'link':
         return _buildLinkContent(content);
+
+      case 'image':
+        return _buildImageContent(content);
+
+      case 'ppt':
+        return _buildPptContent(content);
         
       case 'text':
       default:
@@ -1470,11 +1478,219 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
         return Icons.picture_as_pdf;
       case 'link':
         return Icons.link;
+      case 'image':
+        return Icons.image;
+      case 'ppt':
+        return Icons.slideshow;
       case 'text':
         return Icons.text_snippet;
       default:
         return Icons.article;
     }
+  }
+
+  // Build image content widget
+  Widget _buildImageContent(ContentModel content) {
+    if (content.content.isEmpty) {
+      return const Center(
+        child: Text(
+          'No image URL available.',
+          style: TextStyle(color: Colors.red),
+        ),
+      );
+    }
+
+    return Stack(
+      children: [
+        Container(
+          width: double.infinity,
+          height: double.infinity,
+          color: Colors.black,
+          child: InteractiveViewer(
+            panEnabled: true,
+            scaleEnabled: true,
+            minScale: 0.5,
+            maxScale: 4.0,
+            child: Center(
+              child: Image.network(
+                content.content,
+                fit: BoxFit.contain,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(
+                          value: loadingProgress.expectedTotalBytes != null
+                              ? loadingProgress.cumulativeBytesLoaded /
+                                  loadingProgress.expectedTotalBytes!
+                              : null,
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                            Color(0xFF323483),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Loading image...',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) {
+                  Logger.e('Error loading image: $error');
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.error_outline,
+                          color: Colors.red,
+                          size: 48,
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Failed to load image',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          content.title,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+        
+        // Fullscreen button
+        Positioned(
+          top: 16,
+          right: 16,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: IconButton(
+              icon: const Icon(
+                Icons.fullscreen,
+                color: Colors.white,
+                size: 24,
+              ),
+              onPressed: () => _openFullscreenImage(content),
+              tooltip: 'View fullscreen',
+            ),
+          ),
+        ),
+        
+        // Add watermark overlay
+        BriffiniWatermark(userName: _userName),
+      ],
+    );
+  }
+
+  // Build PPT content widget
+  Widget _buildPptContent(ContentModel content) {
+    if (content.content.isEmpty) {
+      return const Center(
+        child: Text(
+          'No PPT URL available.',
+          style: TextStyle(color: Colors.red),
+        ),
+      );
+    }
+
+    return Stack(
+      children: [
+        // In-app PPT viewer
+        PptViewer(
+          pptUrl: content.content,
+          title: content.title,
+          userName: _userName,
+        ),
+        
+        // Fullscreen button
+        Positioned(
+          top: 16,
+          right: 16,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: IconButton(
+              icon: const Icon(
+                Icons.fullscreen,
+                color: Colors.white,
+                size: 24,
+              ),
+              onPressed: () => _openFullscreenPpt(content),
+              tooltip: 'View fullscreen',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Helper method to open fullscreen PPT viewer
+  void _openFullscreenPpt(ContentModel content) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            FullscreenPptViewer(
+          pptUrl: content.content,
+          title: content.title,
+          userName: _userName,
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(
+            opacity: animation,
+            child: child,
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
+  }
+
+  // Helper method to open fullscreen image viewer
+  void _openFullscreenImage(ContentModel content) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            FullscreenImageViewer(
+          imageUrl: content.content,
+          title: content.title,
+          userName: _userName,
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(
+            opacity: animation,
+            child: child,
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
   }
 
   // Build link content widget
@@ -1500,7 +1716,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
+                    color: Colors.black.withValues(alpha: 0.1),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -1513,7 +1729,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Theme.of(context).primaryColor.withOpacity(0.1),
+                color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(

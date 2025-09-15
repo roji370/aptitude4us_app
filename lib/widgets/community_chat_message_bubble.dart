@@ -13,6 +13,8 @@ class CommunityChatMessageBubble extends StatefulWidget {
   final VoidCallback onReply;
   final Function(String messageId)? onScrollToMessage;
   final bool showAvatar;
+  final bool isHighlighted;
+  final Animation<double>? highlightAnimation;
 
   const CommunityChatMessageBubble({
     super.key,
@@ -21,6 +23,8 @@ class CommunityChatMessageBubble extends StatefulWidget {
     required this.onReply,
     this.onScrollToMessage,
     this.showAvatar = true,
+    this.isHighlighted = false,
+    this.highlightAnimation,
   });
 
   @override
@@ -395,7 +399,8 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
   ) {
     final isMe = widget.isCurrentUser;
 
-    return Material(
+    // Wrap with highlighting animation if needed
+    Widget messageContent = Material(
       color: Colors.transparent,
       child: InkWell(
         onLongPress: () {
@@ -575,6 +580,49 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
         ),
       ),
     );
+
+    // Add highlighting effect if this message is highlighted
+    if (widget.isHighlighted && widget.highlightAnimation != null) {
+      return AnimatedBuilder(
+        animation: widget.highlightAnimation!,
+        builder: (context, child) {
+          return Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(
+                ResponsiveHelper.getAdaptiveSpacing(
+                  context,
+                  compact: 18.0,
+                  regular: 20.0,
+                  pro: 22.0,
+                  large: 24.0,
+                  extraLarge: 26.0,
+                ),
+              ),
+              // Subtle highlight effect that fades in and out
+              boxShadow: [
+                BoxShadow(
+                  color: colorScheme.primary.withValues(
+                    alpha: 0.3 * widget.highlightAnimation!.value,
+                  ),
+                  blurRadius: 12.0 * widget.highlightAnimation!.value,
+                  spreadRadius: 2.0 * widget.highlightAnimation!.value,
+                ),
+              ],
+              // Optional: subtle background color change
+              border: Border.all(
+                color: colorScheme.primary.withValues(
+                  alpha: 0.4 * widget.highlightAnimation!.value,
+                ),
+                width: 2.0 * widget.highlightAnimation!.value,
+              ),
+            ),
+            child: messageContent,
+          );
+        },
+      );
+    }
+
+    return messageContent;
   }
 
   Widget _buildMessageMeta(BuildContext context, ThemeData theme) {

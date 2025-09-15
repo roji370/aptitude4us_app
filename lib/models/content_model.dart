@@ -38,13 +38,26 @@ class ContentModel {
       contentTypeValue = json['contentType'];
     } else {
       // Infer type from content URL if possible
-      if (contentValue.toLowerCase().contains('.mp4') ||
-          contentValue.toLowerCase().contains('youtube.com') ||
-          contentValue.toLowerCase().contains('youtu.be')) {
+      final lowerContent = contentValue.toLowerCase();
+      if (lowerContent.contains('.mp4') ||
+          lowerContent.contains('youtube.com') ||
+          lowerContent.contains('youtu.be')) {
         contentTypeValue = 'video';
-      } else if (contentValue.toLowerCase().contains('.pdf')) {
+      } else if (lowerContent.contains('.pdf')) {
         contentTypeValue = 'pdf';
-      } else if (contentValue.toLowerCase().startsWith('http')) {
+      } else if (lowerContent.contains('.ppt') ||
+                 lowerContent.contains('.pptx') ||
+                 lowerContent.contains('powerpoint')) {
+        contentTypeValue = 'ppt';
+      } else if (lowerContent.contains('.jpg') ||
+                 lowerContent.contains('.jpeg') ||
+                 lowerContent.contains('.png') ||
+                 lowerContent.contains('.gif') ||
+                 lowerContent.contains('.webp') ||
+                 lowerContent.contains('.bmp') ||
+                 lowerContent.contains('image')) {
+        contentTypeValue = 'image';
+      } else if (lowerContent.startsWith('http')) {
         contentTypeValue = 'link';
       } else {
         contentTypeValue = 'text';

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/attachment_service.dart';
 import '../widgets/attachment_preview.dart';
@@ -10,6 +11,9 @@ class MessageBubble extends StatefulWidget {
   final String status;
   final VoidCallback onReply;
   final bool showAvatar;
+  final bool isHighlighted;
+  final Animation<double>? highlightAnimation;
+  final Function(String messageId)? onScrollToMessage;
 
   const MessageBubble({
     super.key,
@@ -18,6 +22,9 @@ class MessageBubble extends StatefulWidget {
     required this.status,
     required this.onReply,
     this.showAvatar = true,
+    this.isHighlighted = false,
+    this.highlightAnimation,
+    this.onScrollToMessage,
   });
 
   @override
@@ -232,48 +239,57 @@ class _MessageBubbleState extends State<MessageBubble>
         final replyMessage = snapshot.data;
         if (replyMessage == null) return const SizedBox.shrink();
 
-        return Container(
-          margin: EdgeInsets.only(
-            bottom: ResponsiveHelper.getAdaptiveSpacing(
-              context,
-              compact: 6.0,
-              regular: 8.0,
-              pro: 8.0,
-              large: 10.0,
-              extraLarge: 12.0,
-            ),
-          ),
-          padding: EdgeInsets.all(
-            ResponsiveHelper.getAdaptiveSpacing(
-              context,
-              compact: 8.0,
-              regular: 10.0,
-              pro: 12.0,
-              large: 12.0,
-              extraLarge: 14.0,
-            ),
-          ),
-          decoration: BoxDecoration(
-            color: Theme.of(
-              context,
-            ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
-            borderRadius: BorderRadius.circular(
-              ResponsiveHelper.getAdaptiveSpacing(
+        return GestureDetector(
+          onTap: () {
+            // Provide haptic feedback for better user experience
+            HapticFeedback.selectionClick();
+            // Scroll to the original message
+            if (widget.onScrollToMessage != null) {
+              widget.onScrollToMessage!(replyToMessageId);
+            }
+          },
+          child: Container(
+            margin: EdgeInsets.only(
+              bottom: ResponsiveHelper.getAdaptiveSpacing(
                 context,
-                compact: 12.0,
-                regular: 14.0,
-                pro: 16.0,
-                large: 16.0,
-                extraLarge: 18.0,
+                compact: 6.0,
+                regular: 8.0,
+                pro: 8.0,
+                large: 10.0,
+                extraLarge: 12.0,
               ),
             ),
-            border: Border.all(
+            padding: EdgeInsets.all(
+              ResponsiveHelper.getAdaptiveSpacing(
+                context,
+                compact: 8.0,
+                regular: 10.0,
+                pro: 12.0,
+                large: 12.0,
+                extraLarge: 14.0,
+              ),
+            ),
+            decoration: BoxDecoration(
               color: Theme.of(
                 context,
-              ).colorScheme.outline.withValues(alpha: 0.3),
-              width: 1,
+              ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+              borderRadius: BorderRadius.circular(
+                ResponsiveHelper.getAdaptiveSpacing(
+                  context,
+                  compact: 12.0,
+                  regular: 14.0,
+                  pro: 16.0,
+                  large: 16.0,
+                  extraLarge: 18.0,
+                ),
+              ),
+              border: Border.all(
+                color: Theme.of(
+                  context,
+                ).colorScheme.outline.withValues(alpha: 0.3),
+                width: 1,
+              ),
             ),
-          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -306,6 +322,7 @@ class _MessageBubbleState extends State<MessageBubble>
               ),
             ],
           ),
+          ),
         );
       },
     );
@@ -319,7 +336,8 @@ class _MessageBubbleState extends State<MessageBubble>
     final isMe = widget.isMe;
     final messageText = widget.message['text'] as String? ?? '';
 
-    return Material(
+    // Wrap with highlighting animation if needed
+    Widget messageContent = Material(
       color: Colors.transparent,
       child: InkWell(
         onLongPress: widget.onReply,
@@ -499,6 +517,49 @@ class _MessageBubbleState extends State<MessageBubble>
         ),
       ),
     );
+
+    // Add highlighting effect if this message is highlighted
+    if (widget.isHighlighted && widget.highlightAnimation != null) {
+      return AnimatedBuilder(
+        animation: widget.highlightAnimation!,
+        builder: (context, child) {
+          return Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(
+                ResponsiveHelper.getAdaptiveSpacing(
+                  context,
+                  compact: 18.0,
+                  regular: 20.0,
+                  pro: 22.0,
+                  large: 24.0,
+                  extraLarge: 26.0,
+                ),
+              ),
+              // Subtle highlight effect that fades in and out
+              boxShadow: [
+                BoxShadow(
+                  color: colorScheme.primary.withValues(
+                    alpha: 0.3 * widget.highlightAnimation!.value,
+                  ),
+                  blurRadius: 12.0 * widget.highlightAnimation!.value,
+                  spreadRadius: 2.0 * widget.highlightAnimation!.value,
+                ),
+              ],
+              // Optional: subtle background color change
+              border: Border.all(
+                color: colorScheme.primary.withValues(
+                  alpha: 0.4 * widget.highlightAnimation!.value,
+                ),
+                width: 2.0 * widget.highlightAnimation!.value,
+              ),
+            ),
+            child: messageContent,
+          );
+        },
+      );
+    }
+
+    return messageContent;
   }
 
   Widget _buildMessageMeta(BuildContext context, ThemeData theme) {
