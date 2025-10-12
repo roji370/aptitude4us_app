@@ -287,7 +287,7 @@ class ContentViewerScreen extends StatefulWidget {
   State<ContentViewerScreen> createState() => _ContentViewerScreenState();
 }
 
-class _ContentViewerScreenState extends State<ContentViewerScreen> {
+class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsBindingObserver {
   late Future<List<ContentModel>> _contentFuture;
   bool _isLoading = true;
   int _currentContentIndex = 0;
@@ -310,6 +310,9 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
     Logger.i(
       "🏁 ContentViewerScreen initState for module: ${widget.module.id}",
     );
+
+    // Add app lifecycle observer
+    WidgetsBinding.instance.addObserver(this);
 
     // Initialize content state manager for this module
     _contentStateManager.initForModule(widget.module.id);
@@ -362,6 +365,12 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
   void dispose() {
     Logger.i("🛑 ContentViewerScreen dispose for module: ${widget.module.id}");
 
+    // Remove app lifecycle observer
+    WidgetsBinding.instance.removeObserver(this);
+
+    // Pause all currently playing videos when leaving the screen
+    _contentStateManager.pauseAllVideos();
+
     // Clean up old content states (older than 30 minutes) but keep current ones
     _contentStateManager.clearOldContentStates();
 
@@ -384,6 +393,35 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
     }
 
     super.dispose();
+  }
+
+  // Handle app lifecycle changes
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+        // Pause all videos when app goes to background or becomes inactive
+        Logger.i('📱 App paused/inactive - pausing all videos');
+        _contentStateManager.pauseAllVideos();
+        break;
+      case AppLifecycleState.resumed:
+        // App resumed - videos will remain paused until user manually plays them
+        Logger.i('📱 App resumed - videos remain paused until user interaction');
+        break;
+      case AppLifecycleState.detached:
+        // App is detached - pause videos for cleanup
+        Logger.i('📱 App detached - pausing all videos');
+        _contentStateManager.pauseAllVideos();
+        break;
+      case AppLifecycleState.hidden:
+        // App is hidden - pause videos
+        Logger.i('📱 App hidden - pausing all videos');
+        _contentStateManager.pauseAllVideos();
+        break;
+    }
   }
 
   // Get the current user's name
@@ -533,14 +571,18 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
     try {
       Logger.i("Initializing video controller for: ${content.title}");
 
+      // Determine the video URL to use
+      final videoUrl = content.originalUrl ?? content.content;
+      Logger.i('Using video URL: $videoUrl');
+
       // Basic URL validation
-      if (!content.content.startsWith('http')) {
+      if (!videoUrl.startsWith('http')) {
         throw Exception("Invalid video URL format");
       }
 
       // Create and initialize the video controller
       final controller = VideoPlayerController.networkUrl(
-        Uri.parse(content.content),
+        Uri.parse(videoUrl),
       );
 
       await controller.initialize();
@@ -750,8 +792,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
             child: Center(
               child: SimpleVideoPlayer(
                 key: ValueKey("video_${content.id}_persistent"),
-                videoUrl: content.content,
-                title: content.title,
+                videoUrl: existingController?.dataSource ?? content.originalUrl ?? content.content,
                 autoPlay: false,
                 userName: _userName,
                 showWatermark: true,
@@ -1420,6 +1461,14 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> {
                             ),
                             selected: i == _currentContentIndex,
                             onTap: () {
+                              // Pause current video before switching to new content
+                              if (_currentContentIndex < contentList.length) {
+                                final currentContent = contentList[_currentContentIndex];
+                                if (currentContent.contentType == 'video') {
+                                  _contentStateManager.pauseVideo(currentContent);
+                                }
+                              }
+                              
                               setState(() {
                                 _currentContentIndex = i;
                                 // Note: No longer disposing video controllers or resetting PDF state

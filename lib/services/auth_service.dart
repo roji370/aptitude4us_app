@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import '../models/user_model.dart';
 import 'auth_persistence_service.dart';
 import '../services/notification_service.dart'; // Add this import
 import 'subscription_service.dart';
 import '../utils/logger.dart';
+import '../utils/device_id.dart';
 import '../main.dart'; // For FirebaseInitHelper
 
 class AuthService {
@@ -234,6 +236,205 @@ class AuthService {
         return null;
       }
       rethrow;
+    }
+  }
+
+  // Sign in with device restriction validation (improved version)
+  Future<UserCredential> loginWithDeviceRestriction(
+    String email, 
+    String password
+  ) async {
+    if (!_isFirebaseAvailable) {
+      throw Exception("Firebase Auth is not available");
+    }
+
+    try {
+      // Get device information
+      final deviceId = await getDeviceId();
+      final deviceInfo = await getDeviceInfoString();
+      
+      Logger.i("Attempting login with device restriction for device: $deviceId");
+
+      // First, sign in with Firebase Auth
+      final cred = await _auth!.signInWithEmailAndPassword(
+        email: email, 
+        password: password
+      );
+      
+      final uid = cred.user!.uid;
+      Logger.i("Firebase Auth successful for user: $uid");
+
+      try {
+        // Validate device using Cloud Functions
+        final callable = FirebaseFunctions.instance.httpsCallable('validateUserDevice');
+        final res = await callable.call({
+          'userId': uid, 
+          'currentDeviceId': deviceId
+        });
+        
+        final validationResult = Map<String, dynamic>.from(res.data as Map);
+        Logger.i("Device validation result: $validationResult");
+
+        // Handle validation response
+        if (validationResult['restrictionEnabled'] != true) {
+          Logger.i("Device restriction not enabled, proceeding with normal login");
+          // Device restriction not enabled, proceed normally
+          await _completeDeviceRestrictedLogin(cred, email);
+          return cred;
+        }
+
+        // Device restriction is enabled
+        if (validationResult['requiresRegistration'] == true) {
+          Logger.i("Device registration required, registering device: $deviceId");
+          // Register the device
+          await FirebaseFunctions.instance
+              .httpsCallable('registerUserDevice')
+              .call({
+            'userId': uid,
+            'deviceId': deviceId,
+            'deviceInfo': deviceInfo,
+          });
+          
+          Logger.i("Device registered successfully");
+          // Complete login process
+          await _completeDeviceRestrictedLogin(cred, email);
+          return cred;
+        }
+
+        if (validationResult['isValid'] != true) {
+          Logger.w("Device validation failed - device not authorized");
+          // Device not valid, clean up authentication state completely
+          await _cleanupFailedAuth();
+          throw FirebaseAuthException(
+            code: 'device-restricted', 
+            message: 'This account is restricted to a specific device. Please contact support if you believe this is an error.'
+          );
+        }
+
+        // Device is valid, complete login
+        Logger.i("Device validation successful, completing login");
+        await _completeDeviceRestrictedLogin(cred, email);
+        return cred;
+        
+      } catch (cloudFunctionError) {
+        Logger.e("Cloud Functions error during device validation: $cloudFunctionError");
+        
+        // If Cloud Functions are unavailable, clean up and show appropriate error
+        await _cleanupFailedAuth();
+        throw Exception("Device validation failed. Please check your internet connection and try again, or contact support if the issue persists.");
+      }
+      
+    } catch (e) {
+      Logger.e("Error during device-restricted login: $e");
+      
+      // Handle specific device restriction error
+      if (e is FirebaseAuthException && e.code == 'device-restricted') {
+        rethrow;
+      }
+      
+      // Re-throw other authentication errors
+      rethrow;
+    }
+  }
+
+  // Helper method to clean up failed authentication attempts
+  Future<void> _cleanupFailedAuth() async {
+    try {
+      Logger.i("Cleaning up failed authentication attempt");
+      
+      // Sign out from Firebase
+      if (_auth != null) {
+        await _auth!.signOut();
+      }
+      
+      // Clear any stored authentication data
+      await AuthPersistenceService.clearAll();
+      
+      // Clear subscription cache
+      SubscriptionService.clearCache();
+      
+      Logger.i("Authentication cleanup completed");
+    } catch (cleanupError) {
+      Logger.e("Error during authentication cleanup: $cleanupError");
+      // Continue despite cleanup errors
+    }
+  }
+
+  // Helper method to complete the login process for device-restricted login
+  Future<void> _completeDeviceRestrictedLogin(UserCredential result, String email) async {
+    if (result.user != null) {
+      String? token = await result.user!.getIdToken();
+      await AuthPersistenceService.saveAuthToken(token!);
+
+      // Get custom claims and user data
+      final claims = await getCustomClaims();
+      final userRole = claims['role'] as String? ?? 'student';
+
+      List<String> assignedCourseIds = [];
+      if (claims['assignedCourseIds'] is List) {
+        assignedCourseIds = List<String>.from(
+          claims['assignedCourseIds'] as List,
+        );
+      } else if (claims['assignedCourseIds'] is Map) {
+        assignedCourseIds =
+            (claims['assignedCourseIds'] as Map).keys.toList().cast<String>();
+      }
+
+      // Get user model
+      UserModel? userModel = await getUserData();
+      if (userModel != null) {
+        userModel = UserModel(
+          uid: userModel.uid,
+          displayName: userModel.displayName,
+          email: userModel.email,
+          role: userRole,
+          assignedCourseIds: assignedCourseIds,
+          password: userModel.password,
+        );
+
+        await AuthPersistenceService.saveUserData(userModel);
+      }
+
+      // Log the successful login
+      await _logLoginEvent(result.user!.uid);
+
+      // Start subscription monitoring for real-time access control
+      startSubscriptionMonitoring();
+    }
+  }
+
+  // Method to re-validate device on app resume/start
+  Future<bool> validateCurrentDevice() async {
+    if (!_isFirebaseAvailable || currentUser == null) {
+      return false;
+    }
+
+    try {
+      final deviceId = await getDeviceId();
+      final uid = currentUser!.uid;
+      
+      Logger.i("Validating current device: $deviceId for user: $uid");
+
+      final callable = FirebaseFunctions.instance.httpsCallable('validateUserDevice');
+      final res = await callable.call({
+        'userId': uid, 
+        'currentDeviceId': deviceId
+      });
+      
+      final validationResult = Map<String, dynamic>.from(res.data as Map);
+      
+      // If restriction is not enabled, device is valid
+      if (validationResult['restrictionEnabled'] != true) {
+        return true;
+      }
+      
+      // If restriction is enabled, check if device is valid
+      return validationResult['isValid'] == true;
+      
+    } catch (e) {
+      Logger.e("Error validating current device: $e");
+      // In case of error, assume device is valid to avoid blocking legitimate users
+      return true;
     }
   }
 

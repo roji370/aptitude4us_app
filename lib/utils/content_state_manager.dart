@@ -117,6 +117,34 @@ class ContentStateManager {
     }
   }
 
+  /// Pause all currently playing videos
+  void pauseAllVideos() {
+    int pausedCount = 0;
+    for (final state in _contentStates.values) {
+      if (state.videoController != null && 
+          state.videoController!.value.isInitialized && 
+          state.videoController!.value.isPlaying) {
+        state.videoController!.pause();
+        pausedCount++;
+        Logger.i('⏸️ Paused video: ${state.content.title}');
+      }
+    }
+    if (pausedCount > 0) {
+      Logger.i('⏸️ Paused $pausedCount active videos');
+    }
+  }
+
+  /// Pause specific video controller
+  void pauseVideo(ContentModel content) {
+    final state = _contentStates[_generateContentKey(content)];
+    if (state?.videoController != null && 
+        state!.videoController!.value.isInitialized && 
+        state.videoController!.value.isPlaying) {
+      state.videoController!.pause();
+      Logger.i('⏸️ Paused video: ${content.title}');
+    }
+  }
+
   /// Clear states for content older than the specified duration
   void clearOldContentStates({Duration maxAge = const Duration(minutes: 30)}) {
     final cutoffTime = DateTime.now().subtract(maxAge);

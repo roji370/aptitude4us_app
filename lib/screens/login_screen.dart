@@ -47,6 +47,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// Convert Firebase error codes to user-friendly messages
   String _getFirebaseErrorMessage(String errorString) {
+    // Handle device restriction errors first (before Firebase error code extraction)
+    if (errorString.contains('device-restricted')) {
+      return 'This account is restricted to a specific device. Please contact support if you believe this is an error.';
+    }
+    
+    if (errorString.contains('Device validation failed')) {
+      return 'Device validation failed. Please check your internet connection and try again, or contact support if the issue persists.';
+    }
+
     // Extract Firebase error code from the error string
     String errorCode = '';
 
@@ -90,6 +99,8 @@ class _LoginScreenState extends State<LoginScreen> {
         return 'This credential is already associated with another account.';
       case 'requires-recent-login':
         return 'Please log out and log back in before retrying this operation.';
+      case 'device-restricted':
+        return 'This account is restricted to a specific device. Please contact support if you believe this is an error.';
       default:
         // Handle other common error patterns
         if (errorString.contains("Firebase Auth is not available")) {
@@ -119,8 +130,8 @@ class _LoginScreenState extends State<LoginScreen> {
         Logger.i("🔐 LoginScreen: AuthService obtained successfully");
         bool shouldNavigateToHome = false;
 
-        // Try to sign in with Firebase
-        final userCredential = await authService.signInWithEmailAndPassword(
+        // Try to sign in with Firebase using device restriction validation
+        final userCredential = await authService.loginWithDeviceRestriction(
           _emailController.text.trim(),
           _passwordController.text.trim(),
         );
@@ -469,65 +480,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
 
-                  // Error message display
-                  if (_errorMessage.isNotEmpty)
-                    Positioned(
-                      top: screenSize.height * 0.67,
-                      left: screenSize.width * 0.06,
-                      right: screenSize.width * 0.06,
-                      child: Container(
-                        width: double.infinity,
-                        constraints: BoxConstraints(
-                          minHeight: 50, // Minimum height for proper display
-                          maxHeight: 120, // Maximum height to prevent overflow
-                        ),
-                        padding: EdgeInsets.symmetric(
-                          vertical: 12,
-                          horizontal: 16,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withAlpha(
-                            26,
-                          ), // 0.1 opacity = 26 alpha (255 * 0.1)
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: Colors.red.withAlpha(
-                              128,
-                            ), // 0.5 opacity = 128 alpha (255 * 0.5)
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: EdgeInsets.only(top: 2),
-                              child: Icon(
-                                Icons.error_outline,
-                                color: Colors.red,
-                                size: screenSize.width * 0.045,
-                              ),
-                            ),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                _errorMessage,
-                                style: TextStyle(
-                                  color: Colors.red.shade700,
-                                  fontSize: screenSize.width * 0.0375,
-                                  fontWeight: FontWeight.w500,
-                                  height:
-                                      1.4, // Better line height for readability
-                                ),
-                                maxLines: 4, // Allow up to 4 lines
-                                overflow: TextOverflow.visible,
-                                softWrap: true,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                  // Removed error message from here - moved to end of Stack for proper layering
 
                   // Sign In Button - styled to match design
                   Positioned(
@@ -577,6 +530,87 @@ class _LoginScreenState extends State<LoginScreen> {
                       height: safeAreaBottom > 0 ? safeAreaBottom : 20,
                     ),
                   ),
+
+                  // Error message display - positioned last to appear on top of other elements
+                  if (_errorMessage.isNotEmpty)
+                    Positioned(
+                      top: screenSize.height * 0.67,
+                      left: screenSize.width * 0.06,
+                      right: screenSize.width * 0.06,
+                      child: Material(
+                        elevation: 6, // Add elevation to ensure it appears on top
+                        borderRadius: BorderRadius.circular(6),
+                        color: Colors.transparent,
+                        child: Container(
+                          width: double.infinity,
+                          constraints: BoxConstraints(
+                            minHeight: 50,
+                            maxHeight: 150,
+                          ),
+                          padding: EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withAlpha(200), // Much higher opacity for better text readability
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: Colors.red.withAlpha(180),
+                              width: 2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withAlpha(51), // 20% opacity
+                                offset: Offset(0, 3),
+                                blurRadius: 6,
+                                spreadRadius: 0,
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Padding(
+                                padding: EdgeInsets.only(top: 2),
+                                child: Icon(
+                                  Icons.error_outline,
+                                  color: Colors.white, // White icon for better contrast on red background
+                                  size: screenSize.width * 0.05,
+                                ),
+                              ),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  _errorMessage,
+                                  style: TextStyle(
+                                    color: Colors.white, // White text on red background for better contrast
+                                    fontSize: screenSize.width * 0.038,
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.4,
+                                  ),
+                                  maxLines: 4,
+                                  overflow: TextOverflow.visible,
+                                  softWrap: true,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    _errorMessage = '';
+                                  });
+                                },
+                                child: Container(
+                                  padding: EdgeInsets.all(4),
+                                  child: Icon(
+                                    Icons.close,
+                                    color: Colors.white, // White close icon for better visibility
+                                    size: screenSize.width * 0.045,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),

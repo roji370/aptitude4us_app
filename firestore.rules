@@ -16,6 +16,15 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create: if isAuthenticated() && request.auth.uid == userId;
       allow delete: if false;
+      
+      // User token subcollections
+      match /tokens/{tokenId} {
+        allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      }
+      
+      match /fcm_tokens/{tokenId} {
+        allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      }
     }
 
     // Courses collection rules (merged)

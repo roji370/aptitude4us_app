@@ -315,8 +315,45 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                 Platform.isIOS ? AppColors.primary : Colors.transparent,
             statusBarIconBrightness: statusBarIconBrightness,
           );
+
+          // Validate device when app resumes (optional security check)
+          _validateDeviceOnResume(context);
         }
       });
+    }
+  }
+
+  // Optional device validation when app resumes
+  void _validateDeviceOnResume(BuildContext context) async {
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      
+      // Only validate if user is logged in
+      if (authService.isUserLoggedIn) {
+        Logger.i("🔒 Validating device on app resume");
+        
+        bool isValid = await authService.validateCurrentDevice();
+        
+        if (!isValid) {
+          Logger.w("⚠️ Device validation failed on resume - signing out user");
+          
+          // Sign out user if device is not valid
+          await authService.signOut();
+          
+          // Navigate to login screen
+          if (context.mounted) {
+            Navigator.of(context).pushNamedAndRemoveUntil(
+              '/login',
+              (route) => false,
+            );
+          }
+        } else {
+          Logger.i("✅ Device validation successful on resume");
+        }
+      }
+    } catch (e) {
+      Logger.e("Error validating device on resume: $e");
+      // Continue silently to avoid disrupting user experience
     }
   }
 

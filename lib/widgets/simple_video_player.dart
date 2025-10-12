@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../utils/logger.dart';
 import 'video_watermark.dart';
 
@@ -26,16 +28,36 @@ class SimpleVideoPlayer extends StatefulWidget {
   State<SimpleVideoPlayer> createState() => _SimpleVideoPlayerState();
 }
 
-class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
+class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> 
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   VideoPlayerController? _controller;
   bool _isInitialized = false;
   bool _showControls = true;
   double _volume = 1.0;
   bool _isMuted = false;
+  Timer? _hideControlsTimer;
+  String? _skipFeedback;
+  Timer? _skipFeedbackTimer;
+  late AnimationController _controlsAnimationController;
+  late Animation<double> _controlsAnimation;
 
   @override
   void initState() {
     super.initState();
+    
+    // Add lifecycle observer
+    WidgetsBinding.instance.addObserver(this);
+    
+    _controlsAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _controlsAnimation = CurvedAnimation(
+      parent: _controlsAnimationController,
+      curve: Curves.easeInOut,
+    );
+    _controlsAnimationController.forward();
+    
     if (widget.existingController != null) {
       _useExistingController();
     } else {
@@ -44,12 +66,64 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
   }
 
   @override
+  void deactivate() {
+    // Pause video when navigating away from this screen
+    if (_controller != null && _controller!.value.isInitialized && _controller!.value.isPlaying) {
+      _controller!.pause();
+      Logger.i('🎬 Video paused due to navigation away from player');
+    }
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
+    // Remove lifecycle observer
+    WidgetsBinding.instance.removeObserver(this);
+    
+    // Cancel timers
+    _hideControlsTimer?.cancel();
+    _skipFeedbackTimer?.cancel();
+    
+    // Pause and cleanup
+    if (_controller != null && _controller!.value.isInitialized && _controller!.value.isPlaying) {
+      _controller!.pause();
+    }
+    
+    // Remove listener and disable wake lock when disposing
+    _controller?.removeListener(_handlePlaybackStateChange);
+    _disableWakelock();
+    
+    // Dispose animation controller
+    _controlsAnimationController.dispose();
+    
     // Only dispose if we created the controller, not if it was provided
     if (widget.existingController == null) {
       _controller?.dispose();
     }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    // Pause video when app goes to background or is paused
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      if (_controller!.value.isPlaying) {
+        _controller!.pause();
+        Logger.i('🎬 Video paused due to app lifecycle change: $state');
+      }
+    }
+    // Optionally resume when app comes back (uncomment if desired)
+    // else if (state == AppLifecycleState.resumed) {
+    //   if (!_controller!.value.isPlaying && widget.autoPlay) {
+    //     _controller!.play();
+    //   }
+    // }
   }
 
   void _useExistingController() {
@@ -58,11 +132,14 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
       _isInitialized = _controller!.value.isInitialized;
     });
 
+    // Add listener to manage wake lock based on playback state
+    _controller!.addListener(_handlePlaybackStateChange);
+
     if (widget.autoPlay && !_controller!.value.isPlaying) {
       _controller!.play();
     }
 
-    // Auto-hide controls after 3 seconds
+    // Auto-hide controls after 5 seconds
     _showControlsTemporarily();
 
     Logger.i(
@@ -89,6 +166,9 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
           _isInitialized = true;
         });
 
+        // Add listener to manage wake lock based on playback state
+        _controller!.addListener(_handlePlaybackStateChange);
+
         if (widget.autoPlay) {
           await _controller!.play();
         }
@@ -102,17 +182,38 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
   }
 
   void _showControlsTemporarily() {
+    // Cancel any existing timer
+    _hideControlsTimer?.cancel();
+    
+    if (!_showControls) {
+      _controlsAnimationController.forward();
+    }
+    
     setState(() {
       _showControls = true;
     });
 
-    Future.delayed(const Duration(seconds: 3), () {
+    // Start new timer
+    _hideControlsTimer = Timer(const Duration(seconds: 5), () {
       if (mounted && _controller != null && _controller!.value.isPlaying) {
+        _controlsAnimationController.reverse();
         setState(() {
           _showControls = false;
         });
       }
     });
+  }
+  
+  void _toggleControls() {
+    if (_showControls) {
+      _hideControlsTimer?.cancel();
+      _controlsAnimationController.reverse();
+      setState(() {
+        _showControls = false;
+      });
+    } else {
+      _showControlsTemporarily();
+    }
   }
 
   void _togglePlayPause() {
@@ -127,6 +228,35 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
     });
   }
 
+  // Wake lock management methods
+  void _handlePlaybackStateChange() {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+    
+    if (_controller!.value.isPlaying) {
+      _enableWakelock();
+    } else {
+      _disableWakelock();
+    }
+  }
+
+  Future<void> _enableWakelock() async {
+    try {
+      await WakelockPlus.enable();
+      Logger.i('🔒 Wake lock enabled - screen will stay on during video playback');
+    } catch (e) {
+      Logger.e('Failed to enable wake lock: $e');
+    }
+  }
+
+  Future<void> _disableWakelock() async {
+    try {
+      await WakelockPlus.disable();
+      Logger.i('🔓 Wake lock disabled - normal screen timeout restored');
+    } catch (e) {
+      Logger.e('Failed to disable wake lock: $e');
+    }
+  }
+
   void _toggleMute() {
     if (_controller == null || !_controller!.value.isInitialized) return;
 
@@ -136,6 +266,63 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
         _controller!.setVolume(0.0);
       } else {
         _controller!.setVolume(_volume);
+      }
+    });
+  }
+
+  void _skipBackward({bool showFeedback = true}) {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    // Haptic feedback
+    HapticFeedback.lightImpact();
+
+    final currentPosition = _controller!.value.position;
+    final newPosition = currentPosition - const Duration(seconds: 10);
+    
+    // Don't go before the start
+    final targetPosition = newPosition < Duration.zero ? Duration.zero : newPosition;
+    
+    _controller!.seekTo(targetPosition);
+    
+    if (showFeedback) {
+      _showSkipFeedback('- 10s');
+    }
+    _showControlsTemporarily();
+  }
+
+  void _skipForward({bool showFeedback = true}) {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    // Haptic feedback
+    HapticFeedback.lightImpact();
+
+    final currentPosition = _controller!.value.position;
+    final duration = _controller!.value.duration;
+    final newPosition = currentPosition + const Duration(seconds: 10);
+    
+    // Don't go past the end
+    final targetPosition = newPosition > duration ? duration : newPosition;
+    
+    _controller!.seekTo(targetPosition);
+    
+    if (showFeedback) {
+      _showSkipFeedback('+ 10s');
+    }
+    _showControlsTemporarily();
+  }
+  
+  void _showSkipFeedback(String text) {
+    _skipFeedbackTimer?.cancel();
+    
+    setState(() {
+      _skipFeedback = text;
+    });
+    
+    _skipFeedbackTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) {
+        setState(() {
+          _skipFeedback = null;
+        });
       }
     });
   }
@@ -217,6 +404,37 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
+          // Time display and fullscreen button
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                // Time display
+                Text(
+                  '${_formatDuration(position)} / ${_formatDuration(duration)}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                  ),
+                ),
+                const Spacer(),
+                // Fullscreen button
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: _toggleFullscreen,
+                  icon: const Icon(
+                    Icons.fullscreen,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 4),
+
           // Progress bar
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -233,71 +451,55 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
 
           // Control buttons
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                // Skip backward button
+                IconButton(
+                  onPressed: _skipBackward,
+                  icon: const Icon(
+                    Icons.replay_10,
+                    color: Colors.white,
+                    size: 32,
+                  ),
+                ),
+
+                const SizedBox(width: 8),
+
                 // Play/Pause button
                 IconButton(
                   onPressed: _togglePlayPause,
                   icon: Icon(
                     isPlaying ? Icons.pause : Icons.play_arrow,
                     color: Colors.white,
-                    size: 32,
+                    size: 36,
                   ),
-                ),
-
-                // Time display
-                Text(
-                  '${_formatDuration(position)} / ${_formatDuration(duration)}',
-                  style: const TextStyle(color: Colors.white),
-                ),
-
-                const Spacer(),
-
-                // Volume control
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      onPressed: _toggleMute,
-                      icon: Icon(
-                        _isMuted 
-                          ? Icons.volume_off 
-                          : _volume > 0.5 
-                            ? Icons.volume_up 
-                            : Icons.volume_down,
-                        color: Colors.white,
-                        size: 24,
-                      ),
-                    ),
-                    SizedBox(
-                      width: 80,
-                      child: SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          trackHeight: 2,
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                          overlayShape: SliderComponentShape.noOverlay,
-                        ),
-                        child: Slider(
-                          value: _isMuted ? 0.0 : _volume,
-                          min: 0.0,
-                          max: 1.0,
-                          onChanged: _setVolume,
-                          activeColor: Colors.white,
-                          inactiveColor: Colors.white30,
-                        ),
-                      ),
-                    ),
-                  ],
                 ),
 
                 const SizedBox(width: 8),
 
-                // Fullscreen button
+                // Skip forward button
                 IconButton(
-                  onPressed: _toggleFullscreen,
+                  onPressed: _skipForward,
                   icon: const Icon(
-                    Icons.fullscreen,
+                    Icons.forward_10,
+                    color: Colors.white,
+                    size: 32,
+                  ),
+                ),
+
+                const Spacer(),
+
+                // Volume control (mute button only)
+                IconButton(
+                  onPressed: _toggleMute,
+                  icon: Icon(
+                    _isMuted 
+                      ? Icons.volume_off 
+                      : _volume > 0.5 
+                        ? Icons.volume_up 
+                        : Icons.volume_down,
                     color: Colors.white,
                     size: 28,
                   ),
@@ -320,32 +522,124 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer> {
   @override
   Widget build(BuildContext context) {
     if (!_isInitialized) {
-      return const Center(child: CircularProgressIndicator());
+      return Container(
+        color: Colors.black,
+        child: const Center(
+          child: CircularProgressIndicator(color: Colors.red),
+        ),
+      );
     }
 
-    return GestureDetector(
-      onTap: _showControlsTemporarily,
-      child: Container(
-        color: Colors.black,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Video player
-            Center(
-              child: AspectRatio(
-                aspectRatio: _controller!.value.aspectRatio,
-                child: VideoPlayer(_controller!),
+    final screenWidth = MediaQuery.of(context).size.width;
+    
+    return Container(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Video player
+          Center(
+            child: AspectRatio(
+              aspectRatio: _controller!.value.aspectRatio,
+              child: VideoPlayer(_controller!),
+            ),
+          ),
+
+          // Double-tap zones for skip
+          Row(
+            children: [
+              // Left zone - skip backward
+              Expanded(
+                child: GestureDetector(
+                  onTap: _toggleControls,
+                  onDoubleTap: () => _skipBackward(),
+                  child: Container(color: Colors.transparent),
+                ),
+              ),
+              // Right zone - skip forward
+              Expanded(
+                child: GestureDetector(
+                  onTap: _toggleControls,
+                  onDoubleTap: () => _skipForward(),
+                  child: Container(color: Colors.transparent),
+                ),
+              ),
+            ],
+          ),
+
+          // Buffering indicator
+          if (_controller!.value.isBuffering)
+            const Center(
+              child: CircularProgressIndicator(
+                color: Colors.red,
+                strokeWidth: 3,
               ),
             ),
 
-            // Watermark overlay
-            if (widget.showWatermark && widget.userName != null)
-              VideoWatermark(userName: widget.userName!),
+          // Center play button when paused
+          if (!_controller!.value.isPlaying && !_controller!.value.isBuffering)
+            Center(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  shape: BoxShape.circle,
+                ),
+                child: IconButton(
+                  iconSize: 64,
+                  icon: const Icon(
+                    Icons.play_arrow,
+                    color: Colors.white,
+                  ),
+                  onPressed: _togglePlayPause,
+                ),
+              ),
+            ),
 
-            // Controls overlay
-            _buildControls(),
-          ],
-        ),
+          // Skip feedback overlay
+          if (_skipFeedback != null)
+            Center(
+              child: AnimatedOpacity(
+                opacity: _skipFeedback != null ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.7),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _skipFeedback!.startsWith('-') ? Icons.replay_10 : Icons.forward_10,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _skipFeedback!,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          // Watermark overlay
+          if (widget.showWatermark && widget.userName != null)
+            VideoWatermark(userName: widget.userName!),
+
+          // Controls overlay with fade animation
+          FadeTransition(
+            opacity: _controlsAnimation,
+            child: _buildControls(),
+          ),
+        ],
       ),
     );
   }
@@ -377,27 +671,97 @@ class _FullscreenVideoPlayer extends StatefulWidget {
   State<_FullscreenVideoPlayer> createState() => _FullscreenVideoPlayerState();
 }
 
-class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
+class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> 
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late VideoPlayerController _controller;
   bool _showControls = true;
   late double _volume;
   late bool _isMuted;
+  Timer? _hideControlsTimer;
+  String? _skipFeedback;
+  Timer? _skipFeedbackTimer;
+  late AnimationController _controlsAnimationController;
+  late Animation<double> _controlsAnimation;
 
   @override
   void initState() {
     super.initState();
+    
+    // Add lifecycle observer
+    WidgetsBinding.instance.addObserver(this);
+    
     _controller = widget.sharedController;
     _volume = widget.volume;
     _isMuted = widget.isMuted;
+    
+    _controlsAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _controlsAnimation = CurvedAnimation(
+      parent: _controlsAnimationController,
+      curve: Curves.easeInOut,
+    );
+    _controlsAnimationController.forward();
+    
     _setFullscreenMode();
     _resumePlaybackIfNeeded();
+    
+    // Add listener to manage wake lock in fullscreen mode
+    _controller.addListener(_handlePlaybackStateChange);
+  }
+
+  @override
+  void deactivate() {
+    // Pause video when exiting fullscreen
+    if (_controller.value.isInitialized && _controller.value.isPlaying) {
+      _controller.pause();
+      Logger.i('🎬 Fullscreen video paused due to navigation');
+    }
+    super.deactivate();
   }
 
   @override
   void dispose() {
+    // Remove lifecycle observer
+    WidgetsBinding.instance.removeObserver(this);
+    
+    // Cancel timers
+    _hideControlsTimer?.cancel();
+    _skipFeedbackTimer?.cancel();
+    
+    // Pause video before cleanup
+    if (_controller.value.isInitialized && _controller.value.isPlaying) {
+      _controller.pause();
+    }
+    
+    // Remove listener and disable wake lock
+    _controller.removeListener(_handlePlaybackStateChange);
+    _disableWakelock();
+    
+    // Dispose animation controller
+    _controlsAnimationController.dispose();
+    
     // Don't dispose the shared controller, just restore system UI
     _exitFullscreenMode();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    if (!_controller.value.isInitialized) return;
+
+    // Pause video when app goes to background or is paused
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      if (_controller.value.isPlaying) {
+        _controller.pause();
+        Logger.i('🎬 Fullscreen video paused due to app lifecycle change: $state');
+      }
+    }
   }
 
   void _setFullscreenMode() {
@@ -431,17 +795,38 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
   }
 
   void _showControlsTemporarily() {
+    // Cancel any existing timer
+    _hideControlsTimer?.cancel();
+    
+    if (!_showControls) {
+      _controlsAnimationController.forward();
+    }
+    
     setState(() {
       _showControls = true;
     });
 
-    Future.delayed(const Duration(seconds: 3), () {
+    // Start new timer
+    _hideControlsTimer = Timer(const Duration(seconds: 5), () {
       if (mounted && _controller.value.isPlaying) {
+        _controlsAnimationController.reverse();
         setState(() {
           _showControls = false;
         });
       }
     });
+  }
+  
+  void _toggleControls() {
+    if (_showControls) {
+      _hideControlsTimer?.cancel();
+      _controlsAnimationController.reverse();
+      setState(() {
+        _showControls = false;
+      });
+    } else {
+      _showControlsTemporarily();
+    }
   }
 
   void _togglePlayPause() {
@@ -454,6 +839,35 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
         _controller.play();
       }
     });
+  }
+
+  // Wake lock management methods for fullscreen mode
+  void _handlePlaybackStateChange() {
+    if (!_controller.value.isInitialized) return;
+    
+    if (_controller.value.isPlaying) {
+      _enableWakelock();
+    } else {
+      _disableWakelock();
+    }
+  }
+
+  Future<void> _enableWakelock() async {
+    try {
+      await WakelockPlus.enable();
+      Logger.i('🔒 Wake lock enabled in fullscreen - screen will stay on during video playback');
+    } catch (e) {
+      Logger.e('Failed to enable wake lock in fullscreen: $e');
+    }
+  }
+
+  Future<void> _disableWakelock() async {
+    try {
+      await WakelockPlus.disable();
+      Logger.i('🔓 Wake lock disabled in fullscreen - normal screen timeout restored');
+    } catch (e) {
+      Logger.e('Failed to disable wake lock in fullscreen: $e');
+    }
   }
 
   void _toggleMute() {
@@ -480,6 +894,63 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
       // If user adjusts volume while muted, unmute
       if (_isMuted && volume > 0) {
         _isMuted = false;
+      }
+    });
+  }
+
+  void _skipBackward({bool showFeedback = true}) {
+    if (!_controller.value.isInitialized) return;
+
+    // Haptic feedback
+    HapticFeedback.lightImpact();
+
+    final currentPosition = _controller.value.position;
+    final newPosition = currentPosition - const Duration(seconds: 10);
+    
+    // Don't go before the start
+    final targetPosition = newPosition < Duration.zero ? Duration.zero : newPosition;
+    
+    _controller.seekTo(targetPosition);
+    
+    if (showFeedback) {
+      _showSkipFeedback('- 10s');
+    }
+    _showControlsTemporarily();
+  }
+
+  void _skipForward({bool showFeedback = true}) {
+    if (!_controller.value.isInitialized) return;
+
+    // Haptic feedback
+    HapticFeedback.lightImpact();
+
+    final currentPosition = _controller.value.position;
+    final duration = _controller.value.duration;
+    final newPosition = currentPosition + const Duration(seconds: 10);
+    
+    // Don't go past the end
+    final targetPosition = newPosition > duration ? duration : newPosition;
+    
+    _controller.seekTo(targetPosition);
+    
+    if (showFeedback) {
+      _showSkipFeedback('+ 10s');
+    }
+    _showControlsTemporarily();
+  }
+  
+  void _showSkipFeedback(String text) {
+    _skipFeedbackTimer?.cancel();
+    
+    setState(() {
+      _skipFeedback = text;
+    });
+    
+    _skipFeedbackTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) {
+        setState(() {
+          _skipFeedback = null;
+        });
       }
     });
   }
@@ -584,6 +1055,16 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
+                    // Skip backward button
+                    IconButton(
+                      onPressed: _skipBackward,
+                      icon: const Icon(
+                        Icons.replay_10,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                    ),
+
                     // Play/Pause button
                     IconButton(
                       onPressed: _togglePlayPause,
@@ -591,6 +1072,16 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
                         isPlaying ? Icons.pause : Icons.play_arrow,
                         color: Colors.white,
                         size: 36,
+                      ),
+                    ),
+
+                    // Skip forward button
+                    IconButton(
+                      onPressed: _skipForward,
+                      icon: const Icon(
+                        Icons.forward_10,
+                        color: Colors.white,
+                        size: 32,
                       ),
                     ),
 
@@ -667,34 +1158,125 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body:
-            _controller.value.isInitialized
-                ? GestureDetector(
-                  onTap: _showControlsTemporarily,
-                  onDoubleTap: _exitFullscreen,
-                  child: Stack(
-                    fit: StackFit.expand,
+        body: _controller.value.isInitialized
+            ? Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Video player
+                  Center(
+                    child: AspectRatio(
+                      aspectRatio: _controller.value.aspectRatio,
+                      child: VideoPlayer(_controller),
+                    ),
+                  ),
+
+                  // Double-tap zones for skip
+                  Row(
                     children: [
-                      // Video player
-                      Center(
-                        child: AspectRatio(
-                          aspectRatio: _controller.value.aspectRatio,
-                          child: VideoPlayer(_controller),
+                      // Left zone - skip backward
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: _toggleControls,
+                          onDoubleTap: () => _skipBackward(),
+                          child: Container(color: Colors.transparent),
                         ),
                       ),
-
-                      // Watermark overlay
-                      if (widget.showWatermark && widget.userName != null)
-                        FullscreenVideoWatermark(userName: widget.userName!),
-
-                      // Controls overlay
-                      _buildFullscreenControls(),
+                      // Center zone - exit fullscreen
+                      GestureDetector(
+                        onDoubleTap: _exitFullscreen,
+                        child: Container(
+                          width: MediaQuery.of(context).size.width * 0.2,
+                          color: Colors.transparent,
+                        ),
+                      ),
+                      // Right zone - skip forward
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: _toggleControls,
+                          onDoubleTap: () => _skipForward(),
+                          child: Container(color: Colors.transparent),
+                        ),
+                      ),
                     ],
                   ),
-                )
-                : const Center(
-                  child: CircularProgressIndicator(color: Colors.white),
-                ),
+
+                  // Buffering indicator
+                  if (_controller.value.isBuffering)
+                    const Center(
+                      child: CircularProgressIndicator(
+                        color: Colors.red,
+                        strokeWidth: 4,
+                      ),
+                    ),
+
+                  // Center play button when paused
+                  if (!_controller.value.isPlaying && !_controller.value.isBuffering)
+                    Center(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.5),
+                          shape: BoxShape.circle,
+                        ),
+                        child: IconButton(
+                          iconSize: 80,
+                          icon: const Icon(
+                            Icons.play_arrow,
+                            color: Colors.white,
+                          ),
+                          onPressed: _togglePlayPause,
+                        ),
+                      ),
+                    ),
+
+                  // Skip feedback overlay
+                  if (_skipFeedback != null)
+                    Center(
+                      child: AnimatedOpacity(
+                        opacity: _skipFeedback != null ? 1.0 : 0.0,
+                        duration: const Duration(milliseconds: 200),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.7),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _skipFeedback!.startsWith('-') ? Icons.replay_10 : Icons.forward_10,
+                                color: Colors.white,
+                                size: 48,
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                _skipFeedback!,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                  // Watermark overlay
+                  if (widget.showWatermark && widget.userName != null)
+                    FullscreenVideoWatermark(userName: widget.userName!),
+
+                  // Controls overlay with fade animation
+                  FadeTransition(
+                    opacity: _controlsAnimation,
+                    child: _buildFullscreenControls(),
+                  ),
+                ],
+              )
+            : const Center(
+                child: CircularProgressIndicator(color: Colors.red),
+              ),
       ),
     );
   }

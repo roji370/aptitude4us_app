@@ -7,6 +7,12 @@ class ContentModel {
   final String content;
   final int order;
   final String moduleId;
+  
+  // HLS-specific fields for video content
+  final String? hlsUrl;           // HLS master playlist URL (.m3u8)
+  final String? originalUrl;      // Backup original MP4 URL
+  final String? processingStatus; // 'pending', 'processing', 'completed', 'failed'
+  final double? duration;         // Video duration in seconds
 
   ContentModel({
     required this.id,
@@ -15,6 +21,10 @@ class ContentModel {
     required this.content,
     required this.order,
     this.moduleId = '',
+    this.hlsUrl,
+    this.originalUrl,
+    this.processingStatus,
+    this.duration,
   });
 
   factory ContentModel.fromJson(Map<String, dynamic> json, String id) {
@@ -92,6 +102,31 @@ class ContentModel {
     // Get moduleId if available
     String moduleIdValue = json['moduleId'] ?? '';
 
+    // Parse HLS-specific fields for video content
+    String? hlsUrlValue;
+    String? originalUrlValue;
+    String? processingStatusValue;
+    double? durationValue;
+
+    if (contentTypeValue == 'video') {
+      hlsUrlValue = json['hlsUrl'];
+      originalUrlValue = json['originalUrl'];
+      processingStatusValue = json['processingStatus'];
+      
+      // Parse duration from various possible formats
+      if (json['duration'] != null) {
+        if (json['duration'] is num) {
+          durationValue = json['duration'].toDouble();
+        } else if (json['duration'] is String) {
+          durationValue = double.tryParse(json['duration']);
+        }
+      }
+      
+      Logger.d(
+        "HLS fields - hlsUrl: $hlsUrlValue, status: $processingStatusValue, duration: $durationValue",
+      );
+    }
+
     Logger.d(
       "ContentModel.fromJson output - title: $titleValue, type: $contentTypeValue, content: $contentValue",
     );
@@ -103,16 +138,30 @@ class ContentModel {
       content: contentValue,
       order: orderValue,
       moduleId: moduleIdValue,
+      hlsUrl: hlsUrlValue,
+      originalUrl: originalUrlValue,
+      processingStatus: processingStatusValue,
+      duration: durationValue,
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {
+    Map<String, dynamic> json = {
       'title': title,
       'contentType': contentType,
       'content': content,
       'order': order,
       'moduleId': moduleId,
     };
+    
+    // Add HLS fields if they exist (only for video content)
+    if (contentType == 'video') {
+      if (hlsUrl != null) json['hlsUrl'] = hlsUrl;
+      if (originalUrl != null) json['originalUrl'] = originalUrl;
+      if (processingStatus != null) json['processingStatus'] = processingStatus;
+      if (duration != null) json['duration'] = duration;
+    }
+    
+    return json;
   }
 }

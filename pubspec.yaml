@@ -52,6 +52,7 @@ dependencies:
   shared_preferences: ^2.2.2
   emoji_selector: ^0.0.6
   firebase_messaging: ^16.0.0
+  device_info_plus: ^10.1.2
   awesome_notifications: ^0.10.1
   intl: ^0.20.0
   rxdart: ^0.28.0
