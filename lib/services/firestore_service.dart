@@ -567,6 +567,16 @@ class FirestoreService {
         allContents = uniqueContent.values.toList();
         Logger.i("Total content items after deduplication: ${allContents.length}");
 
+        // Filter out unpublished content (isPublished === false)
+        // Keep content where isPublished is true or null/undefined (backwards compatibility)
+        final publishedContent = allContents.where((content) => content.isPublished != false).toList();
+        final filteredCount = allContents.length - publishedContent.length;
+        if (filteredCount > 0) {
+          Logger.i("Filtered out $filteredCount unpublished content items");
+        }
+        allContents = publishedContent;
+        Logger.i("Total published content items: ${allContents.length}");
+
         // Validate and log each content item
         for (var content in allContents) {
           Logger.d("\nContent Item:");
@@ -574,6 +584,7 @@ class FirestoreService {
           Logger.d("- Type: ${content.contentType}");
           Logger.d("- Title: ${content.title}");
           Logger.d("- URL/Content: ${content.content}");
+          Logger.d("- Published: ${content.isPublished ?? 'undefined (visible by default)'}");
 
           if (content.contentType == 'video' || content.contentType == 'pdf') {
             if (!content.content.startsWith('http')) {

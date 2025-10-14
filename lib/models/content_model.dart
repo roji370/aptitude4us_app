@@ -7,6 +7,7 @@ class ContentModel {
   final String content;
   final int order;
   final String moduleId;
+  final bool? isPublished; // Content-level publishing control
   
   // HLS-specific fields for video content
   final String? hlsUrl;           // HLS master playlist URL (.m3u8)
@@ -21,6 +22,7 @@ class ContentModel {
     required this.content,
     required this.order,
     this.moduleId = '',
+    this.isPublished,
     this.hlsUrl,
     this.originalUrl,
     this.processingStatus,
@@ -102,6 +104,9 @@ class ContentModel {
     // Get moduleId if available
     String moduleIdValue = json['moduleId'] ?? '';
 
+    // Parse isPublished field (null if not present for backwards compatibility)
+    bool? isPublishedValue = json['isPublished'] as bool?;
+
     // Parse HLS-specific fields for video content
     String? hlsUrlValue;
     String? originalUrlValue;
@@ -138,6 +143,7 @@ class ContentModel {
       content: contentValue,
       order: orderValue,
       moduleId: moduleIdValue,
+      isPublished: isPublishedValue,
       hlsUrl: hlsUrlValue,
       originalUrl: originalUrlValue,
       processingStatus: processingStatusValue,
@@ -153,6 +159,9 @@ class ContentModel {
       'order': order,
       'moduleId': moduleId,
     };
+    
+    // Add isPublished if present
+    if (isPublished != null) json['isPublished'] = isPublished;
     
     // Add HLS fields if they exist (only for video content)
     if (contentType == 'video') {
