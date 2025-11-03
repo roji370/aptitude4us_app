@@ -276,11 +276,17 @@ class _FullScreenPdfViewerState extends State<FullScreenPdfViewer> {
 class ContentViewerScreen extends StatefulWidget {
   final CourseModel course;
   final ModuleModel module;
+  final int? initialContentIndex;
+  final String? filteredContentType;
+  final bool singleContentMode; // New: When true, only show the single selected content
 
   const ContentViewerScreen({
     super.key,
     required this.course,
     required this.module,
+    this.initialContentIndex,
+    this.filteredContentType,
+    this.singleContentMode = false,
   });
 
   @override
@@ -472,11 +478,63 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     }
   }
 
-  Future<void> _loadContent() async {
+  Future<List<ContentModel>> _getFilteredContent() async {
     final firestoreService = Provider.of<FirestoreService>(
       context,
       listen: false,
     );
+
+    // Load all content from Firestore
+    var contentList = await firestoreService.getModuleContent(
+      widget.course.id,
+      widget.module.id,
+    );
+
+    Logger.i("Loaded ${contentList.length} content items");
+    
+    // Filter content by type if specified
+    if (widget.filteredContentType != null) {
+      contentList = contentList
+          .where((content) => content.contentType == widget.filteredContentType)
+          .toList();
+      Logger.i(
+        "Filtered to ${contentList.length} items of type ${widget.filteredContentType}",
+      );
+    }
+
+    // If in single content mode, return only the selected content item
+    if (widget.singleContentMode && widget.initialContentIndex != null) {
+      if (widget.initialContentIndex! >= 0 && widget.initialContentIndex! < contentList.length) {
+        final singleContent = contentList[widget.initialContentIndex!];
+        Logger.i("Single content mode: showing only '${singleContent.title}'");
+        return [singleContent];
+      }
+    }
+
+    // Print detailed info for debugging
+    for (int i = 0; i < contentList.length; i++) {
+      final content = contentList[i];
+      Logger.d("Content item #$i:");
+      Logger.d("  - ID: ${content.id}");
+      Logger.d("  - Title: ${content.title}");
+      Logger.d("  - Type: ${content.contentType}");
+      Logger.d("  - URL/Content: ${content.content}");
+
+      // Verify URL format for videos and PDFs
+      if ((content.contentType == 'video' || content.contentType == 'pdf') &&
+          content.content.isNotEmpty) {
+        if (!content.content.startsWith('http')) {
+          Logger.w("WARNING: Invalid URL format: ${content.content}");
+        } else {
+          Logger.d("URL format looks valid");
+        }
+      }
+    }
+
+    return contentList;
+  }
+
+  Future<void> _loadContent() async {
     final authService = Provider.of<AuthService>(context, listen: false);
 
     setState(() {
@@ -510,38 +568,30 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
 
       Logger.i("Access granted: User has access to course ${widget.course.id}");
 
-      // Now load the content
+      // Now load and filter the content
       setState(() {
-        _contentFuture = firestoreService.getModuleContent(
-          widget.course.id,
-          widget.module.id,
-        );
+        _contentFuture = _getFilteredContent();
       });
 
       final contentList = await _contentFuture;
-      Logger.i("Loaded ${contentList.length} content items");
       
       // Store content count for empty state logic
       _totalContentCount = contentList.length;
 
-      // Print detailed info for debugging
-      for (int i = 0; i < contentList.length; i++) {
-        final content = contentList[i];
-        Logger.d("Content item #$i:");
-        Logger.d("  - ID: ${content.id}");
-        Logger.d("  - Title: ${content.title}");
-        Logger.d("  - Type: ${content.contentType}");
-        Logger.d("  - URL/Content: ${content.content}");
-
-        // Verify URL format for videos and PDFs
-        if ((content.contentType == 'video' || content.contentType == 'pdf') &&
-            content.content.isNotEmpty) {
-          if (!content.content.startsWith('http')) {
-            Logger.w("WARNING: Invalid URL format: ${content.content}");
-          } else {
-            Logger.d("URL format looks valid");
-          }
-        }
+      // In single content mode, always start at index 0 (the only item)
+      // Otherwise, set initial content index if provided and valid
+      if (widget.singleContentMode) {
+        setState(() {
+          _currentContentIndex = 0;
+        });
+        Logger.i("Single content mode: index set to 0");
+      } else if (widget.initialContentIndex != null &&
+          widget.initialContentIndex! >= 0 &&
+          widget.initialContentIndex! < contentList.length) {
+        setState(() {
+          _currentContentIndex = widget.initialContentIndex!;
+        });
+        Logger.i("Set initial content index to ${widget.initialContentIndex}");
       }
 
       // Skip pre-initialization to prevent multiple simultaneous initializations
@@ -1041,17 +1091,18 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
       extendBody: false,
       appBar: AppBar(
         title: Text(
-          widget.module.title,
-          style: const TextStyle(
+          widget.course.title,
+          style: GoogleFonts.inter(
             fontWeight: FontWeight.w600,
             color: Colors.white,
+            fontSize: 18,
           ),
         ),
         backgroundColor: const Color(0xFF323483),
         foregroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
@@ -1181,157 +1232,313 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     return Container(
       width: screenSize.width,
       height: screenSize.height,
-      color: Colors.white, // Page background
-      child: Stack(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0xFFF5F5F5),
+            Colors.white,
+          ],
+        ),
+      ),
+      child: Column(
         children: [
-          // Main content area with padding
-          Padding(
-            padding: EdgeInsets.only(
-              top: screenSize.height * 0.01,
-              bottom: safeAreaBottom + 30, // Reduced space for bottom nav
+          // Modern Header Card with content title
+          Container(
+            margin: EdgeInsets.all(screenSize.width * 0.04),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // User Profile Card - Module Title
-                Padding(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: screenSize.width * 0.04,
-                    vertical: screenSize.height * 0.01,
+                // Content type badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
                   ),
-                  child: Container(
-                    width: double.infinity,
-                    height: screenSize.height * 0.08,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF323483),
-                      borderRadius: BorderRadius.circular(8),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x1F171A1F),
-                          offset: Offset(0, 2),
-                          blurRadius: 4,
-                        ),
-                      ],
-                    ),
-                    child: Center(
-                      child: Text(
-                        widget.module.title,
-                        style: GoogleFonts.inter(
-                          fontSize: isTablet ? 22 : 20,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                        textAlign: TextAlign.center,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
-                ),
-
-                SizedBox(height: screenSize.height * 0.005),
-
-                // Content Container - Expanded to take more screen space
-                Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: screenSize.width * 0.04,
-                    ),
-                    child: Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: const Color(0xFF323483),
-                          width: 1,
-                        ),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x1A000000),
-                            offset: Offset(0, 2),
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(7),
-                        child: _buildContentView(currentContent),
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Navigation row (prev/next) with index indicator
-                Padding(
-                  padding: EdgeInsets.only(
-                    top: screenSize.height * 0.005,
-                    left: screenSize.width * 0.05,
-                    right: screenSize.width * 0.05,
-                    bottom: screenSize.height * 0.005,
+                  decoration: BoxDecoration(
+                    color: _getColorForContentType(currentContent.contentType).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Previous button
-                      IconButton(
-                        onPressed:
-                            _currentContentIndex > 0
-                                ? () {
-                                  setState(() {
-                                    _currentContentIndex--;
-                                    // Note: Content state manager handles persistence across navigation
-                                  });
-                                }
-                                : null,
-                        icon: Icon(
-                          Icons.arrow_back,
-                          color:
-                              _currentContentIndex > 0
-                                  ? const Color(0xFF323483)
-                                  : Colors.grey,
-                          size: 30,
-                        ),
+                      Icon(
+                        _getIconForContentType(currentContent.contentType),
+                        size: 16,
+                        color: _getColorForContentType(currentContent.contentType),
                       ),
-
-                      // Progress indicator
+                      const SizedBox(width: 6),
                       Text(
-                        '${_currentContentIndex + 1}/${contentList.length}',
-                        style: GoogleFonts.inter(
-                          fontSize: screenSize.width * 0.04,
-                          fontWeight: FontWeight.bold,
-                          color: const Color(0xFF2E2C6A),
-                        ),
-                      ),
-
-                      // Next button
-                      IconButton(
-                        onPressed:
-                            _currentContentIndex < contentList.length - 1
-                                ? () {
-                                  setState(() {
-                                    _currentContentIndex++;
-                                    // Note: Content state manager handles persistence across navigation
-                                  });
-                                }
-                                : null,
-                        icon: Icon(
-                          Icons.arrow_forward,
-                          color:
-                              _currentContentIndex < contentList.length - 1
-                                  ? const Color(0xFF323483)
-                                  : Colors.grey,
-                          size: 30,
+                        _getDisplayNameForContentType(currentContent.contentType),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _getColorForContentType(currentContent.contentType),
                         ),
                       ),
                     ],
                   ),
                 ),
+                const SizedBox(height: 12),
+                // Content title
+                Text(
+                  currentContent.title,
+                  style: GoogleFonts.inter(
+                    fontSize: isTablet ? 20 : 18,
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF1A1A1A),
+                    height: 1.3,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 8),
+                // Module name subtitle
+                Row(
+                  children: [
+                    Icon(
+                      Icons.folder_outlined,
+                      size: 16,
+                      color: Colors.grey[600],
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        widget.module.title,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[600],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
+
+          // Content Container - Modern card design
+          Expanded(
+            child: Container(
+              margin: EdgeInsets.symmetric(
+                horizontal: screenSize.width * 0.04,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 20,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: _buildContentView(currentContent),
+              ),
+            ),
+          ),
+
+          // Navigation row (prev/next) - modern floating design - only show if multiple content items
+          if (contentList.length > 1)
+            Container(
+              margin: EdgeInsets.fromLTRB(
+                screenSize.width * 0.04,
+                16,
+                screenSize.width * 0.04,
+                16 + safeAreaBottom,
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 12,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(30),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 15,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Previous button
+                  _buildNavigationButton(
+                    icon: Icons.arrow_back_ios_new_rounded,
+                    enabled: _currentContentIndex > 0,
+                    onTap: _currentContentIndex > 0
+                        ? () {
+                            setState(() {
+                              _currentContentIndex--;
+                            });
+                          }
+                        : null,
+                  ),
+
+                  // Progress indicator with modern design
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF323483).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          '${_currentContentIndex + 1}',
+                          style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFF323483),
+                          ),
+                        ),
+                        Text(
+                          ' / ',
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        Text(
+                          '${contentList.length}',
+                          style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Next button
+                  _buildNavigationButton(
+                    icon: Icons.arrow_forward_ios_rounded,
+                    enabled: _currentContentIndex < contentList.length - 1,
+                    onTap: _currentContentIndex < contentList.length - 1
+                        ? () {
+                            setState(() {
+                              _currentContentIndex++;
+                            });
+                          }
+                        : null,
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
+  }
+
+  // Helper widget for modern navigation buttons
+  Widget _buildNavigationButton({
+    required IconData icon,
+    required bool enabled,
+    required VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: enabled
+              ? const Color(0xFF323483).withOpacity(0.1)
+              : Colors.grey.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          icon,
+          color: enabled ? const Color(0xFF323483) : Colors.grey[400],
+          size: 20,
+        ),
+      ),
+    );
+  }
+
+  // Helper method to get color for content type
+  Color _getColorForContentType(String type) {
+    switch (type.toLowerCase()) {
+      case 'video':
+        return const Color(0xFFE53935); // Red
+      case 'pdf':
+        return const Color(0xFFD32F2F); // Deep red
+      case 'ppt':
+        return const Color(0xFFFB8C00); // Orange
+      case 'image':
+        return const Color(0xFF7B1FA2); // Purple
+      case 'link':
+        return const Color(0xFF1976D2); // Blue
+      case 'text':
+        return const Color(0xFF388E3C); // Green
+      default:
+        return const Color(0xFF323483); // Default brand color
+    }
+  }
+
+  // Helper method to get icon for content type
+  IconData _getIconForContentType(String type) {
+    switch (type.toLowerCase()) {
+      case 'video':
+        return Icons.play_circle_outline;
+      case 'pdf':
+        return Icons.picture_as_pdf;
+      case 'ppt':
+        return Icons.slideshow;
+      case 'image':
+        return Icons.image;
+      case 'link':
+        return Icons.link;
+      case 'text':
+        return Icons.text_fields;
+      default:
+        return Icons.description;
+    }
+  }
+
+  // Helper method to get display name for content type
+  String _getDisplayNameForContentType(String type) {
+    switch (type.toLowerCase()) {
+      case 'video':
+        return 'Video';
+      case 'pdf':
+        return 'PDF';
+      case 'ppt':
+        return 'Presentation';
+      case 'image':
+        return 'Image';
+      case 'link':
+        return 'Link';
+      case 'text':
+        return 'Document';
+      default:
+        return type.toUpperCase();
+    }
   }
 
   // Clean up old PDF files to prevent storage issues
@@ -1395,73 +1602,147 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     ContentModel currentContent,
     bool isTablet,
   ) {
-    // Landscape-optimized layout
+    // Landscape-optimized layout with modern design
     return Container(
       width: screenSize.width,
       height: screenSize.height,
-      color: Colors.white,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFFF5F5F5),
+            Colors.white,
+          ],
+        ),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Left side: Module title and navigation controls
-          Container(
-            width: screenSize.width * 0.25,
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              children: [
-                // Module title
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF323483),
-                    borderRadius: BorderRadius.circular(8),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x1F171A1F),
-                        offset: Offset(0, 2),
-                        blurRadius: 4,
+          // Left side: Navigation sidebar - only show if multiple content items
+          if (contentList.length > 1)
+            Container(
+              width: screenSize.width * 0.28,
+              margin: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 20,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  // Header with content type badge
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF323483).withOpacity(0.05),
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(20),
+                        topRight: Radius.circular(20),
                       ),
-                    ],
-                  ),
-                  child: Text(
-                    widget.module.title,
-                    style: GoogleFonts.inter(
-                      fontSize: isTablet ? 18 : 16,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
                     ),
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 2,
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                // Navigation
-                Expanded(
-                  child: SingleChildScrollView(
                     child: Column(
                       children: [
-                        for (int i = 0; i < contentList.length; i++)
-                          ListTile(
+                        Text(
+                          'Content List',
+                          style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFF323483),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF323483).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '${contentList.length} items',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF323483),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Content list
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: contentList.length,
+                      itemBuilder: (context, i) {
+                        final isSelected = i == _currentContentIndex;
+                        return Container(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? _getColorForContentType(contentList[i].contentType).withOpacity(0.1)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isSelected
+                                  ? _getColorForContentType(contentList[i].contentType)
+                                  : Colors.transparent,
+                              width: 2,
+                            ),
+                          ),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 4,
+                            ),
                             title: Text(
                               contentList[i].title,
-                              style: TextStyle(
-                                color:
-                                    i == _currentContentIndex
-                                        ? const Color(0xFF323483)
-                                        : Colors.black87,
-                                fontWeight:
-                                    i == _currentContentIndex
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
+                              style: GoogleFonts.inter(
+                                color: isSelected
+                                    ? _getColorForContentType(contentList[i].contentType)
+                                    : Colors.black87,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.w500,
+                                fontSize: 13,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: _getColorForContentType(contentList[i].contentType).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                _getIconForContentType(contentList[i].contentType),
+                                color: _getColorForContentType(contentList[i].contentType),
+                                size: 20,
                               ),
                             ),
-                            selected: i == _currentContentIndex,
+                            trailing: isSelected
+                                ? Icon(
+                                    Icons.play_arrow,
+                                    color: _getColorForContentType(contentList[i].contentType),
+                                  )
+                                : null,
                             onTap: () {
-                              // Pause current video before switching to new content
+                              // Pause current video before switching
                               if (_currentContentIndex < contentList.length) {
                                 final currentContent = contentList[_currentContentIndex];
                                 if (currentContent.contentType == 'video') {
@@ -1471,44 +1752,34 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                               
                               setState(() {
                                 _currentContentIndex = i;
-                                // Note: No longer disposing video controllers or resetting PDF state
-                                // Content state manager handles persistence across navigation
                               });
                             },
-                            leading: Icon(
-                              _getContentTypeIcon(contentList[i].contentType),
-                              color:
-                                  i == _currentContentIndex
-                                      ? const Color(0xFF323483)
-                                      : Colors.grey,
-                            ),
                           ),
-                      ],
+                        );
+                      },
                     ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Right side: Content viewer
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: const Color(0xFF323483), width: 1),
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x1A000000),
-                    offset: Offset(0, 2),
-                    blurRadius: 4,
                   ),
                 ],
               ),
+            ),
+
+          // Right side: Content viewer with modern card
+          Expanded(
+            child: Container(
               margin: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 20,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(7),
+                borderRadius: BorderRadius.circular(20),
                 child: _buildContentView(currentContent),
               ),
             ),
@@ -1516,26 +1787,6 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
         ],
       ),
     );
-  }
-
-  // Helper method to get icon for content type
-  IconData _getContentTypeIcon(String contentType) {
-    switch (contentType) {
-      case 'video':
-        return Icons.video_library;
-      case 'pdf':
-        return Icons.picture_as_pdf;
-      case 'link':
-        return Icons.link;
-      case 'image':
-        return Icons.image;
-      case 'ppt':
-        return Icons.slideshow;
-      case 'text':
-        return Icons.text_snippet;
-      default:
-        return Icons.article;
-    }
   }
 
   // Build image content widget

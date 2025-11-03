@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 import '../services/auth_service.dart';
+import '../models/user_model.dart';
 import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
@@ -65,36 +67,123 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildUserInfo() {
     return Consumer<AuthService>(
       builder: (context, authService, child) {
-        final user = authService.currentUser;
-
-        return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Account Information',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.onSurface,
+        return FutureBuilder<UserModel?>(
+          future: authService.getUserData(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
+                child: const Center(child: CircularProgressIndicator()),
+              );
+            }
+
+            final userData = snapshot.data;
+            final user = authService.currentUser;
+
+            return Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              _buildInfoRow('Email', user?.email ?? 'Not available'),
-            ],
-          ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Profile Information',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.onSurface,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: Icon(Icons.edit, color: AppColors.primary),
+                        tooltip: 'Edit Profile',
+                        onPressed: () {
+                          Navigator.pushNamed(context, '/profile-completion');
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Profile Photo
+                  if (userData?.photoUrl != null && userData!.photoUrl!.isNotEmpty)
+                    Center(
+                      child: CircleAvatar(
+                        radius: 50,
+                        backgroundImage: NetworkImage(userData.photoUrl!),
+                        onBackgroundImageError: (exception, stackTrace) {
+                          Logger.e('Error loading profile photo: $exception');
+                        },
+                        child: userData.photoUrl!.isEmpty
+                            ? Icon(Icons.person, size: 50, color: AppColors.onSurface.withOpacity(0.5))
+                            : null,
+                      ),
+                    )
+                  else
+                    Center(
+                      child: CircleAvatar(
+                        radius: 50,
+                        backgroundColor: AppColors.primary.withOpacity(0.1),
+                        child: Icon(Icons.person, size: 50, color: AppColors.primary),
+                      ),
+                    ),
+                  const SizedBox(height: 20),
+
+                  _buildInfoRow('Email', user?.email ?? 'Not available'),
+                  const SizedBox(height: 12),
+
+                  if (userData?.mobile != null && userData!.mobile!.isNotEmpty) ...[
+                    _buildInfoRow('Mobile', userData.mobile!),
+                    const SizedBox(height: 12),
+                  ],
+
+                  if (userData?.dateOfJoining != null) ...[
+                    _buildInfoRow(
+                      'Date of Joining',
+                      DateFormat('MMM dd, yyyy').format(userData!.dateOfJoining!),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  if (userData?.examDate != null) ...[
+                    _buildInfoRow(
+                      'Exam Date',
+                      DateFormat('MMM dd, yyyy').format(userData!.examDate!),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  if (userData?.subscriptionPeriod != null && userData!.subscriptionPeriod!.isNotEmpty) ...[
+                    _buildInfoRow('Subscription Period', userData.subscriptionPeriod!),
+                  ],
+                ],
+              ),
+            );
+          },
         );
       },
     );

@@ -5,6 +5,7 @@ import '../services/auth_service.dart';
 import '../services/auth_persistence_service.dart';
 import '../utils/logger.dart';
 import 'assigned_courses_screen.dart';
+import 'profile_completion_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -155,12 +156,27 @@ class _LoginScreenState extends State<LoginScreen> {
         if (!mounted) return;
 
         if (shouldNavigateToHome) {
+          // Check if profile is complete before navigating
+          bool profileComplete = false;
+          try {
+            profileComplete = await authService.isProfileComplete();
+            Logger.i("Profile completion status after login: $profileComplete");
+          } catch (e) {
+            Logger.e("Error checking profile completion: $e");
+            // If error, assume profile is incomplete and let user fill it
+            profileComplete = false;
+          }
+
+          if (!mounted) return;
+
           // Use WidgetsBinding.instance.addPostFrameCallback to safely navigate after the current frame
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
               Navigator.of(scaffoldContext).pushReplacement(
                 MaterialPageRoute(
-                  builder: (_) => const AssignedCoursesScreen(),
+                  builder: (_) => profileComplete 
+                      ? const AssignedCoursesScreen()
+                      : const ProfileCompletionScreen(),
                 ),
               );
             }

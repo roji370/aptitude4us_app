@@ -529,14 +529,9 @@ class AuthService {
       if (userDoc.exists) {
         Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
 
-        return UserModel(
-          uid: user.uid,
-          displayName: userData['displayName'] ?? '',
-          email: userData['email'] ?? '',
+        return UserModel.fromJson(userData, user.uid).copyWith(
           role: userRole, // Use role from claims
-          assignedCourseIds:
-              assignedCourseIds, // Use assigned courses from claims
-          password: userData['password'],
+          assignedCourseIds: assignedCourseIds, // Use assigned courses from claims
         );
       }
 
@@ -555,6 +550,80 @@ class AuthService {
     } catch (e) {
       Logger.e("Error getting user data: $e");
       rethrow;
+    }
+  }
+
+  /// Update user profile with additional details
+  Future<void> updateUserProfile({
+    String? photoUrl,
+    DateTime? dateOfJoining,
+    DateTime? examDate,
+    String? mobile,
+    String? subscriptionPeriod,
+  }) async {
+    if (!_isFirebaseAvailable || !_isFirestoreAvailable) {
+      throw Exception("Firebase or Firestore is not available");
+    }
+
+    try {
+      User? user = currentUser;
+      if (user == null) {
+        throw Exception("No user logged in");
+      }
+
+      // Prepare update data
+      Map<String, dynamic> updateData = {};
+      
+      if (photoUrl != null) updateData['photoUrl'] = photoUrl;
+      if (dateOfJoining != null) {
+        updateData['dateOfJoining'] = dateOfJoining.millisecondsSinceEpoch;
+      }
+      if (examDate != null) {
+        updateData['examDate'] = examDate.millisecondsSinceEpoch;
+      }
+      if (mobile != null) updateData['mobile'] = mobile;
+      if (subscriptionPeriod != null) {
+        updateData['subscriptionPeriod'] = subscriptionPeriod;
+      }
+      
+      // Mark profile as completed if all required fields are present
+      if (photoUrl != null &&
+          dateOfJoining != null &&
+          examDate != null &&
+          mobile != null &&
+          subscriptionPeriod != null) {
+        updateData['profileCompleted'] = true;
+      }
+
+      // Update Firestore
+      await _firestore!
+          .collection('users')
+          .doc(user.uid)
+          .set(updateData, SetOptions(merge: true));
+
+      Logger.i("User profile updated successfully for UID: ${user.uid}");
+
+      // Update local persisted data
+      UserModel? userData = await getUserData();
+      if (userData != null) {
+        await AuthPersistenceService.saveUserData(userData);
+      }
+    } catch (e) {
+      Logger.e("Error updating user profile: $e");
+      rethrow;
+    }
+  }
+
+  /// Check if user profile is complete
+  Future<bool> isProfileComplete() async {
+    try {
+      final userData = await getUserData();
+      if (userData == null) return false;
+      
+      return userData.isProfileComplete;
+    } catch (e) {
+      Logger.e("Error checking profile completion: $e");
+      return false;
     }
   }
 

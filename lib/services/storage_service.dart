@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../utils/logger.dart';
 import '../main.dart'; // For FirebaseInitHelper
@@ -9,23 +10,35 @@ class StorageService {
 
   // Firebase Storage instance with error handling
   FirebaseStorage? _storage;
+  bool _isInitializing = false;
+  bool _hasInitialized = false;
 
   StorageService() {
     _initializeStorage();
   }
 
   Future<void> _initializeStorage() async {
+    // Prevent multiple initialization attempts
+    if (_hasInitialized || _isInitializing) {
+      return;
+    }
+    
+    _isInitializing = true;
+    
     try {
       // Wait for Firebase to be initialized first
       await FirebaseInitHelper.ensureInitialized();
 
       _storage = FirebaseStorage.instance;
       _isStorageAvailable = true;
+      _hasInitialized = true;
       Logger.i("Firebase Storage initialized successfully");
     } catch (e) {
       Logger.e("Failed to initialize Firebase Storage: $e");
       _isStorageAvailable = false;
       _storage = null;
+    } finally {
+      _isInitializing = false;
     }
   }
 
@@ -173,6 +186,91 @@ class StorageService {
     } catch (e) {
       Logger.e("Error getting file metadata: $e");
       return {'available': false, 'error': e.toString()};
+    }
+  }
+
+  /// Upload profile photo to Firebase Storage
+  /// Returns the download URL of the uploaded photo
+  Future<String> uploadProfilePhoto(String userId, File imageFile) async {
+    // Ensure storage is initialized before attempting upload
+    await _initializeStorage();
+    
+    if (!_isStorageAvailable || _storage == null) {
+      Logger.e("Firebase Storage is not available");
+      throw Exception("Firebase Storage is not available");
+    }
+
+    try {
+      Logger.i("Starting profile photo upload for user: $userId");
+      
+      // Verify file exists
+      if (!await imageFile.exists()) {
+        Logger.e("Image file does not exist: ${imageFile.path}");
+        throw Exception("Selected image file not found");
+      }
+      
+      // Get file size
+      final fileSize = await imageFile.length();
+      Logger.i("Image file size: ${fileSize} bytes");
+      
+      if (fileSize == 0) {
+        Logger.e("Image file is empty");
+        throw Exception("Selected image file is empty");
+      }
+
+      // Create a reference to the file location
+      // IMPORTANT: Path must match storage rules: users/{userId}/profile/{filename}
+      final String fileName = 'profile.jpg'; // Use simple name, overwrite each time
+      final String storagePath = 'users/$userId/profile/$fileName';
+      
+      Logger.i("Upload path: $storagePath");
+      
+      final ref = _storage!.ref().child(storagePath);
+
+      // Set metadata
+      final metadata = SettableMetadata(
+        contentType: 'image/jpeg',
+        customMetadata: {
+          'userId': userId,
+          'uploadedAt': DateTime.now().toIso8601String(),
+        },
+      );
+
+      Logger.i("Starting upload task...");
+      
+      // Upload the file
+      final uploadTask = ref.putFile(imageFile, metadata);
+      
+      // Monitor upload progress
+      uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
+        double progress = snapshot.bytesTransferred / snapshot.totalBytes;
+        Logger.i('Upload progress: ${(progress * 100).toStringAsFixed(2)}%');
+      });
+
+      // Wait for upload to complete
+      final snapshot = await uploadTask;
+      
+      Logger.i("Upload complete, getting download URL...");
+
+      // Get the download URL
+      final downloadUrl = await snapshot.ref.getDownloadURL();
+
+      Logger.i("Profile photo uploaded successfully: $downloadUrl");
+      return downloadUrl;
+    } on FirebaseException catch (e) {
+      Logger.e("Firebase error uploading profile photo: ${e.code} - ${e.message}");
+      if (e.code == 'unauthorized') {
+        throw Exception("Permission denied. Please try logging out and back in.");
+      } else if (e.code == 'storage/unauthorized') {
+        throw Exception("Storage permission denied. Please contact support.");
+      } else if (e.code == 'storage/unauthenticated') {
+        throw Exception("Not authenticated. Please log in again.");
+      } else {
+        throw Exception("Upload failed: ${e.message ?? e.code}");
+      }
+    } catch (e) {
+      Logger.e("Unexpected error uploading profile photo: $e");
+      throw Exception("Failed to upload photo. Please try again.");
     }
   }
 }

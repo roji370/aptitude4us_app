@@ -14,6 +14,7 @@ import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'screens/assigned_courses_screen.dart';
 import 'screens/chat_screen.dart';
+import 'screens/profile_completion_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/auth_service.dart';
@@ -446,6 +447,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         routes: {
           '/chat': (context) => ChatScreen(),
           '/settings': (context) => const SettingsScreen(),
+          '/profile-completion': (context) => const ProfileCompletionScreen(),
         },
       ),
     );

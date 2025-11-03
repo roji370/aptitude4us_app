@@ -8,7 +8,7 @@ import '../services/firestore_service.dart';
 import '../utils/logger.dart';
 import '../utils/route_transitions.dart';
 import '../widgets/custom_bottom_navigation.dart';
-import 'content_viewer_screen_mobile.dart';
+import 'content_types_screen.dart';
 
 class ModuleListScreen extends StatefulWidget {
   final CourseModel course;
@@ -383,11 +383,11 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                                                     color: Colors.transparent,
                                                     child: InkWell(
                                                       onTap: () {
-                                                        // Navigate to content viewer
+                                                        // Navigate to content types screen
                                                         AppNavigator.navigateTo(
                                                           context: context,
                                                           page:
-                                                              ContentViewerScreen(
+                                                              ContentTypesScreen(
                                                                 course:
                                                                     widget
                                                                         .course,

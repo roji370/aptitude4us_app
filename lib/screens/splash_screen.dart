@@ -7,12 +7,15 @@ import '../services/auth_service.dart';
 import '../services/auth_persistence_service.dart';
 import '../services/firestore_service.dart';
 import '../services/subscription_service.dart';
+import '../services/version_check_service.dart';
 import '../utils/accessibility_helper.dart';
 import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
 import 'login_screen.dart';
 import 'assigned_courses_screen.dart';
 import 'onboarding_screen.dart';
+import 'force_update_screen.dart';
+import 'profile_completion_screen.dart';
 import '../services/notification_service.dart';
 import '../main.dart';
 
@@ -141,7 +144,41 @@ class _SplashScreenState extends State<SplashScreen>
         return;
       }
 
-      // Firebase ready - check authentication
+      // Firebase ready - check app version first
+      if (mounted) {
+        setState(() {
+          _loadingText = "Checking for updates...";
+        });
+      }
+
+      await Future.delayed(const Duration(milliseconds: 400));
+
+      if (!mounted || _isNavigating) return;
+
+      // Check if app update is required
+      final versionCheckService = VersionCheckService();
+      bool updateRequired = false;
+      
+      try {
+        updateRequired = await versionCheckService.isUpdateRequired().timeout(
+          const Duration(seconds: 5),
+        );
+      } catch (e) {
+        Logger.e("Error checking app version: $e");
+        // On error, continue to app (don't block user)
+        updateRequired = false;
+      }
+
+      if (!mounted || _isNavigating) return;
+
+      if (updateRequired) {
+        // Navigate to force update screen
+        Logger.w("App update required - navigating to force update screen");
+        _navigateToForceUpdate();
+        return;
+      }
+
+      // Version is OK - check authentication
       if (mounted) {
         setState(() {
           _loadingText = "Checking authentication...";
@@ -172,6 +209,51 @@ class _SplashScreenState extends State<SplashScreen>
     ).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
   }
 
+  /// Navigate to force update screen when app version is outdated
+  void _navigateToForceUpdate() async {
+    if (!mounted || _isNavigating || _hasNavigated) return;
+
+    // Set navigation flag immediately to prevent duplicates
+    _hasNavigated = true;
+
+    setState(() {
+      _isNavigating = true;
+    });
+
+    Logger.i("🔄 Navigating to force update screen...");
+
+    // Get version information
+    final versionCheckService = VersionCheckService();
+    final currentVersion = await versionCheckService.getCurrentVersion();
+    final versionInfo = await versionCheckService.getVersionInfo();
+    final requiredVersion = versionInfo['minimumVersion'] as String? ?? 'Unknown';
+    final updateMessage = versionInfo['updateMessage'] as String?;
+
+    // Fade out before navigation
+    await _fadeController.reverse();
+
+    if (!mounted) return;
+
+    // Force a frame to render before navigation
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    if (!mounted) return;
+
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => ForceUpdateScreen(
+          currentVersion: currentVersion,
+          requiredVersion: requiredVersion,
+          updateMessage: updateMessage,
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
+  }
+
   Future<void> _checkAuthAndNavigate() async {
     if (!mounted || _isNavigating) return;
 
@@ -193,6 +275,26 @@ class _SplashScreenState extends State<SplashScreen>
       if (authService.currentUser != null) {
         // User is already logged in through Firebase Auth
         Logger.i("User already logged in via Firebase Auth");
+
+        // Check if profile is complete
+        bool profileComplete = false;
+        try {
+          profileComplete = await authService.isProfileComplete();
+          Logger.i("Profile completion status: $profileComplete");
+        } catch (e) {
+          Logger.e("Error checking profile completion: $e");
+          // If error, assume profile is incomplete and let user fill it
+          profileComplete = false;
+        }
+
+        if (!mounted) return;
+
+        // If profile is not complete, navigate to profile completion screen
+        if (!profileComplete) {
+          Logger.i("Profile incomplete - navigating to profile completion");
+          _navigateToProfileCompletion();
+          return;
+        }
 
         // Setup user-specific notification handling
         if (mounted) {
@@ -242,6 +344,37 @@ class _SplashScreenState extends State<SplashScreen>
         _navigateToLogin();
       }
     }
+  }
+
+  /// Navigate to profile completion screen
+  void _navigateToProfileCompletion() async {
+    if (!mounted || !_isNavigating || _hasNavigated) return;
+
+    // Set navigation flag immediately to prevent duplicates
+    _hasNavigated = true;
+
+    Logger.i("📝 Navigating to profile completion screen...");
+
+    // Fade out before navigation
+    await _fadeController.reverse();
+
+    if (!mounted) return;
+
+    // Force a frame to render before navigation
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    if (!mounted) return;
+
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const ProfileCompletionScreen(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
   }
 
   void _navigateToHome() async {
