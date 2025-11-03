@@ -244,7 +244,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
 
-                  // Title: "Briffini Academy"
+                  // Title: "Xfini Academy"
                   Positioned(
                     top: screenSize.height * 0.08,
                     left: 0,
@@ -257,7 +257,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
-                          "Briffini Academy",
+                          "Xfini Academy",
                           maxLines: 1,
                           overflow: TextOverflow.visible,
                           style: GoogleFonts.archivo(

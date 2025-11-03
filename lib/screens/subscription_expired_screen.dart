@@ -141,11 +141,11 @@ class _SubscriptionExpiredScreenState extends State<SubscriptionExpiredScreen> {
 
   Widget _buildDescription() {
     String description =
-        'To access this content, you need an active subscription to Briffini Academy.';
+        'To access this content, you need an active subscription to Xfini Academy.';
 
     if (widget.contentTitle != null) {
       description =
-          'To access "${widget.contentTitle}", you need an active subscription to Briffini Academy.';
+          'To access "${widget.contentTitle}", you need an active subscription to Xfini Academy.';
     }
 
     return Text(
@@ -489,7 +489,7 @@ class _SubscriptionExpiredScreenState extends State<SubscriptionExpiredScreen> {
           (context) => AlertDialog(
             title: const Text('Contact Support'),
             content: const Text(
-              'Support contact information:\n\nEmail: support@briffini.academy\n\nWe\'ll respond within 24 hours.',
+              'Support contact information:\n\nEmail: support@xfini.academy\n\nWe\'ll respond within 24 hours.',
             ),
             actions: [
               TextButton(

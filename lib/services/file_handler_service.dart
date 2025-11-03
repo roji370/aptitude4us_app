@@ -126,9 +126,9 @@ class FileHandlerService {
         return null;
       }
 
-      // Create Briffini Academy folder in Downloads
+      // Create Xfini Academy folder in Downloads
       final downloadDir = Directory(
-        '${externalDir.path}/Download/BriffiniAcademy',
+        '${externalDir.path}/Download/XfiniAcademy',
       );
       await downloadDir.create(recursive: true);
 
@@ -182,7 +182,7 @@ class FileHandlerService {
         final externalDir = await getExternalStorageDirectory();
         if (externalDir != null) {
           final downloadDir = Directory(
-            '${externalDir.path}/Download/BriffiniAcademy',
+            '${externalDir.path}/Download/XfiniAcademy',
           );
           await downloadDir.create(recursive: true);
           return downloadDir;

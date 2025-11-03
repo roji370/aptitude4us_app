@@ -1,5 +1,5 @@
-name: briffini_academy
-description: "Briffini Academy - A comprehensive learning platform for students with interactive content, messaging, and progress tracking."
+name: xfini_academy
+description: "Xfini Academy - A comprehensive learning platform for students with interactive content, messaging, and progress tracking."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

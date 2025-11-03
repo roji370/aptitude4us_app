@@ -694,7 +694,7 @@ class _AttachmentPreviewState extends State<AttachmentPreview> {
       final directory = await getExternalStorageDirectory();
       if (directory != null) {
         final publicDir = Directory(
-          '${directory.path}/Pictures/BriffiniAcademy',
+          '${directory.path}/Pictures/XfiniAcademy',
         );
         await publicDir.create(recursive: true);
 

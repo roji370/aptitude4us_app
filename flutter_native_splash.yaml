@@ -1,10 +1,10 @@
-# flutter_native_splash configuration with custom beige color and logo
+# flutter_native_splash configuration with custom light gray color and logo
 flutter_native_splash:
-  # Light beige background
-  color: "d5d4d3"  # Light beige/taupe color
-  color_dark: "d5d4d3"
+  # Match logo's light background
+  color: "f5f5f7"  # Very light gray/off-white to match logo
+  color_dark: "f5f5f7"  # Same for dark mode
   
-  # BRIFFINI logo centered on beige background
+  # XFINI logo centered on light gray background
   image: assets/images/logo/app_logo.png
   
   # Platform settings

@@ -524,9 +524,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
     if (!_isInitialized) {
       return Container(
         color: Colors.black,
-        child: const Center(
-          child: CircularProgressIndicator(color: Colors.red),
-        ),
       );
     }
 
@@ -566,34 +563,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
               ),
             ],
           ),
-
-          // Buffering indicator
-          if (_controller!.value.isBuffering)
-            const Center(
-              child: CircularProgressIndicator(
-                color: Colors.red,
-                strokeWidth: 3,
-              ),
-            ),
-
-          // Center play button when paused
-          if (!_controller!.value.isPlaying && !_controller!.value.isBuffering)
-            Center(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.5),
-                  shape: BoxShape.circle,
-                ),
-                child: IconButton(
-                  iconSize: 64,
-                  icon: const Icon(
-                    Icons.play_arrow,
-                    color: Colors.white,
-                  ),
-                  onPressed: _togglePlayPause,
-                ),
-              ),
-            ),
 
           // Skip feedback overlay
           if (_skipFeedback != null)
@@ -1200,34 +1169,6 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
                     ],
                   ),
 
-                  // Buffering indicator
-                  if (_controller.value.isBuffering)
-                    const Center(
-                      child: CircularProgressIndicator(
-                        color: Colors.red,
-                        strokeWidth: 4,
-                      ),
-                    ),
-
-                  // Center play button when paused
-                  if (!_controller.value.isPlaying && !_controller.value.isBuffering)
-                    Center(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.5),
-                          shape: BoxShape.circle,
-                        ),
-                        child: IconButton(
-                          iconSize: 80,
-                          icon: const Icon(
-                            Icons.play_arrow,
-                            color: Colors.white,
-                          ),
-                          onPressed: _togglePlayPause,
-                        ),
-                      ),
-                    ),
-
                   // Skip feedback overlay
                   if (_skipFeedback != null)
                     Center(
@@ -1274,8 +1215,8 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
                   ),
                 ],
               )
-            : const Center(
-                child: CircularProgressIndicator(color: Colors.red),
+            : Container(
+                color: Colors.black,
               ),
       ),
     );

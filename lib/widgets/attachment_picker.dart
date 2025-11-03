@@ -436,7 +436,7 @@ class _AttachmentPickerState extends State<AttachmentPicker>
           content: Text(
             'To select photos and videos, please:\n\n'
             '1. Go to Settings\n'
-            '2. Find "Briffini Academy"\n'
+            '2. Find "Xfini Academy"\n'
             '3. Tap "Photos"\n'
             '4. Select "All Photos" or "Selected Photos"',
           ),

@@ -28,10 +28,10 @@ import '../widgets/ppt_viewer.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // Watermark overlay widget for PDFs
-class BriffiniWatermark extends StatelessWidget {
+class XfiniWatermark extends StatelessWidget {
   final String userName;
 
-  const BriffiniWatermark({super.key, required this.userName});
+  const XfiniWatermark({super.key, required this.userName});
 
   @override
   Widget build(BuildContext context) {
@@ -1023,7 +1023,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
               ),
             ),
             // Add watermark overlay with the user's name
-            BriffiniWatermark(userName: _userName),
+            XfiniWatermark(userName: _userName),
           ],
         );
     }
@@ -1651,7 +1651,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
         ),
         
         // Add watermark overlay
-        BriffiniWatermark(userName: _userName),
+        XfiniWatermark(userName: _userName),
       ],
     );
   }

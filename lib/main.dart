@@ -211,7 +211,7 @@ Future<void> _configureImmediateUI() async {
   // Set app to show immediately with branded color to prevent white flash
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
-      statusBarColor: Color(0xFF1A237E), // Briffini brand color
+      statusBarColor: Color(0xFF1A237E), // Xfini brand color
       statusBarIconBrightness: Brightness.light,
       systemNavigationBarColor: Color(0xFF1A237E),
       systemNavigationBarIconBrightness: Brightness.light,

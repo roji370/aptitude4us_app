@@ -507,7 +507,7 @@ class _SplashScreenState extends State<SplashScreen>
                 children: [
                   // App Logo/Text - matches native splash branding
                   Text(
-                    'BRIFFINI',
+                    'XFINI',
                     style: TextStyle(
                       fontFamily: 'Poppins',
                       fontSize: ResponsiveHelper.adaptiveFontSize(
