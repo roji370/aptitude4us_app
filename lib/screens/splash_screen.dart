@@ -228,6 +228,7 @@ class _SplashScreenState extends State<SplashScreen>
     final versionInfo = await versionCheckService.getVersionInfo();
     final requiredVersion = versionInfo['minimumVersion'] as String? ?? 'Unknown';
     final updateMessage = versionInfo['updateMessage'] as String?;
+    final apkDownloadPath = versionInfo['apkDownloadPath'] as String?;
 
     // Fade out before navigation
     await _fadeController.reverse();
@@ -245,6 +246,7 @@ class _SplashScreenState extends State<SplashScreen>
           currentVersion: currentVersion,
           requiredVersion: requiredVersion,
           updateMessage: updateMessage,
+          apkDownloadPath: apkDownloadPath,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);

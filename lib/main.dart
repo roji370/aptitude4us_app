@@ -300,7 +300,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     super.didChangeAppLifecycleState(state);
     Logger.i('App lifecycle state changed to: $state');
 
-    // App lifecycle changes will be handled by individual services when they're accessed
+    // ✅ Notify notification service of lifecycle changes (including badge clearing)
+    if (_globalNotificationService != null) {
+      _globalNotificationService!.handleAppLifecycleChange(state);
+    }
 
     // Reset system UI when app is resumed to handle different device behaviors
     if (state == AppLifecycleState.resumed) {

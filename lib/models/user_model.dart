@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class UserModel {
   final String uid;
   final String displayName;
@@ -35,7 +37,9 @@ class UserModel {
     DateTime? parseExamDate;
     
     if (json['dateOfJoining'] != null) {
-      if (json['dateOfJoining'] is int) {
+      if (json['dateOfJoining'] is Timestamp) {
+        parseDateOfJoining = (json['dateOfJoining'] as Timestamp).toDate();
+      } else if (json['dateOfJoining'] is int) {
         parseDateOfJoining = DateTime.fromMillisecondsSinceEpoch(json['dateOfJoining']);
       } else if (json['dateOfJoining'] is String) {
         parseDateOfJoining = DateTime.tryParse(json['dateOfJoining']);
@@ -43,7 +47,9 @@ class UserModel {
     }
     
     if (json['examDate'] != null) {
-      if (json['examDate'] is int) {
+      if (json['examDate'] is Timestamp) {
+        parseExamDate = (json['examDate'] as Timestamp).toDate();
+      } else if (json['examDate'] is int) {
         parseExamDate = DateTime.fromMillisecondsSinceEpoch(json['examDate']);
       } else if (json['examDate'] is String) {
         parseExamDate = DateTime.tryParse(json['examDate']);
@@ -75,8 +81,8 @@ class UserModel {
       'assignedCourseIds': assignedCourseIds,
       'password': password,
       'photoUrl': photoUrl,
-      'dateOfJoining': dateOfJoining?.millisecondsSinceEpoch,
-      'examDate': examDate?.millisecondsSinceEpoch,
+      'dateOfJoining': dateOfJoining != null ? Timestamp.fromDate(dateOfJoining!) : null,
+      'examDate': examDate != null ? Timestamp.fromDate(examDate!) : null,
       'mobile': mobile,
       'subscriptionPeriod': subscriptionPeriod,
       'profileCompleted': profileCompleted,

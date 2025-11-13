@@ -71,6 +71,10 @@ class NotificationService {
       ],
     );
 
+    // ✅ CRITICAL: Clear all badges when app is opened
+    await clearBadges();
+    Logger.i('✅ Badges cleared on app initialization');
+
     // Request Awesome Notifications permissions
     await AwesomeNotifications().isNotificationAllowed().then((
       isAllowed,
@@ -110,21 +114,35 @@ class NotificationService {
     String? userId = _auth?.currentUser?.uid;
     if (userId != null) {
       try {
-        // Perform comprehensive token cleanup
-        await cleanupTokens();
-        Logger.i('Token cleanup completed during initialization');
+        // On iOS, wait for APNs token to be available before cleanup
+        if (defaultTargetPlatform == TargetPlatform.iOS) {
+          Logger.i('iOS detected - checking for APNs token availability');
+          try {
+            // Try to get APNs token (will be null if not available yet)
+            String? apnsToken = await _firebaseMessaging?.getAPNSToken();
+            if (apnsToken == null) {
+              Logger.w('APNs token not available yet, skipping initial cleanup');
+              Logger.i('Will retry cleanup when APNs token becomes available');
+              // Don't throw error, just skip cleanup for now
+              // Token will be cleaned up when user interacts with app or on next launch
+            } else {
+              Logger.i('APNs token available, proceeding with cleanup');
+              await cleanupTokens();
+              Logger.i('Token cleanup completed during initialization');
+            }
+          } catch (e) {
+            Logger.e('Error checking APNs token: $e');
+            Logger.i('Skipping cleanup due to APNs token unavailability');
+          }
+        } else {
+          // On Android, proceed with normal cleanup
+          await cleanupTokens();
+          Logger.i('Token cleanup completed during initialization');
+        }
       } catch (e) {
         Logger.e('Error during token cleanup in initialization: $e');
-
-        // If cleanup fails, try force refresh as fallback
-        try {
-          String? token = await refreshToken();
-          Logger.i(
-            'FCM Token refreshed during initialization: ${token ?? 'Failed'}',
-          );
-        } catch (e) {
-          Logger.e('Error refreshing token during initialization: $e');
-        }
+        // Don't try force refresh if APNs token isn't available
+        // The token refresh will happen automatically when APNs token becomes available
       }
     } else {
       Logger.i('No user logged in during initialization');
@@ -132,9 +150,24 @@ class NotificationService {
 
     // Also listen for auth state changes to refresh token on login
     if (_auth != null) {
-      _auth!.authStateChanges().listen((User? user) {
+      _auth!.authStateChanges().listen((User? user) async {
         if (user != null) {
           // User logged in, run cleanup and refresh token
+          // On iOS, check for APNs token first
+          if (defaultTargetPlatform == TargetPlatform.iOS) {
+            try {
+              String? apnsToken = await _firebaseMessaging?.getAPNSToken();
+              if (apnsToken == null) {
+                Logger.w('APNs token not available after login, will retry later');
+                return;
+              }
+            } catch (e) {
+              Logger.e('Error checking APNs token after login: $e');
+              return;
+            }
+          }
+          
+          // Proceed with cleanup
           cleanupTokens()
               .then((_) {
                 Logger.i('Token cleanup completed after login');
@@ -152,6 +185,31 @@ class NotificationService {
         Logger.i('FCM token refreshed automatically: $token');
         _saveTokenToFirestore(token);
       });
+      
+      // For iOS: Listen for APNs token availability
+      if (defaultTargetPlatform == TargetPlatform.iOS && userId != null) {
+        Logger.i('Setting up APNs token availability listener for iOS');
+        // Poll for APNs token periodically until it's available
+        Future.delayed(const Duration(seconds: 2), () async {
+          try {
+            String? apnsToken = await _firebaseMessaging?.getAPNSToken();
+            if (apnsToken != null) {
+              Logger.i('✅ APNs token now available: $apnsToken');
+              // Now that APNs token is available, run cleanup
+              try {
+                await cleanupTokens();
+                Logger.i('Deferred token cleanup completed after APNs token became available');
+              } catch (e) {
+                Logger.e('Error during deferred cleanup: $e');
+              }
+            } else {
+              Logger.w('APNs token still not available after 2 seconds');
+            }
+          } catch (e) {
+            Logger.e('Error checking for APNs token after delay: $e');
+          }
+        });
+      }
     }
 
     // Handle foreground messages
@@ -253,6 +311,22 @@ class NotificationService {
       // Subscribe to chat topic
       await subscribeToTopic('chat');
       Logger.i('Subscribed to topic: chat');
+
+      // ✅ NEW: Subscribe to student chat topic
+      await subscribeToTopic('student_chat');
+      Logger.i('Subscribed to topic: student_chat');
+
+      // ✅ NEW: Subscribe to community chat topic
+      await subscribeToTopic('community_chat');
+      Logger.i('Subscribed to topic: community_chat');
+
+      // ✅ NEW: Subscribe to past questions topic
+      await subscribeToTopic('past_questions');
+      Logger.i('Subscribed to topic: past_questions');
+
+      // ✅ NEW: Subscribe to general notifications topic
+      await subscribeToTopic('notifications');
+      Logger.i('Subscribed to topic: notifications');
 
       // Check notification permissions
       NotificationSettings settings =
@@ -373,23 +447,24 @@ class NotificationService {
       Logger.e("Error cleaning up orphaned tokens: $e");
     }
 
-    // 4. Save the new token using admin team's EXACT required structure
+    // 4. Save the new token using FLAT collection structure (CRITICAL FIX)
+    // ✅ CORRECT: Save to flat user_tokens collection as required by admin system
     try {
       await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('fcm_tokens')  // Admin team requires 'fcm_tokens' collection
+          .collection('user_tokens')  // ✅ FLAT COLLECTION!
           .doc(token)  // Use token as document ID
           .set({
             'token': token,
+            'userId': userId,  // ✅ REQUIRED: Include user ID
             'platform': defaultTargetPlatform.toString().split('.').last, // 'ios' or 'android'
+            'appType': 'student',  // ✅ REQUIRED: Mark as student app
             'isActive': true,
-            'createdAt': FieldValue.serverTimestamp(),
-            'lastUsed': FieldValue.serverTimestamp(),
+            'timestamp': FieldValue.serverTimestamp(),  // ✅ REQUIRED field
+            'lastUpdated': FieldValue.serverTimestamp(),  // ✅ REQUIRED field
           });
-      Logger.i("FCM token saved successfully to admin app structure");
+      Logger.i("✅ FCM token saved successfully to user_tokens collection (flat structure)");
     } catch (e) {
-      Logger.e('Error saving FCM token: $e');
+      Logger.e('❌ Error saving FCM token to user_tokens: $e');
     }
 
     // Also maintain backward compatibility with existing structure
@@ -408,12 +483,10 @@ class NotificationService {
             'email': _auth?.currentUser?.email,
             'isActive': true,
           });
-      Logger.i("Saved new token to users collection: $token");
+      Logger.i("Saved new token to users collection (backward compatibility): $token");
     } catch (e) {
       Logger.e('Error saving token to users collection: $e');
     }
-
-    // Note: Removed user_tokens collection storage as admin app uses users/{userId}/fcm_tokens structure
 
     // 5. Verify token was saved properly by checking if only one token exists
     try {
@@ -436,7 +509,7 @@ class NotificationService {
       Logger.e('Error verifying token count: $e');
     }
 
-    // Subscribe to topics in the background
+    // Subscribe to ALL required topics for notifications
     subscribeToTopic('user_$userId').catchError((e) {
       Logger.e('Error subscribing to user topic: $e');
     });
@@ -445,7 +518,27 @@ class NotificationService {
       Logger.e('Error subscribing to chat topic: $e');
     });
 
-    Logger.i('FCM token saved successfully for user: $userId');
+    // ✅ NEW: Subscribe to student chat topic
+    subscribeToTopic('student_chat').catchError((e) {
+      Logger.e('Error subscribing to student_chat topic: $e');
+    });
+
+    // ✅ NEW: Subscribe to community chat topic
+    subscribeToTopic('community_chat').catchError((e) {
+      Logger.e('Error subscribing to community_chat topic: $e');
+    });
+
+    // ✅ NEW: Subscribe to past questions topic
+    subscribeToTopic('past_questions').catchError((e) {
+      Logger.e('Error subscribing to past_questions topic: $e');
+    });
+
+    // ✅ NEW: Subscribe to general notifications topic
+    subscribeToTopic('notifications').catchError((e) {
+      Logger.e('Error subscribing to notifications topic: $e');
+    });
+
+    Logger.i('✅ FCM token saved and all topics subscribed for user: $userId');
   }
 
   /// Handle notification tap to navigate to appropriate screen
@@ -453,24 +546,52 @@ class NotificationService {
     Logger.i('Notification tapped: ${message.data}');
 
     // Handle navigation based on notification type
-    if (message.data['type'] == 'chat') {
-      final String? chatId = message.data['chatId'];
-      if (chatId != null && globalNavigatorKey.currentState != null) {
-        globalNavigatorKey.currentState!.pushNamed('/chat', arguments: chatId);
-      }
-    } else if (message.data['type'] == 'course') {
-      final String? courseId = message.data['courseId'];
-      if (courseId != null && globalNavigatorKey.currentState != null) {
-        globalNavigatorKey.currentState!.pushNamed(
-          '/course',
-          arguments: courseId,
-        );
-      }
-    } else if (message.data['type'] == 'announcement') {
-      // Navigate to announcements screen
-      if (globalNavigatorKey.currentState != null) {
-        globalNavigatorKey.currentState!.pushNamed('/announcements');
-      }
+    String notificationType = message.data['type'] ?? 'general';
+    
+    switch (notificationType) {
+      case 'chat':
+        final String? chatId = message.data['chatId'];
+        if (chatId != null && globalNavigatorKey.currentState != null) {
+          globalNavigatorKey.currentState!.pushNamed('/chat', arguments: chatId);
+        }
+        break;
+
+      case 'course':
+      case 'course_assignment':
+        final String? courseId = message.data['courseId'];
+        if (courseId != null && globalNavigatorKey.currentState != null) {
+          globalNavigatorKey.currentState!.pushNamed(
+            '/course',
+            arguments: courseId,
+          );
+        }
+        break;
+
+      case 'announcement':
+        if (globalNavigatorKey.currentState != null) {
+          globalNavigatorKey.currentState!.pushNamed('/announcements');
+        }
+        break;
+
+      // ✅ NEW: Handle community chat notifications
+      case 'community_chat':
+        Logger.i('Navigating to community chat');
+        if (globalNavigatorKey.currentState != null) {
+          globalNavigatorKey.currentState!.pushNamed('/community_chat');
+        }
+        break;
+
+      // ✅ NEW: Handle past questions notifications
+      case 'past_questions':
+        Logger.i('Navigating to past questions');
+        if (globalNavigatorKey.currentState != null) {
+          globalNavigatorKey.currentState!.pushNamed('/past_questions');
+        }
+        break;
+
+      default:
+        Logger.i('Unknown notification type: $notificationType');
+        break;
     }
   }
 
@@ -501,6 +622,43 @@ class NotificationService {
       return null;
     }
     return await _firebaseMessaging!.getToken();
+  }
+
+  /// Clear all app icon badges (works on both Android and iOS)
+  Future<void> clearBadges() async {
+    try {
+      // Clear Awesome Notifications badge (works on both platforms)
+      await AwesomeNotifications().resetGlobalBadge();
+      Logger.i('✅ App badge cleared via AwesomeNotifications');
+      
+      // For iOS: Also use FCM to clear badge
+      if (defaultTargetPlatform == TargetPlatform.iOS && _firebaseMessaging != null) {
+        try {
+          await _firebaseMessaging!.setForegroundNotificationPresentationOptions(
+            alert: true,
+            badge: false, // Temporarily disable badge
+            sound: true,
+          );
+          
+          // Re-enable badge for future notifications
+          await _firebaseMessaging!.setForegroundNotificationPresentationOptions(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
+          Logger.i('✅ iOS badge reset via FCM');
+        } catch (e) {
+          Logger.e('Error resetting iOS badge via FCM: $e');
+        }
+      }
+      
+      // Cancel all displayed notifications to ensure badge is cleared
+      await AwesomeNotifications().cancelAll();
+      Logger.i('✅ All notifications cancelled');
+      
+    } catch (e) {
+      Logger.e('Error clearing badges: $e');
+    }
   }
 
   /// Check notification permissions status
@@ -771,19 +929,23 @@ class NotificationService {
         Logger.e("Error cleaning up orphaned tokens: $e");
       }
 
-      // STEP 5: Unsubscribe from topics
-      try {
-        await unsubscribeFromTopic('user_$userId');
-        Logger.i("Unsubscribed from user topic: user_$userId");
-      } catch (e) {
-        Logger.e("Error unsubscribing from user topic: $e");
-      }
+      // STEP 5: Unsubscribe from ALL topics
+      final List<String> topics = [
+        'user_$userId',
+        'chat',
+        'student_chat',
+        'community_chat',
+        'past_questions',
+        'notifications',
+      ];
 
-      try {
-        await unsubscribeFromTopic('chat');
-        Logger.i("Unsubscribed from chat topic");
-      } catch (e) {
-        Logger.e("Error unsubscribing from chat topic: $e");
+      for (String topic in topics) {
+        try {
+          await unsubscribeFromTopic(topic);
+          Logger.i("Unsubscribed from topic: $topic");
+        } catch (e) {
+          Logger.e("Error unsubscribing from $topic topic: $e");
+        }
       }
 
       // STEP 6: Delete the FCM token from Firebase
@@ -996,14 +1158,52 @@ class NotificationService {
     Logger.i('Notification action received: ${receivedAction.buttonKeyPressed}');
     Logger.i('Notification payload: ${receivedAction.payload}');
 
+    // ✅ Clear badge when notification is tapped
+    try {
+      await AwesomeNotifications().resetGlobalBadge();
+      Logger.i('✅ Badge cleared after notification tap');
+    } catch (e) {
+      Logger.e('Error clearing badge on notification tap: $e');
+    }
 
-    // Handle chat notifications (existing logic)
-    if (receivedAction.payload != null &&
-        receivedAction.payload!['type'] == 'chat') {
-      final String? chatId = receivedAction.payload!['chatId'];
-      if (chatId != null && globalNavigatorKey.currentState != null) {
-        globalNavigatorKey.currentState!.pushNamed('/chat', arguments: chatId);
-      }
+    if (receivedAction.payload == null) return;
+
+    String notificationType = receivedAction.payload!['type'] ?? 'general';
+
+    // Handle navigation based on notification type
+    switch (notificationType) {
+      case 'chat':
+        final String? chatId = receivedAction.payload!['chatId'];
+        if (chatId != null && globalNavigatorKey.currentState != null) {
+          globalNavigatorKey.currentState!.pushNamed('/chat', arguments: chatId);
+        }
+        break;
+
+      case 'course':
+      case 'course_assignment':
+        final String? courseId = receivedAction.payload!['courseId'];
+        if (courseId != null && globalNavigatorKey.currentState != null) {
+          globalNavigatorKey.currentState!.pushNamed('/course', arguments: courseId);
+        }
+        break;
+
+      // ✅ NEW: Handle community chat notification actions
+      case 'community_chat':
+        if (globalNavigatorKey.currentState != null) {
+          globalNavigatorKey.currentState!.pushNamed('/community_chat');
+        }
+        break;
+
+      // ✅ NEW: Handle past questions notification actions
+      case 'past_questions':
+        if (globalNavigatorKey.currentState != null) {
+          globalNavigatorKey.currentState!.pushNamed('/past_questions');
+        }
+        break;
+
+      default:
+        Logger.i('Unknown notification type in action: $notificationType');
+        break;
     }
   }
 
@@ -1031,30 +1231,43 @@ class NotificationService {
     ReceivedAction receivedAction,
   ) async {
     Logger.i('Notification dismissed: ${receivedAction.toString()}');
+    
+    // ✅ Clear badge when notification is dismissed
+    try {
+      await AwesomeNotifications().resetGlobalBadge();
+      Logger.i('✅ Badge cleared after notification dismissal');
+    } catch (e) {
+      Logger.e('Error clearing badge on dismissal: $e');
+    }
   }
 
   /// Handle app lifecycle changes to ensure tokens are properly managed
   Future<void> handleAppLifecycleChange(AppLifecycleState state) async {
     Logger.i("App lifecycle state changed to: $state");
 
-    // Get current user ID
-    String? userId = _auth?.currentUser?.uid;
-    if (userId == null) {
-      Logger.i(
-        "No user logged in, skipping token management for lifecycle change",
-      );
-      return;
-    }
-
     switch (state) {
       case AppLifecycleState.resumed:
         // App is in the foreground
-        Logger.i("App resumed - refreshing FCM token");
+        Logger.i("App resumed - clearing badges and refreshing token");
         try {
-          // Refresh token when app is resumed to ensure we have the latest
-          await refreshToken();
+          // ✅ CRITICAL: Clear all badges when app is resumed (works regardless of login status)
+          await clearBadges();
+          Logger.i('✅ Badges cleared on app resume');
         } catch (e) {
-          Logger.e("Error refreshing token on resume: $e");
+          Logger.e("Error clearing badges on resume: $e");
+        }
+        
+        // Get current user ID for token management
+        String? userId = _auth?.currentUser?.uid;
+        if (userId != null) {
+          try {
+            // Refresh token when app is resumed to ensure we have the latest
+            await refreshToken();
+          } catch (e) {
+            Logger.e("Error refreshing token on resume: $e");
+          }
+        } else {
+          Logger.i("No user logged in, skipping token refresh");
         }
         break;
 
@@ -1065,6 +1278,14 @@ class NotificationService {
       case AppLifecycleState.paused:
         // App is in the background
         Logger.i("App paused - verifying token status");
+        
+        // Get current user ID
+        String? userId = _auth?.currentUser?.uid;
+        if (userId == null) {
+          Logger.i("No user logged in, skipping token update on pause");
+          break;
+        }
+        
         try {
           // Get current token
           String? token = await _firebaseMessaging?.getToken();
@@ -1096,6 +1317,14 @@ class NotificationService {
       case AppLifecycleState.detached:
         // App is terminated
         Logger.i("App detached - marking token as possibly inactive");
+        
+        // Get current user ID
+        String? userId = _auth?.currentUser?.uid;
+        if (userId == null) {
+          Logger.i("No user logged in, skipping token update on detach");
+          break;
+        }
+        
         try {
           // Get current token
           String? token = await _firebaseMessaging?.getToken();
@@ -1127,6 +1356,14 @@ class NotificationService {
       case AppLifecycleState.hidden:
         // App is hidden (minimized but still running)
         Logger.i("App hidden - updating token status");
+        
+        // Get current user ID
+        String? userId = _auth?.currentUser?.uid;
+        if (userId == null) {
+          Logger.i("No user logged in, skipping token update on hidden");
+          break;
+        }
+        
         try {
           // Get current token
           String? token = await _firebaseMessaging?.getToken();
@@ -1494,11 +1731,15 @@ class NotificationService {
         Logger.e("Error in final verification: $e");
       }
 
-      // STEP 6: Ensure we're subscribed to topics
+      // STEP 6: Ensure we're subscribed to ALL required topics
       try {
         await subscribeToTopic('user_$userId');
         await subscribeToTopic('chat');
-        Logger.i("Verified topic subscriptions");
+        await subscribeToTopic('student_chat');
+        await subscribeToTopic('community_chat');
+        await subscribeToTopic('past_questions');
+        await subscribeToTopic('notifications');
+        Logger.i("✅ Verified all topic subscriptions");
       } catch (e) {
         Logger.e("Error verifying topic subscriptions: $e");
       }

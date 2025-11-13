@@ -5,12 +5,14 @@ import '../models/course_model.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
+import '../services/content_update_service.dart';
 import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
 import '../utils/route_transitions.dart';
 import '../widgets/custom_bottom_navigation.dart';
 import '../widgets/protected_course_content.dart';
+import '../widgets/update_badge.dart';
 import 'module_list_screen.dart';
 
 class AssignedCoursesScreen extends StatefulWidget {
@@ -27,6 +29,7 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
   int _selectedIndex = 0;
   bool _hasLoadedData = false;
   int _totalAssignedCourses = 0; // Track total vs published courses
+  final ContentUpdateService _updateService = ContentUpdateService();
 
   @override
   void initState() {
@@ -121,8 +124,12 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
     }
   }
 
-  // Course card with responsive design for all iPhone models including iPhone 16 lineup
-  Widget _buildCourseCard(CourseModel course, BuildContext context) {
+  // Course card with responsive design and update indicators
+  Widget _buildCourseCard(
+    CourseModel course,
+    BuildContext context,
+    String userId,
+  ) {
     final horizontalPadding = ResponsiveHelper.getScreenHorizontalPadding(
       context,
     );
@@ -143,53 +150,171 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
       extraLarge: 14.0,
     );
 
-    return Container(
-      width: double.infinity,
-      height: ResponsiveHelper.adaptiveFontSize(context, 60.0),
-      margin: EdgeInsets.only(bottom: cardSpacing),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: borderRadius,
-        border: Border.all(color: const Color(0xFF656BE9), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: ResponsiveHelper.getAdaptiveElevation(context),
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: borderRadius,
+    return FutureBuilder<List<dynamic>>(
+      future: Future.wait([
+        _updateService.getCourseUpdateInfo(course.id, userId),
+        _updateService.getTotalCourseUpdateCount(course.id, userId),
+      ]),
+      builder: (context, snapshot) {
+        final updateInfo = snapshot.data?[0] as Map<String, dynamic>?;
+        final totalUpdateCount = (snapshot.data?[1] as int?) ?? 0;
+        final hasUpdate = updateInfo != null;
+        final priority = updateInfo?['priority'] as String?;
+        final message = updateInfo?['message'] as String?;
+
+        return GestureDetector(
           onTap: () {
+            // Navigate immediately for instant response
             AppNavigator.navigateTo(
               context: context,
               page: ModuleListScreen(course: course),
             );
+            
+            // Mark course as seen in the background (don't await)
+            if (hasUpdate) {
+              _updateService.markCourseAsSeen(
+                course.id,
+                userId,
+              ).then((_) {
+                // Refresh the UI after marking as seen (if still mounted)
+                if (mounted) {
+                  setState(() {});
+                }
+              }).catchError((error) {
+                Logger.w("Failed to mark course as seen: $error");
+              });
+            }
           },
           child: Container(
-            constraints: ResponsiveHelper.getMinTouchTarget(),
-            child: Center(
-              child: Padding(
-                padding: horizontalPadding,
-                child: Text(
-                  course.title,
-                  style: GoogleFonts.inter(
-                    fontSize: ResponsiveHelper.adaptiveFontSize(context, 16.0),
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF323483),
-                  ),
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
+            width: double.infinity,
+            margin: EdgeInsets.only(bottom: cardSpacing),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: borderRadius,
+              border: Border.all(
+                color: hasUpdate && priority == 'critical'
+                    ? Colors.red
+                    : const Color(0xFF656BE9),
+                width: hasUpdate && priority == 'critical' ? 2 : 1,
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: ResponsiveHelper.getAdaptiveElevation(context),
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Main course card - using Row instead of Stack for better tap detection
+                Container(
+                  constraints: ResponsiveHelper.getMinTouchTarget(),
+                  padding: EdgeInsets.only(
+                    left: horizontalPadding.horizontal,
+                    right: hasUpdate ? 8 : horizontalPadding.horizontal,
+                    top: 12,
+                    bottom: 12,
+                  ),
+                  child: Row(
+                    children: [
+                      // Left spacer
+                      const SizedBox(width: 8),
+                      // Course title (centered, takes most space)
+                      Expanded(
+                        child: Text(
+                          course.title,
+                          style: GoogleFonts.inter(
+                            fontSize: ResponsiveHelper.adaptiveFontSize(
+                              context,
+                              16.0,
+                            ),
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF323483),
+                          ),
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      // Update indicators (on the right side)
+                      if (hasUpdate) ...[
+                        const SizedBox(width: 16),
+                        UpdateBadge(
+                          hasUpdate: true,
+                          priority: priority,
+                          size: 14,
+                        ),
+                        const SizedBox(width: 8),
+                        PulsingDot(
+                          hasUpdate: true,
+                          priority: priority,
+                          size: 10,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                // Update message banner (inside the clickable area)
+                if (hasUpdate && message != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: priority == 'critical'
+                          ? Colors.red[50]
+                          : Colors.orange[50],
+                      borderRadius: BorderRadius.only(
+                        bottomLeft: borderRadius.bottomLeft,
+                        bottomRight: borderRadius.bottomRight,
+                      ),
+                      border: Border(
+                        top: BorderSide(
+                          color: priority == 'critical'
+                              ? Colors.red[200]!
+                              : Colors.orange[200]!,
+                          width: 1,
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          priority == 'critical'
+                              ? Icons.warning_amber_rounded
+                              : Icons.info_outline,
+                          size: 16,
+                          color: priority == 'critical'
+                              ? Colors.red[600]
+                              : Colors.orange[600],
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            message,
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              color: priority == 'critical'
+                                  ? Colors.red[700]
+                                  : Colors.orange[700],
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -201,6 +326,88 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
     } catch (e) {
       Logger.w("Could not fetch total courses count: $e");
       _totalAssignedCourses = 0;
+    }
+  }
+
+  Future<void> _refreshAccountData() async {
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      
+      // Show loading indicator
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                ),
+                SizedBox(width: 12),
+                Text('Refreshing account data...'),
+              ],
+            ),
+            duration: Duration(seconds: 2),
+            backgroundColor: AppColors.primary,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        );
+      }
+
+      await authService.forceTokenRefresh();
+
+      if (mounted) {
+        // Reload the data after token refresh
+        setState(() {
+          _hasLoadedData = false;
+        });
+        await _loadData();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 12),
+                Text('Account data refreshed successfully'),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      Logger.e('❌ Error refreshing account data: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.error_outline, color: Colors.white),
+                SizedBox(width: 12),
+                Expanded(child: Text('Error refreshing data: ${e.toString()}')),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -716,64 +923,88 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                                             color: const Color(0xFF323483),
                                           ),
                                         ),
-                                        // Show course count on larger screens
-                                        if (ResponsiveHelper.getIPhoneSize(
+                                        Row(
+                                          children: [
+                                            // Show course count on larger screens
+                                            if (ResponsiveHelper.getIPhoneSize(
+                                                      context,
+                                                    ) ==
+                                                    IPhoneSize.extraLarge ||
+                                                ResponsiveHelper.getIPhoneSize(
+                                                      context,
+                                                    ) ==
+                                                    IPhoneSize.large)
+                                              FutureBuilder<List<CourseModel>>(
+                                                future: _coursesFuture,
+                                                builder: (context, snapshot) {
+                                                  final courseCount =
+                                                      snapshot.data?.length ?? 0;
+                                                  return Container(
+                                                    padding: EdgeInsets.symmetric(
+                                                      horizontal:
+                                                          ResponsiveHelper.getAdaptiveSpacing(
+                                                            context,
+                                                            compact: 8.0,
+                                                            regular: 10.0,
+                                                            pro: 12.0,
+                                                            large: 12.0,
+                                                            extraLarge: 14.0,
+                                                          ),
+                                                      vertical:
+                                                          ResponsiveHelper.getAdaptiveSpacing(
+                                                            context,
+                                                            compact: 4.0,
+                                                            regular: 6.0,
+                                                            pro: 6.0,
+                                                            large: 6.0,
+                                                            extraLarge: 8.0,
+                                                          ),
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color: AppColors.primary
+                                                          .withOpacity(0.1),
+                                                      borderRadius:
+                                                          ResponsiveHelper.getAdaptiveBorderRadius(
+                                                            context,
+                                                          ),
+                                                    ),
+                                                    child: Text(
+                                                      '$courseCount ${courseCount == 1 ? 'Course' : 'Courses'}',
+                                                      style: GoogleFonts.inter(
+                                                        fontSize:
+                                                            ResponsiveHelper.adaptiveFontSize(
+                                                              context,
+                                                              12.0,
+                                                            ),
+                                                        fontWeight: FontWeight.w500,
+                                                        color: AppColors.primary,
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
+                                              ),
+                                            // Refresh account data button
+                                            IconButton(
+                                              icon: Icon(
+                                                Icons.refresh,
+                                                color: AppColors.primary,
+                                                size: ResponsiveHelper.adaptiveFontSize(
                                                   context,
-                                                ) ==
-                                                IPhoneSize.extraLarge ||
-                                            ResponsiveHelper.getIPhoneSize(
+                                                  24.0,
+                                                ),
+                                              ),
+                                              onPressed: _refreshAccountData,
+                                              tooltip: 'Refresh Account Data',
+                                              padding: EdgeInsets.all(
+                                                ResponsiveHelper.getAdaptiveSpacing(
                                                   context,
-                                                ) ==
-                                                IPhoneSize.large)
-                                          FutureBuilder<List<CourseModel>>(
-                                            future: _coursesFuture,
-                                            builder: (context, snapshot) {
-                                              final courseCount =
-                                                  snapshot.data?.length ?? 0;
-                                              return Container(
-                                                padding: EdgeInsets.symmetric(
-                                                  horizontal:
-                                                      ResponsiveHelper.getAdaptiveSpacing(
-                                                        context,
-                                                        compact: 8.0,
-                                                        regular: 10.0,
-                                                        pro: 12.0,
-                                                        large: 12.0,
-                                                        extraLarge: 14.0,
-                                                      ),
-                                                  vertical:
-                                                      ResponsiveHelper.getAdaptiveSpacing(
-                                                        context,
-                                                        compact: 4.0,
-                                                        regular: 6.0,
-                                                        pro: 6.0,
-                                                        large: 6.0,
-                                                        extraLarge: 8.0,
-                                                      ),
+                                                  compact: 8.0,
+                                                  regular: 8.0,
                                                 ),
-                                                decoration: BoxDecoration(
-                                                  color: AppColors.primary
-                                                      .withOpacity(0.1),
-                                                  borderRadius:
-                                                      ResponsiveHelper.getAdaptiveBorderRadius(
-                                                        context,
-                                                      ),
-                                                ),
-                                                child: Text(
-                                                  '$courseCount ${courseCount == 1 ? 'Course' : 'Courses'}',
-                                                  style: GoogleFonts.inter(
-                                                    fontSize:
-                                                        ResponsiveHelper.adaptiveFontSize(
-                                                          context,
-                                                          12.0,
-                                                        ),
-                                                    fontWeight: FontWeight.w500,
-                                                    color: AppColors.primary,
-                                                  ),
-                                                ),
-                                              );
-                                            },
-                                          ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ],
                                     ),
 
@@ -797,6 +1028,7 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                                                   return _buildCourseCard(
                                                     courses[index],
                                                     context,
+                                                    user.uid,
                                                   );
                                                 },
                                               ),

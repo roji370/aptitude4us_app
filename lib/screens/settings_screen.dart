@@ -121,8 +121,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       IconButton(
                         icon: Icon(Icons.edit, color: AppColors.primary),
                         tooltip: 'Edit Profile',
-                        onPressed: () {
-                          Navigator.pushNamed(context, '/profile-completion');
+                        onPressed: () async {
+                          // Navigate to profile edit and refresh when returning
+                          await Navigator.pushNamed(context, '/profile-completion');
+                          // Trigger rebuild to fetch fresh data
+                          if (mounted) {
+                            setState(() {});
+                          }
                         },
                       ),
                     ],

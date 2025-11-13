@@ -5,9 +5,11 @@ import '../models/course_model.dart';
 import '../models/module_model.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
+import '../services/content_update_service.dart';
 import '../utils/logger.dart';
 import '../utils/route_transitions.dart';
 import '../widgets/custom_bottom_navigation.dart';
+import '../widgets/update_badge.dart';
 import 'content_types_screen.dart';
 
 class ModuleListScreen extends StatefulWidget {
@@ -25,6 +27,8 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   int _selectedIndex = 0; // For bottom navigation
   Map<String, dynamic> _customClaims = {}; // Store user's custom claims
   int _totalModulesCount = 0; // Track total modules vs published modules
+  final ContentUpdateService _updateService = ContentUpdateService();
+  String? _currentUserId;
 
   @override
   void initState() {
@@ -44,6 +48,9 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
     });
 
     try {
+      // Get current user ID
+      _currentUserId = authService.currentUser?.uid;
+
       // Get custom claims to check for module access permissions
       _customClaims = await authService.getCustomClaims();
       Logger.d("Custom claims: $_customClaims");
@@ -117,6 +124,200 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
       _selectedIndex = index;
     });
     CustomBottomNavigation.handleNavigation(context, index);
+  }
+
+  /// Build module card with update indicators
+  Widget _buildModuleCard(ModuleModel module, Size screenSize) {
+    if (_currentUserId == null) {
+      // If no user ID, show module without updates
+      return _buildModuleCardContent(module, screenSize, false, null, null, 0);
+    }
+
+    return FutureBuilder<List<dynamic>>(
+      future: Future.wait([
+        _updateService.hasModuleUpdate(
+          widget.course.id,
+          module.id,
+          _currentUserId!,
+        ),
+        _updateService.getContentUpdateCount(
+          widget.course.id,
+          module.id,
+          _currentUserId!,
+        ),
+      ]),
+      builder: (context, snapshot) {
+        final hasUpdate = (snapshot.data?[0] as bool?) ?? false;
+        final contentUpdateCount = (snapshot.data?[1] as int?) ?? 0;
+
+        // If there's an update, get the update info
+        if (hasUpdate) {
+          return FutureBuilder<Map<String, dynamic>?>(
+            future: _updateService.getCourseUpdateInfo(
+              widget.course.id,
+              _currentUserId!,
+            ),
+            builder: (context, infoSnapshot) {
+              final updateInfo = infoSnapshot.data;
+              final priority = updateInfo?['priority'] as String?;
+              final message = updateInfo?['message'] as String?;
+
+              return _buildModuleCardContent(
+                module,
+                screenSize,
+                hasUpdate,
+                priority,
+                message,
+                contentUpdateCount,
+              );
+            },
+          );
+        }
+
+        return _buildModuleCardContent(
+          module,
+          screenSize,
+          false,
+          null,
+          null,
+          contentUpdateCount,
+        );
+      },
+    );
+  }
+
+  /// Build the actual module card content
+  Widget _buildModuleCardContent(
+    ModuleModel module,
+    Size screenSize,
+    bool hasUpdate,
+    String? priority,
+    String? message,
+    int contentUpdateCount,
+  ) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: 16,
+        left: screenSize.width * 0.05,
+        right: screenSize.width * 0.05,
+      ),
+      child: Container(
+        width: double.infinity,
+        constraints: BoxConstraints(
+          minHeight: screenSize.height * 0.085,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: hasUpdate && priority == 'critical'
+                ? Colors.red
+                : const Color(0xFF656BE9),
+            width: hasUpdate && priority == 'critical' ? 2 : 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () async {
+              // Mark module as seen when user opens it
+              if (hasUpdate && _currentUserId != null) {
+                await _updateService.markModuleAsSeen(
+                  widget.course.id,
+                  module.id,
+                  _currentUserId!,
+                );
+                // Refresh the UI
+                setState(() {});
+              }
+
+              // Navigate to content types screen
+              AppNavigator.navigateTo(
+                context: context,
+                page: ContentTypesScreen(
+                  course: widget.course,
+                  module: module,
+                ),
+              );
+            },
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Module title (left-aligned, takes most space)
+                  Expanded(
+                    child: Text(
+                      module.title,
+                      style: GoogleFonts.inter(
+                        fontSize: screenSize.width * 0.05,
+                        fontWeight: FontWeight.w500,
+                        color: const Color(0xFF2E2C6A),
+                      ),
+                      textAlign: TextAlign.left,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  // Update indicators (on the right side)
+                  if (hasUpdate) ...[
+                    const SizedBox(width: 12),
+                    UpdateBadge(
+                      hasUpdate: true,
+                      priority: priority,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 6),
+                    PulsingDot(
+                      hasUpdate: true,
+                      priority: priority,
+                      size: 10,
+                    ),
+                  ],
+                  // Content update count badge (if no module update but has content updates)
+                  if (!hasUpdate && contentUpdateCount > 0) ...[
+                    const SizedBox(width: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '+$contentUpdateCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                  // Play arrow icon
+                  const SizedBox(width: 12),
+                  const Icon(
+                    Icons.play_arrow,
+                    color: Color(0xFF171A1F),
+                    size: 24,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildEmptyModulesState(Size screenSize) {
@@ -268,31 +469,22 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                       return Center(child: Text('Error: ${snapshot.error}'));
                     }
 
-                    final modules = snapshot.data ?? [];
+                            final modules = snapshot.data ?? [];
+                            // Sort modules alphabetically by title
+                            modules.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
 
-                    return Container(
-                      width: screenSize.width,
-                      height: screenSize.height,
-                      color: Colors.white,
-                      child: Stack(
-                        children: [
-                          // Content area with scroll
-                          SingleChildScrollView(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            child: Padding(
-                              padding: EdgeInsets.only(
-                                top: safeAreaTop + 16,
-                                bottom:
-                                    100 +
-                                    safeAreaBottom, // Space for bottom nav
-                              ),
+                            return Container(
+                              width: screenSize.width,
+                              height: screenSize.height,
+                              color: Colors.white,
                               child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   // User Profile Card
                                   Padding(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: screenSize.width * 0.05,
+                                    padding: EdgeInsets.only(
+                                      left: screenSize.width * 0.05,
+                                      right: screenSize.width * 0.05,
+                                      top: 16,
                                     ),
                                     child: Container(
                                       width: double.infinity,
@@ -334,124 +526,27 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                                   SizedBox(height: screenSize.height * 0.04),
 
                                   // Modules List
-                                  modules.isEmpty
-                                      ? _buildEmptyModulesState(screenSize)
-                                      : Column(
-                                        children:
-                                            modules.map((module) {
-                                              return Padding(
-                                                padding: EdgeInsets.only(
-                                                  bottom: 16,
-                                                  left: screenSize.width * 0.05,
-                                                  right:
-                                                      screenSize.width * 0.05,
-                                                ),
-                                                child: Container(
-                                                  width: double.infinity,
-                                                  height:
-                                                      screenSize.height * 0.085,
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.white,
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          10,
-                                                        ),
-                                                    border: Border.all(
-                                                      color: const Color(
-                                                        0xFF656BE9,
-                                                      ),
-                                                      width: 2,
-                                                    ),
-                                                    boxShadow: const [
-                                                      BoxShadow(
-                                                        color: Color(
-                                                          0x26171A1F,
-                                                        ),
-                                                        offset: Offset(0, 8),
-                                                        blurRadius: 17,
-                                                      ),
-                                                      BoxShadow(
-                                                        color: Color(
-                                                          0x1F171A1F,
-                                                        ),
-                                                        offset: Offset(0, 0),
-                                                        blurRadius: 2,
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  child: Material(
-                                                    color: Colors.transparent,
-                                                    child: InkWell(
-                                                      onTap: () {
-                                                        // Navigate to content types screen
-                                                        AppNavigator.navigateTo(
-                                                          context: context,
-                                                          page:
-                                                              ContentTypesScreen(
-                                                                course:
-                                                                    widget
-                                                                        .course,
-                                                                module: module,
-                                                              ),
-                                                        );
-                                                      },
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            10,
-                                                          ),
-                                                      child: Padding(
-                                                        padding:
-                                                            const EdgeInsets.symmetric(
-                                                              horizontal: 24,
-                                                            ),
-                                                        child: Row(
-                                                          mainAxisAlignment:
-                                                              MainAxisAlignment
-                                                                  .spaceBetween,
-                                                          children: [
-                                                            Expanded(
-                                                              child: Text(
-                                                                module.title,
-                                                                style: GoogleFonts.inter(
-                                                                  fontSize:
-                                                                      screenSize
-                                                                          .width *
-                                                                      0.05,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w400,
-                                                                  color: const Color(
-                                                                    0xFF2E2C6A,
-                                                                  ),
-                                                                ),
-                                                                overflow:
-                                                                    TextOverflow
-                                                                        .ellipsis,
-                                                              ),
-                                                            ),
-                                                            const Icon(
-                                                              Icons.play_arrow,
-                                                              color: Color(
-                                                                0xFF171A1F,
-                                                              ),
-                                                              size: 24,
-                                                            ),
-                                                          ],
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              );
-                                            }).toList(),
-                                      ),
+                                  Expanded(
+                                    child:
+                                        modules.isEmpty
+                                            ? _buildEmptyModulesState(screenSize)
+                                            : ListView.builder(
+                                              physics: const AlwaysScrollableScrollPhysics(),
+                                              padding: EdgeInsets.only(
+                                                bottom: safeAreaBottom + 16,
+                                              ),
+                                              itemCount: modules.length,
+                                              itemBuilder: (context, index) {
+                                                return _buildModuleCard(
+                                                  modules[index],
+                                                  screenSize,
+                                                );
+                                              },
+                                            ),
+                                  ),
                                 ],
                               ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
+                            );
                   },
                 ),
               ),

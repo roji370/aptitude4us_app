@@ -1,0 +1,28 @@
+# Check iOS Token in Firestore
+
+Go to Firestore Console:
+https://console.firebase.google.com/project/course-c18bb/firestore
+
+1. Click on "user_tokens" collection
+2. Search for document with ID: 
+   fjjPrslSZEj_pewIpSFAv8:APA91bHTx674hMHXl2W093aGvy1hQFQftDX_EAekCJ6E0WQmAqasSaC9VtJIMZAX-p5Jf79zgOAzTQcYz856p0oLvlwZWcWYdMsNM_i7QC2HqQGlRDufnkI
+
+OR search by field:
+- platform = "ios"
+- isActive = true
+
+WHAT TO CHECK:
+✅ Document exists?
+✅ userId field is set?
+✅ appType = "student"?
+✅ isActive = true?
+✅ platform = "ios"?
+
+IF DOCUMENT DOESN'T EXIST OR IS MISSING FIELDS:
+→ App wasn't rebuilt with my fixes yet
+→ Need to rebuild: flutter clean && flutter build ios --release
+
+IF DOCUMENT EXISTS WITH ALL FIELDS:
+→ Token registration is working
+→ Problem might be in admin app sending or topic subscription
+

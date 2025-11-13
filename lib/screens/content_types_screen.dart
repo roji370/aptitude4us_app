@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import '../models/content_model.dart';
 import '../models/course_model.dart';
 import '../models/module_model.dart';
 import '../services/firestore_service.dart';
+import '../services/content_update_service.dart';
 import '../utils/logger.dart';
 import '../utils/route_transitions.dart';
 import '../widgets/custom_bottom_navigation.dart';
+import '../widgets/update_badge.dart';
 import 'content_by_type_screen.dart';
 
 class ContentTypesScreen extends StatefulWidget {
@@ -28,11 +31,42 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
   Map<String, List<ContentModel>> _contentByType = {};
   String? _errorMessage;
   int _selectedIndex = 0; // For bottom navigation
+  final _updateService = ContentUpdateService();
+  Map<String, dynamic>? _contentChangeInfo;
 
   @override
   void initState() {
     super.initState();
     _loadContent();
+    _markContentAsSeen();
+    _loadContentChangeInfo();
+  }
+
+  /// Mark content changes as seen when user opens this screen
+  Future<void> _markContentAsSeen() async {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId != null) {
+      await _updateService.markContentAsSeen(
+        widget.course.id,
+        widget.module.id,
+        userId,
+      );
+    }
+  }
+
+  /// Load content change information for this module
+  Future<void> _loadContentChangeInfo() async {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId != null) {
+      final changeInfo = await _updateService.getContentChangeInfo(
+        widget.course.id,
+        widget.module.id,
+        userId,
+      );
+      setState(() {
+        _contentChangeInfo = changeInfo;
+      });
+    }
   }
 
   Future<void> _loadContent() async {
@@ -297,6 +331,17 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
                               final icon = _getIconForContentType(type);
                               final displayName = _getDisplayNameForContentType(type);
 
+                              // Check if this content type has changes
+                              Map<String, dynamic>? typeChange;
+                              if (_contentChangeInfo != null && 
+                                  _contentChangeInfo!['contentChanges'] != null) {
+                                final changes = List.from(_contentChangeInfo!['contentChanges']);
+                                typeChange = changes.firstWhere(
+                                  (c) => c['type'].toString().toLowerCase() == type.toLowerCase() + 's',
+                                  orElse: () => null as dynamic,
+                                );
+                              }
+
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 16),
                                 elevation: 2,
@@ -316,59 +361,139 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
                                     );
                                   },
                                   borderRadius: BorderRadius.circular(16),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(20),
-                                    child: Row(
-                                      children: [
-                                        // Icon container
-                                        Container(
-                                          width: 60,
-                                          height: 60,
-                                          decoration: BoxDecoration(
-                                            color: color.withOpacity(0.1),
-                                            borderRadius: BorderRadius.circular(12),
-                                          ),
-                                          child: Icon(
-                                            icon,
-                                            color: color,
-                                            size: 32,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 16),
-
-                                        // Content type info
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                displayName,
-                                                style: const TextStyle(
-                                                  fontSize: 18,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Color(0xFF323483),
+                                  child: Stack(
+                                    children: [
+                                      Padding(
+                                        padding: const EdgeInsets.all(20),
+                                        child: Row(
+                                          children: [
+                                            // Icon container with pulse animation for changes
+                                            Stack(
+                                              children: [
+                                                Container(
+                                                  width: 60,
+                                                  height: 60,
+                                                  decoration: BoxDecoration(
+                                                    color: color.withOpacity(0.1),
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    border: typeChange != null
+                                                        ? Border.all(
+                                                            color: typeChange['change'] == 'added'
+                                                                ? Colors.green
+                                                                : Colors.red,
+                                                            width: 2,
+                                                          )
+                                                        : null,
+                                                  ),
+                                                  child: Icon(
+                                                    icon,
+                                                    color: color,
+                                                    size: 32,
+                                                  ),
                                                 ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                '${contents.length} ${contents.length == 1 ? 'item' : 'items'}',
-                                                style: const TextStyle(
-                                                  fontSize: 14,
-                                                  color: Colors.grey,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
+                                                // Badge indicator
+                                                if (typeChange != null)
+                                                  Positioned(
+                                                    top: 0,
+                                                    right: 0,
+                                                    child: Container(
+                                                      padding: const EdgeInsets.all(4),
+                                                      decoration: BoxDecoration(
+                                                        color: typeChange['change'] == 'added'
+                                                            ? Colors.green
+                                                            : Colors.red,
+                                                        shape: BoxShape.circle,
+                                                        boxShadow: [
+                                                          BoxShadow(
+                                                            color: (typeChange['change'] == 'added'
+                                                                    ? Colors.green
+                                                                    : Colors.red)
+                                                                .withOpacity(0.5),
+                                                            blurRadius: 4,
+                                                            spreadRadius: 1,
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      child: Text(
+                                                        typeChange['change'] == 'added'
+                                                            ? '+${typeChange['count']}'
+                                                            : '-${typeChange['count']}',
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 10,
+                                                          fontWeight: FontWeight.bold,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                            const SizedBox(width: 16),
 
-                                        // Arrow icon
-                                        const Icon(
-                                          Icons.arrow_forward_ios,
-                                          color: Colors.grey,
-                                          size: 20,
+                                            // Content type info
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Row(
+                                                    children: [
+                                                      Text(
+                                                        displayName,
+                                                        style: const TextStyle(
+                                                          fontSize: 18,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: Color(0xFF323483),
+                                                        ),
+                                                      ),
+                                                      // Show "NEW" or "UPDATED" badge
+                                                      if (typeChange != null)
+                                                        Container(
+                                                          margin: const EdgeInsets.only(left: 8),
+                                                          padding: const EdgeInsets.symmetric(
+                                                            horizontal: 8,
+                                                            vertical: 4,
+                                                          ),
+                                                          decoration: BoxDecoration(
+                                                            color: typeChange['change'] == 'added'
+                                                                ? Colors.green
+                                                                : Colors.red,
+                                                            borderRadius: BorderRadius.circular(12),
+                                                          ),
+                                                          child: Text(
+                                                            typeChange['change'] == 'added'
+                                                                ? 'NEW'
+                                                                : 'REMOVED',
+                                                            style: const TextStyle(
+                                                              color: Colors.white,
+                                                              fontSize: 10,
+                                                              fontWeight: FontWeight.bold,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Text(
+                                                    '${contents.length} ${contents.length == 1 ? 'item' : 'items'}',
+                                                    style: const TextStyle(
+                                                      fontSize: 14,
+                                                      color: Colors.grey,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+
+                                            // Arrow icon
+                                            const Icon(
+                                              Icons.arrow_forward_ios,
+                                              color: Colors.grey,
+                                              size: 20,
+                                            ),
+                                          ],
                                         ),
-                                      ],
-                                    ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               );

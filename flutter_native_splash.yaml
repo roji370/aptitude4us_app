@@ -1,13 +1,26 @@
-# flutter_native_splash configuration with custom light gray color and logo
+# flutter_native_splash configuration - Premium education app splash screen
 flutter_native_splash:
-  # Match logo's light background
-  color: "f5f5f7"  # Very light gray/off-white to match logo
-  color_dark: "f5f5f7"  # Same for dark mode
+  # Clean white background to match new splash logo
+  color: "#FFFFFF"  # Pure white for seamless integration
+  color_dark: "#FFFFFF"  # Consistent across light/dark modes
   
-  # XFINI logo centered on light gray background
-  image: assets/images/logo/app_logo.png
+  # XFINI splash logo - centered with proper spacing
+  image: assets/images/logo/splash_logo.png
+  
+  # Image sizing - center for clean, spacious look with no borders
+  android_gravity: center
+  ios_content_mode: center
+  
+  # Full screen for premium, seamless appearance
+  fullscreen: true
   
   # Platform settings
   android: true
   ios: true
   web: false
+  
+  # Android 12+ specific settings for modern devices
+  android_12:
+    image: assets/images/logo/splash_logo.png
+    color: "#FFFFFF"
+    icon_background_color: "#FFFFFF"

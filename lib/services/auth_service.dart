@@ -576,10 +576,10 @@ class AuthService {
       
       if (photoUrl != null) updateData['photoUrl'] = photoUrl;
       if (dateOfJoining != null) {
-        updateData['dateOfJoining'] = dateOfJoining.millisecondsSinceEpoch;
+        updateData['dateOfJoining'] = Timestamp.fromDate(dateOfJoining);
       }
       if (examDate != null) {
-        updateData['examDate'] = examDate.millisecondsSinceEpoch;
+        updateData['examDate'] = Timestamp.fromDate(examDate);
       }
       if (mobile != null) updateData['mobile'] = mobile;
       if (subscriptionPeriod != null) {
@@ -603,10 +603,17 @@ class AuthService {
 
       Logger.i("User profile updated successfully for UID: ${user.uid}");
 
-      // Update local persisted data
-      UserModel? userData = await getUserData();
-      if (userData != null) {
-        await AuthPersistenceService.saveUserData(userData);
+      // Update local persisted data (non-critical - don't fail if this errors)
+      try {
+        UserModel? userData = await getUserData();
+        if (userData != null) {
+          await AuthPersistenceService.saveUserData(userData);
+          Logger.i("Local user data cache updated successfully");
+        }
+      } catch (cacheError) {
+        // Don't fail the whole operation if cache update fails
+        // The data is already saved to Firestore (the source of truth)
+        Logger.w("Failed to update local cache (non-critical): $cacheError");
       }
     } catch (e) {
       Logger.e("Error updating user profile: $e");

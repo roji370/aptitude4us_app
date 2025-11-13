@@ -77,10 +77,16 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // User tokens for FCM
+    // User tokens for FCM (flat collection structure)
     match /user_tokens/{tokenId} {
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Allow authenticated users to manage their tokens
+      // More permissive to handle token cleanup and registration
+      allow create: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+      // Admins can do anything
+      allow read, write: if isAdmin();
     }
 
     // Typing status for chat
@@ -113,6 +119,21 @@ service cloud.firestore {
       allow delete: if false;
     }
     
+    // Content Updates rules (for course/module update notifications)
+    match /contentUpdates/{updateId} {
+      // Students can read their own updates
+      allow read: if isAuthenticated() && 
+        resource.data.notifiedUsers.hasAny([request.auth.uid]);
+      // Only cloud functions can create updates
+      allow create: if false;
+      // Students can update only to mark as seen
+      allow update: if isAuthenticated() && 
+        resource.data.notifiedUsers.hasAny([request.auth.uid]) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seenBy']);
+      // No deletion allowed
+      allow delete: if false;
+    }
+    
     // CRITICAL: Subscriptions collection rules (REQUIRED for subscription validation)
     match /subscriptions/{subscriptionId} {
       // Users can read their own subscriptions
@@ -135,6 +156,13 @@ service cloud.firestore {
       allow create: if isAuthenticated();
       allow read: if isAdmin();
       allow update, delete: if false;
+    }
+    
+    // App configuration (version control, etc.)
+    // Allow all users to read app config (needed for version checking)
+    match /appConfig/{configId} {
+      allow read: if true;  // Anyone can read (even before authentication)
+      allow write: if isAdmin();
     }
     
     // Allow access to any remaining collections for admins

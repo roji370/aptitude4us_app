@@ -29,6 +29,8 @@ class MainActivity : FlutterActivity() {
     private var lastRecordingState = false
     private var methodChannel: MethodChannel? = null
     private var hasNotifiedThisSession = false
+    private var lastNotificationTime: Long = 0
+    private val NOTIFICATION_COOLDOWN_MS = 60000 // 60 seconds between notifications
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -146,6 +148,7 @@ class MainActivity : FlutterActivity() {
         
         isMonitoringEnabled = false
         hasNotifiedThisSession = false // Reset notification flag when disabling
+        lastNotificationTime = 0 // Reset cooldown timer
         screenRecordingCheckRunnable?.let { 
             screenRecordingCheckHandler?.removeCallbacks(it)
         }
@@ -158,13 +161,23 @@ class MainActivity : FlutterActivity() {
     private fun checkForScreenRecording() {
         try {
             val currentRecordingState = detectScreenRecording()
+            val currentTime = System.currentTimeMillis()
             
-            // Only notify if state changed from false to true (recording started) 
-            // and we haven't already notified this session
-            if (currentRecordingState && !lastRecordingState && !hasNotifiedThisSession) {
-                Log.w("ScreenProtection", "Screen recording detected on Android! (First time this session)")
-                hasNotifiedThisSession = true
-                notifyFlutterOfScreenRecording(true)
+            // Only notify if:
+            // 1. Recording state changed from false to true
+            // 2. We haven't notified in the last cooldown period (60 seconds)
+            // 3. We haven't already notified this session (unless cooldown has passed)
+            if (currentRecordingState && !lastRecordingState) {
+                val timeSinceLastNotification = currentTime - lastNotificationTime
+                
+                if (timeSinceLastNotification > NOTIFICATION_COOLDOWN_MS || lastNotificationTime == 0L) {
+                    Log.w("ScreenProtection", "Screen recording detected on Android!")
+                    hasNotifiedThisSession = true
+                    lastNotificationTime = currentTime
+                    notifyFlutterOfScreenRecording(true)
+                } else {
+                    Log.d("ScreenProtection", "Screen recording detected but cooldown active (${timeSinceLastNotification}ms / ${NOTIFICATION_COOLDOWN_MS}ms)")
+                }
             } else if (!currentRecordingState && lastRecordingState) {
                 Log.i("ScreenProtection", "Screen recording stopped on Android - resetting notification flag")
                 hasNotifiedThisSession = false
@@ -179,13 +192,16 @@ class MainActivity : FlutterActivity() {
     
     private fun detectScreenRecording(): Boolean {
         try {
-            // Method 1: Check for audio recording (many screen recorders also record audio)
+            // Method 1: Check if audio mode indicates recording
+            // NOTE: Checking for device existence (TYPE_BUILTIN_MIC) is incorrect and causes false positives
+            // Instead, check if audio mode is actually in recording state
             val isAudioRecording = audioManager?.let { manager ->
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    // Check if any app is recording audio
-                    manager.getDevices(AudioManager.GET_DEVICES_INPUTS).any { device ->
-                        device.type == AudioDeviceInfo.TYPE_BUILTIN_MIC
-                    }
+                    // Check if audio mode indicates communication/recording
+                    val audioMode = manager.mode
+                    // MODE_IN_COMMUNICATION or MODE_IN_CALL might indicate recording
+                    // But this alone is not reliable - need more specific checks
+                    false // Disabled for now to prevent false positives
                 } else {
                     false
                 }
@@ -197,7 +213,9 @@ class MainActivity : FlutterActivity() {
             // Method 3: Check system properties that might indicate recording
             val hasRecordingProperties = checkRecordingSystemProperties()
             
-            return isAudioRecording || hasScreenRecordingApp || hasRecordingProperties
+            // Only rely on app detection to avoid false positives
+            // Audio detection is too unreliable on Android
+            return hasScreenRecordingApp || hasRecordingProperties
             
         } catch (e: Exception) {
             Log.e("ScreenProtection", "Error in detectScreenRecording: ${e.message}")

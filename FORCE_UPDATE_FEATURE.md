@@ -7,6 +7,16 @@ The Force Update feature allows you to require users to update their app before 
 - Breaking API changes
 - Major feature releases that require all users to be on the same version
 
+## Update Distribution Methods
+
+### Android Users
+- **Direct APK Download**: Download and install APK files directly from Firebase Storage
+- **Play Store Redirect**: Fallback to Play Store if APK path is not configured
+- See `ANDROID_APK_DOWNLOAD_UPDATE.md` for detailed APK distribution setup
+
+### iOS Users
+- **App Store Only**: Always redirects to the App Store (APK installation not supported on iOS)
+
 ## How It Works
 
 1. **On App Launch**: The splash screen checks the current app version against the minimum required version stored in Firestore
@@ -35,6 +45,7 @@ Document ID: versionControl
   "latestVersion": "1.0.6",            // String - Latest version available (optional, for reference)
   "forceUpdate": true,                  // Boolean - Enable/disable force update feature
   "updateMessage": "A new version...", // String - Custom message shown on update screen (optional)
+  "apkDownloadPath": "app-updates/android/app-release-1.0.6.apk", // String - Firebase Storage path for Android APK (optional)
   "lastUpdated": Timestamp,             // Timestamp - When this was last updated (optional)
 }
 ```
@@ -56,6 +67,14 @@ Document ID: versionControl
 - **updateMessage** (Optional): Custom message shown on the force update screen
   - If not provided, default message is shown
   - Should explain why the update is important
+
+- **apkDownloadPath** (Optional, Android only): Firebase Storage path to the APK file
+  - Format: "folder/subfolder/filename.apk"
+  - If provided, Android users will download APK directly from Firebase Storage
+  - If empty or omitted, Android users will be redirected to Play Store
+  - Ignored for iOS users (always redirected to App Store)
+  - Example: "app-updates/android/app-release-1.0.6.apk"
+  - See `ANDROID_APK_DOWNLOAD_UPDATE.md` for detailed setup
 
 ## Setting Up in Firestore
 
