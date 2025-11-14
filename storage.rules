@@ -65,6 +65,12 @@ service firebase.storage {
       allow write: if isAuthenticated() && request.auth.uid == userId;
     }
     
+    // App updates - public read access for APK downloads, admin-only writes
+    match /app-updates/{allPaths=**} {
+      allow read: if true;  // Anyone can download APKs (required for app updates)
+      allow write: if isAdmin();  // Only admins can upload new APKs
+    }
+    
     // Default rule - deny if not matching specific rules
     match /{allPaths=**} {
       allow read, write: if isAdmin();
