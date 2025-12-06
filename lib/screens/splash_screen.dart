@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import '../services/auth_service.dart';
 import '../services/auth_persistence_service.dart';
 import '../services/firestore_service.dart';
@@ -105,17 +106,14 @@ class _SplashScreenState extends State<SplashScreen>
     });
 
     try {
-      // Show splash screen for minimum duration to let user see the branding
-      await Future.delayed(const Duration(milliseconds: 1200));
-
-      if (!mounted || _isNavigating) return;
-
-      // Update loading text
+      // STEP 1: Initialize Firebase & Core Services
       if (mounted) {
         setState(() {
-          _loadingText = "Initializing Firebase...";
+          _loadingText = "Initializing...";
         });
       }
+
+      Logger.i("🔥 SplashScreen: Starting Firebase initialization");
 
       // Initialize Firebase with timeout
       bool firebaseReady = false;
@@ -144,7 +142,37 @@ class _SplashScreenState extends State<SplashScreen>
         return;
       }
 
-      // Firebase ready - check app version first
+      Logger.i("✅ Firebase initialized successfully in SplashScreen");
+
+      // STEP 2: Initialize Notification Service
+      if (mounted) {
+        setState(() {
+          _loadingText = "Setting up notifications...";
+        });
+      }
+
+      try {
+        // Register background message handler
+        FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+        Logger.i('📱 Background message handler registered');
+        
+        // Initialize notification service
+        final notificationService = Provider.of<NotificationService>(context, listen: false);
+        await notificationService.initialize();
+        Logger.i('✅ NotificationService initialized - push notifications ready');
+        
+        // Store globally for app-wide access
+        globalNotificationService = notificationService;
+      } catch (e) {
+        Logger.e("Notification service initialization error: $e");
+        // Continue even if notifications fail
+      }
+
+      if (!mounted || _isNavigating) return;
+
+      await Future.delayed(const Duration(milliseconds: 400));
+
+      // STEP 3: Check app version
       if (mounted) {
         setState(() {
           _loadingText = "Checking for updates...";

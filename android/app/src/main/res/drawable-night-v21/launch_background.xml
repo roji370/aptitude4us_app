@@ -1,9 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- White background -->
     <item>
         <bitmap android:gravity="fill" android:src="@drawable/background"/>
     </item>
+    
+    <!-- Logo centered -->
     <item>
         <bitmap android:gravity="center" android:src="@drawable/splash"/>
+    </item>
+    
+    <!-- Loading dots indicator below logo -->
+    <item android:gravity="center_horizontal|bottom" android:bottom="100dp">
+        <shape android:shape="rectangle">
+            <size android:width="60dp" android:height="12dp"/>
+            <solid android:color="@android:color/transparent"/>
+        </shape>
+    </item>
+    
+    <!-- Loading dot 1 -->
+    <item android:gravity="center_horizontal|bottom" android:bottom="102dp" android:left="-20dp">
+        <shape android:shape="oval">
+            <size android:width="8dp" android:height="8dp"/>
+            <solid android:color="#BBBBBB"/>
+        </shape>
+    </item>
+    
+    <!-- Loading dot 2 -->
+    <item android:gravity="center_horizontal|bottom" android:bottom="102dp">
+        <shape android:shape="oval">
+            <size android:width="8dp" android:height="8dp"/>
+            <solid android:color="#BBBBBB"/>
+        </shape>
+    </item>
+    
+    <!-- Loading dot 3 -->
+    <item android:gravity="center_horizontal|bottom" android:bottom="102dp" android:right="-20dp">
+        <shape android:shape="oval">
+            <size android:width="8dp" android:height="8dp"/>
+            <solid android:color="#BBBBBB"/>
+        </shape>
     </item>
 </layer-list>

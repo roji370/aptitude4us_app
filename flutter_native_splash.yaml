@@ -1,25 +1,25 @@
-# flutter_native_splash configuration - Premium education app splash screen
+# flutter_native_splash configuration - Minimal for fast Flutter load
 flutter_native_splash:
-  # Clean white background to match new splash logo
-  color: "#FFFFFF"  # Pure white for seamless integration
+  # Clean white background for instant transition to Flutter splash
+  color: "#FFFFFF"  # Pure white
   color_dark: "#FFFFFF"  # Consistent across light/dark modes
   
-  # XFINI splash logo - centered with proper spacing
+  # Minimal logo - shows briefly while Flutter engine loads
   image: assets/images/logo/splash_logo.png
   
-  # Image sizing - center for clean, spacious look with no borders
+  # Image sizing - center for clean look
   android_gravity: center
   ios_content_mode: center
   
-  # Full screen for premium, seamless appearance
-  fullscreen: true
+  # Don't fullscreen - faster transition
+  fullscreen: false
   
-  # Platform settings
-  android: true
-  ios: true
+  # Platform settings - iOS only (App Store requirement)
+  android: false  # Disabled - go straight to Flutter splash on Android
+  ios: true       # Enabled - required for iOS App Store compliance
   web: false
   
-  # Android 12+ specific settings for modern devices
+  # Android 12+ specific settings - disabled for faster startup
   android_12:
     image: assets/images/logo/splash_logo.png
     color: "#FFFFFF"

@@ -31,11 +31,13 @@ import 'utils/logger.dart';
 import 'utils/text_scale_calculator.dart';
 
 // Global notification service instance for universal push notifications
-NotificationService? _globalNotificationService;
+// Public so it can be accessed from splash screen
+NotificationService? globalNotificationService;
 
 // Background message handler - MUST be top-level function
+// Public so it can be registered from splash screen
 @pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // Initialize Firebase if not already initialized
   await Firebase.initializeApp();
 
@@ -142,35 +144,8 @@ void main() async {
   // Configure immediate UI to prevent white screen
   await _configureImmediateUI();
 
-  // CRITICAL: Initialize Firebase and Notifications IMMEDIATELY for universal push notifications
-  // This ensures notifications work regardless of login status or app state
-  Logger.i('🚀 Initializing Firebase and notifications for universal push support...');
+  Logger.i('🚀 Starting Xfini Academy app...');
   
-  try {
-    // Initialize Firebase first
-    bool firebaseReady = await FirebaseInitHelper.ensureInitialized();
-    
-    if (firebaseReady) {
-      Logger.i('✅ Firebase initialized successfully');
-      
-      // Register background message handler FIRST - this must happen before any other FCM setup
-      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-      Logger.i('📱 Background message handler registered');
-      
-      // Initialize notification service immediately for universal push notifications
-      final notificationService = NotificationService();
-      await notificationService.initialize();
-      Logger.i('✅ NotificationService initialized - push notifications ready');
-      
-      // Store globally accessible notification service instance
-      _globalNotificationService = notificationService;
-    } else {
-      Logger.w('⚠️ Firebase initialization failed - notifications may not work');
-    }
-  } catch (e) {
-    Logger.e('❌ Error initializing Firebase/Notifications: $e');
-  }
-
   // Configure system UI properties for iPhone 11+ compatibility
   final Brightness statusBarIconBrightness =
       Platform.isIOS ? Brightness.light : Brightness.light;
@@ -184,7 +159,7 @@ void main() async {
     navigationBarIconBrightness: navBarIconBrightness,
   );
 
-  // Start app
+  // Start app immediately - all initialization moved to SplashScreen
   runApp(
     MultiProvider(
       providers: [
@@ -196,15 +171,15 @@ void main() async {
         ),
         Provider<StorageService>(create: (_) => StorageService(), lazy: true),
         Provider<NotificationService>(
-          create: (_) => _globalNotificationService ?? NotificationService(),
-          lazy: false, // Not lazy - we want immediate access
+          create: (_) => globalNotificationService ?? NotificationService(),
+          lazy: true, // Lazy - will initialize in SplashScreen
         ),
       ],
       child: const MyApp(),
     ),
   );
 
-  // Request permissions in background
+  // Request permissions in background (non-blocking)
   _requestPermissions();
 }
 
@@ -301,8 +276,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     Logger.i('App lifecycle state changed to: $state');
 
     // ✅ Notify notification service of lifecycle changes (including badge clearing)
-    if (_globalNotificationService != null) {
-      _globalNotificationService!.handleAppLifecycleChange(state);
+    if (globalNotificationService != null) {
+      globalNotificationService!.handleAppLifecycleChange(state);
     }
 
     // Reset system UI when app is resumed to handle different device behaviors
