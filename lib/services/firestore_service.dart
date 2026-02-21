@@ -31,6 +31,44 @@ class FirestoreService {
     }
   }
 
+  // Get all courses from Firestore
+  Future<List<CourseModel>> getCourses() async {
+    if (!_isFirestoreAvailable) {
+      Logger.w("Firestore not available");
+      return [];
+    }
+
+    try {
+      Logger.i("Fetching all courses from Firestore");
+      
+      QuerySnapshot coursesSnapshot = await _firestore!
+          .collection('courses')
+          .get();
+      
+      List<CourseModel> courses = coursesSnapshot.docs.map((doc) {
+        return CourseModel.fromJson(
+          doc.data() as Map<String, dynamic>,
+          doc.id,
+        );
+      }).toList();
+      
+      Logger.i("Found ${courses.length} total courses");
+      
+      // Sort courses: pinned courses first, then unpinned courses
+      courses.sort((a, b) {
+        if (a.isPinned == b.isPinned) {
+          return 0; // Keep existing order for courses with same pinned status
+        }
+        return a.isPinned ? -1 : 1; // Pinned courses come first
+      });
+      
+      return courses;
+    } catch (e) {
+      Logger.e("Error getting all courses: $e");
+      rethrow;
+    }
+  }
+
   // Get assigned courses for a user
   Future<List<CourseModel>> getAssignedCourses(List<String> courseIds) async {
     if (!_isFirestoreAvailable || courseIds.isEmpty) {
@@ -118,6 +156,15 @@ class FirestoreService {
       }
 
       Logger.i("Found ${allCourses.length} total assigned courses, ${publishedCourses.length} published");
+      
+      // Sort courses: pinned courses first, then unpinned courses
+      publishedCourses.sort((a, b) {
+        if (a.isPinned == b.isPinned) {
+          return 0; // Keep existing order for courses with same pinned status
+        }
+        return a.isPinned ? -1 : 1; // Pinned courses come first
+      });
+      
       return publishedCourses;
     } catch (e) {
       Logger.e("Error getting published assigned courses: $e");
@@ -276,8 +323,7 @@ class FirestoreService {
                         'contentType': 'video',
                         'content': videoUrl,
                       },
-                      video['id'] ??
-                          DateTime.now().millisecondsSinceEpoch.toString(),
+                      video['id'] ?? videoUrl,
                     ),
                   );
                 } else {
@@ -305,8 +351,7 @@ class FirestoreService {
                         'contentType': 'pdf',
                         'content': pdfUrl,
                       },
-                      pdf['id'] ??
-                          DateTime.now().millisecondsSinceEpoch.toString(),
+                      pdf['id'] ?? pdfUrl,
                     ),
                   );
                 } else {
@@ -334,8 +379,7 @@ class FirestoreService {
                           'contentType': 'text',
                           'content': noteContent,
                         },
-                        note['id'] ??
-                            DateTime.now().millisecondsSinceEpoch.toString(),
+                        note['id'] ?? noteContent,
                       ),
                     );
                   }
@@ -376,8 +420,7 @@ class FirestoreService {
                         'contentType': 'link',
                         'content': linkUrl,
                       },
-                      link['id'] ??
-                          DateTime.now().millisecondsSinceEpoch.toString(),
+                      link['id'] ?? linkUrl,
                     ),
                   );
                 } else {
@@ -405,8 +448,7 @@ class FirestoreService {
                         'contentType': 'image',
                         'content': imageUrl,
                       },
-                      image['id'] ??
-                          DateTime.now().millisecondsSinceEpoch.toString(),
+                      image['id'] ?? imageUrl,
                     ),
                   );
                 } else {
@@ -434,8 +476,7 @@ class FirestoreService {
                         'contentType': 'ppt',
                         'content': pptUrl,
                       },
-                      ppt['id'] ??
-                          DateTime.now().millisecondsSinceEpoch.toString(),
+                      ppt['id'] ?? pptUrl,
                     ),
                   );
                 } else {

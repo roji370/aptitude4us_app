@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'dart:io';
 
 /// A utility class for handling platform-specific page transitions and navigation
@@ -71,8 +72,8 @@ class AdaptiveNavigation {
     bool fullscreenDialog = false,
   }) {
     if (Platform.isIOS) {
-      // iOS-style slide transition
-      return MaterialPageRoute<T>(
+      // iOS-style slide transition with swipe-to-go-back gesture
+      return CupertinoPageRoute<T>(
         builder: (context) => page,
         fullscreenDialog: fullscreenDialog,
       );

@@ -10,7 +10,7 @@ class TermsConditionsScreen extends StatelessWidget {
       backgroundColor: Colors.white,
       appBar: AppBar(
         title: const Text('Terms and Conditions'),
-        backgroundColor: const Color(0xFF323483),
+        backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
       ),
       body: SafeArea(

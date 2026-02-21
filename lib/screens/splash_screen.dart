@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
 import '../services/auth_persistence_service.dart';
 import '../services/firestore_service.dart';
@@ -13,11 +14,14 @@ import '../utils/accessibility_helper.dart';
 import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
 import 'login_screen.dart';
-import 'assigned_courses_screen.dart';
+import 'main_screen.dart';
 import 'onboarding_screen.dart';
 import 'force_update_screen.dart';
 import 'profile_completion_screen.dart';
 import '../services/notification_service.dart';
+import '../services/first_time_user_service.dart';
+import '../utils/exam_overview_navigator.dart';
+import '../widgets/exam_overview_dialog.dart';
 import '../main.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -298,13 +302,43 @@ class _SplashScreenState extends State<SplashScreen>
       // Check authentication state
       Logger.i("Checking authentication state...");
 
-      // Give Firebase Auth more time to restore session on initial app launch
-      await Future.delayed(const Duration(milliseconds: 2500));
+      // Check if we have persistent login data first
+      bool hasPersistentLogin = await AuthPersistenceService.isLoggedIn();
+      Logger.i("Persistent login status: $hasPersistentLogin");
 
-      // Check if user is already logged in
-      if (authService.currentUser != null) {
-        // User is already logged in through Firebase Auth
-        Logger.i("User already logged in via Firebase Auth");
+      // Wait for Firebase Auth to confirm the session state
+      // Use a timeout to prevent infinite waiting
+      User? firebaseUser;
+      try {
+        Logger.i("Waiting for Firebase Auth state confirmation...");
+        firebaseUser = await authService.authStateChanges.first.timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            Logger.w("Firebase Auth state timeout - using current state");
+            return authService.currentUser;
+          },
+        );
+        Logger.i("Firebase Auth state confirmed: ${firebaseUser?.uid ?? 'null'}");
+      } catch (e) {
+        Logger.e("Error waiting for auth state: $e");
+        firebaseUser = authService.currentUser;
+      }
+
+      if (!mounted) return;
+
+      // Handle the authentication state
+      if (firebaseUser != null) {
+        // User is authenticated via Firebase
+        Logger.i("User authenticated via Firebase Auth: ${firebaseUser.uid}");
+
+        // Ensure persistent storage is in sync
+        if (!hasPersistentLogin) {
+          Logger.i("Syncing persistent storage with Firebase Auth state");
+          String? token = await firebaseUser.getIdToken();
+          if (token != null) {
+            await AuthPersistenceService.saveAuthToken(token);
+          }
+        }
 
         // Check if profile is complete
         bool profileComplete = false;
@@ -326,6 +360,21 @@ class _SplashScreenState extends State<SplashScreen>
           return;
         }
 
+        // Check if user has watched exam overview (first-time user requirement)
+        final firstTimeUserService = FirstTimeUserService();
+        final userId = firebaseUser.uid;
+        final hasWatchedExamOverview = await firstTimeUserService.hasWatchedExamOverview(userId);
+        
+        if (!hasWatchedExamOverview) {
+          Logger.i("First-time user - showing exam overview dialog");
+          
+          if (!mounted) return;
+          
+          // Show exam overview dialog
+          await _showExamOverviewDialog();
+          return;
+        }
+
         // Setup user-specific notification handling
         if (mounted) {
           final notificationService = Provider.of<NotificationService>(
@@ -333,15 +382,11 @@ class _SplashScreenState extends State<SplashScreen>
             listen: false,
           );
 
-          // Get the current user ID
-          String? userId = authService.currentUser?.uid;
-          if (userId != null) {
-            // Ensure topic subscriptions and permissions
-            notificationService.ensureTopicSubscriptions(userId);
+          // Ensure topic subscriptions and permissions
+          notificationService.ensureTopicSubscriptions(userId);
 
-            // Also refresh token to make sure we have the latest
-            notificationService.refreshToken();
-          }
+          // Also refresh token to make sure we have the latest
+          notificationService.refreshToken();
         }
 
         // Navigate if still mounted
@@ -351,20 +396,35 @@ class _SplashScreenState extends State<SplashScreen>
         return;
       }
 
-      // Check if we have persistent login data
-      bool isLoggedIn = await AuthPersistenceService.isLoggedIn();
-
-      // Check if still mounted before navigating
-      if (!mounted) return;
-
-      if (isLoggedIn) {
+      // Firebase says no user, but we have persistent login data
+      if (hasPersistentLogin) {
         Logger.w(
-          "User has persistent login, but Firebase session may not be ready",
+          "⚠️ Persistent login exists but Firebase Auth returned null - likely slow network or offline",
         );
-        // We have persistent data
+        Logger.i("Trusting persistent login and proceeding to app (offline-first approach)");
+        
+        // DO NOT clear persistent data - Firebase Auth will sync in background
+        // This allows the app to work offline or with slow connections
+        
+        if (!mounted) return;
+        
+        // Try to get cached user data
+        try {
+          final userData = await AuthPersistenceService.getUserData();
+          if (userData != null) {
+            Logger.i("Cached user data available: ${userData.displayName}");
+          }
+        } catch (e) {
+          Logger.e("Error loading cached user data: $e");
+        }
+        
+        if (!mounted) return;
+        
+        // Navigate to home screen - auth will sync in background
         _navigateToHome();
       } else {
-        // No login detected, go to login screen
+        // No login detected anywhere, go to login screen
+        Logger.i("No authentication detected - navigating to login");
         _navigateToLogin();
       }
     } catch (e) {
@@ -433,7 +493,7 @@ class _SplashScreenState extends State<SplashScreen>
 
     if (!mounted) return;
 
-    Logger.i("🏠 Performing navigation to AssignedCoursesScreen");
+    Logger.i("🏠 Performing navigation to MainScreen");
 
     // Force a frame to render before navigation (iOS Simulator fix)
     await Future.delayed(const Duration(milliseconds: 100));
@@ -444,11 +504,44 @@ class _SplashScreenState extends State<SplashScreen>
       PageRouteBuilder(
         pageBuilder:
             (context, animation, secondaryAnimation) =>
-                const AssignedCoursesScreen(),
+                const MainScreen(),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
         },
         transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
+  }
+
+  /// Show exam overview dialog to first-time users
+  Future<void> _showExamOverviewDialog() async {
+    if (!mounted) return;
+
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final firestoreService = Provider.of<FirestoreService>(context, listen: false);
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false, // User must click proceed
+      builder: (dialogContext) => ExamOverviewDialog(
+        onProceed: () async {
+          Logger.i('📚 Navigating to Exam Overview from dialog');
+          
+          // Navigate to exam overview
+          final success = await ExamOverviewNavigator.navigateToExamOverview(
+            context,
+            firestoreService,
+          );
+          
+          if (!success) {
+            Logger.e('Failed to navigate to exam overview');
+            // If navigation fails, for now we'll just go to home
+            // In production, you might want to retry or show an error
+            if (mounted) {
+              _navigateToHome();
+            }
+          }
+        },
       ),
     );
   }

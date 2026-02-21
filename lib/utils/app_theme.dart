@@ -138,6 +138,12 @@ class AppTheme {
           return Colors.grey[300];
         }),
       ),
+      // iOS native page transitions
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        },
+      ),
     );
   }
 
@@ -236,6 +242,12 @@ class AppTheme {
       checkboxTheme: CheckboxThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
         side: BorderSide(color: Colors.grey[600]!),
+      ),
+      // Android modern page transitions (Material 3 style)
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: ZoomPageTransitionsBuilder(),
+        },
       ),
     );
   }

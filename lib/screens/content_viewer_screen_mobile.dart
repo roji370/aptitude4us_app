@@ -22,7 +22,10 @@ import '../services/auth_service.dart';
 import '../utils/pdf_loader.dart';
 import '../widgets/custom_pdf_viewer.dart';
 import '../services/firestore_service.dart';
+import '../services/first_time_user_service.dart';
+import '../utils/exam_overview_navigator.dart';
 import '../widgets/custom_bottom_navigation.dart';
+import 'main_screen.dart';
 import '../widgets/fullscreen_image_viewer.dart';
 import '../widgets/ppt_viewer.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -273,12 +276,75 @@ class _FullScreenPdfViewerState extends State<FullScreenPdfViewer> {
   }
 }
 
+// Fullscreen PPT viewer widget
+class FullscreenPptViewer extends StatefulWidget {
+  final String pptUrl;
+  final String title;
+  final String userName;
+
+  const FullscreenPptViewer({
+    super.key,
+    required this.pptUrl,
+    required this.title,
+    required this.userName,
+  });
+
+  @override
+  State<FullscreenPptViewer> createState() => _FullscreenPptViewerState();
+}
+
+class _FullscreenPptViewerState extends State<FullscreenPptViewer> {
+  @override
+  void initState() {
+    super.initState();
+    // Allow landscape orientations for better viewing
+    AccessibilityHelper.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
+
+  @override
+  void dispose() {
+    // Restore original orientations
+    AccessibilityHelper.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        title: Text(widget.title),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      body: SafeArea(
+        child: PptViewer(
+          pptUrl: widget.pptUrl,
+          title: widget.title,
+          userName: widget.userName,
+        ),
+      ),
+    );
+  }
+}
+
 class ContentViewerScreen extends StatefulWidget {
   final CourseModel course;
   final ModuleModel module;
   final int? initialContentIndex;
   final String? filteredContentType;
   final bool singleContentMode; // New: When true, only show the single selected content
+  final bool isExamOverviewMode;
 
   const ContentViewerScreen({
     super.key,
@@ -287,6 +353,7 @@ class ContentViewerScreen extends StatefulWidget {
     this.initialContentIndex,
     this.filteredContentType,
     this.singleContentMode = false,
+    this.isExamOverviewMode = false,
   });
 
   @override
@@ -308,6 +375,9 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
   String? _pdfPath;
   String? _pdfError;
   bool _isScreenProtectionEnabled = false;
+  
+  // Exam overview tracking
+  bool _hasMarkedExamOverviewAsWatched = false;
 
   @override
   void initState() {
@@ -640,6 +710,11 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
       // Store the controller in the content state manager
       _contentStateManager.setVideoController(content, controller);
 
+      // Add listener to track video progress for exam overview completion
+      if (_isExamOverviewContent()) {
+        controller.addListener(() => _trackVideoProgress(controller, content));
+      }
+
       // Rebuild the UI to show the video player
       if (mounted) {
         setState(() {});
@@ -859,7 +934,11 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
         }
 
         // Show loading while initializing
-        return const Center(child: CircularProgressIndicator());
+        return const Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+          ),
+        );
 
       case 'pdf':
         if (content.content.isEmpty) {
@@ -1017,19 +1096,19 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
           );
         }
 
-        // Show loading indicator while PDF is being prepared
+        // Show loading indicator while PDF is being prepared - UPDATED COLORS
         return Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF323483)),
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
               ),
               const SizedBox(height: 20),
               const Text(
                 'Loading PDF...',
                 style: TextStyle(
-                  color: Color(0xFF323483),
+                  color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
                 ),
@@ -1037,13 +1116,13 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
               const SizedBox(height: 8),
               Text(
                 'Module: ${widget.module.title}',
-                style: const TextStyle(color: Colors.grey, fontSize: 14),
+                style: const TextStyle(color: Colors.white70, fontSize: 14),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 4),
               const Text(
                 'This may take a moment depending on your connection',
-                style: TextStyle(color: Colors.grey, fontSize: 12),
+                style: TextStyle(color: Colors.white70, fontSize: 12),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -1079,31 +1158,135 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     }
   }
 
+  /// Check if current content is from Exam Overview course
+  /// (any module within the course counts)
+  bool _isExamOverviewContent() {
+    return widget.course.id == ExamOverviewNavigator.examOverviewCourseId;
+  }
+
+  /// Track video progress and mark exam overview as watched when 100% complete
+  void _trackVideoProgress(VideoPlayerController controller, ContentModel content) async {
+    if (!mounted || _hasMarkedExamOverviewAsWatched) return;
+
+    if (!controller.value.isInitialized) return;
+
+    final position = controller.value.position;
+    final duration = controller.value.duration;
+
+    if (duration.inSeconds == 0) return;
+
+    // Calculate percentage watched
+    final percentageWatched = (position.inSeconds / duration.inSeconds) * 100;
+
+    // If user has watched 100% (video completed), mark exam overview as complete
+    if (percentageWatched >= 99.5) { // Using 99.5% to account for rounding
+      Logger.i('📚 User has completed Exam Overview video (${percentageWatched.toStringAsFixed(1)}%)');
+      
+      // Mark as watched
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final userId = authService.currentUser?.uid;
+      
+      if (userId != null) {
+        final firstTimeUserService = FirstTimeUserService();
+        await firstTimeUserService.markExamOverviewAsWatched(userId);
+        
+        setState(() {
+          _hasMarkedExamOverviewAsWatched = true;
+        });
+
+        // Show success message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: const [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Exam Overview completed! Navigating to home screen...',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+
+          // Stop video playback before navigation
+          Future.delayed(const Duration(seconds: 3), () async {
+            if (mounted) {
+              // Pause and dispose video controller to prevent background playback
+              try {
+                await controller.pause();
+                Logger.i('🎬 Video paused before navigation');
+              } catch (e) {
+                Logger.w('Failed to pause video: $e');
+              }
+
+              // Navigate to AssignedCoursesScreen and clear all previous routes
+              if (mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(
+                    builder: (context) => const MainScreen(),
+                  ),
+                  (route) => false, // Remove all previous routes
+                );
+              }
+            }
+          });
+        }
+
+        Logger.i('✅ Exam Overview marked as watched for user: $userId');
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
     final safeAreaBottom = MediaQuery.of(context).padding.bottom;
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      // Proper system UI handling
-      extendBodyBehindAppBar: false,
-      extendBody: false,
-      appBar: AppBar(
+    return PopScope(
+      canPop: !widget.isExamOverviewMode,
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        if (!didPop && widget.isExamOverviewMode) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Please watch the Exam Overview before accessing the app',
+                style: TextStyle(color: Colors.white),
+              ),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.grey[50],
+        // Proper system UI handling
+        extendBodyBehindAppBar: false,
+        extendBody: false,
+        appBar: AppBar(
+          backgroundColor: Colors.grey[50],
+          elevation: 0,
+          leading: widget.isExamOverviewMode
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.black),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
         title: Text(
-          widget.course.title,
-          style: GoogleFonts.inter(
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-            fontSize: 18,
+          widget.module.title,
+          style: const TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+            color: Colors.black,
           ),
-        ),
-        backgroundColor: const Color(0xFF323483),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
         ),
       ),
       body: SafeArea(
@@ -1208,14 +1391,17 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                   },
                 ),
       ),
-      bottomNavigationBar: CustomBottomNavigation(
-        selectedIndex: _selectedIndex,
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-          CustomBottomNavigation.handleNavigation(context, index);
-        },
+      bottomNavigationBar: widget.isExamOverviewMode
+        ? null
+        : CustomBottomNavigation(
+            selectedIndex: _selectedIndex,
+            onTap: (index) {
+              setState(() {
+                _selectedIndex = index;
+              });
+              CustomBottomNavigation.handleNavigation(context, index);
+            },
+          ),
       ),
     );
   }
@@ -1229,19 +1415,74 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     ContentModel currentContent,
     bool isTablet,
   ) {
+    return Column(
+      children: [
+        // Content Title - Dynamic sizing
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxHeight: 80, // Increased height for longer titles
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                currentContent.title,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                  height: 1.2, // Line height for better readability
+                ),
+                maxLines: 3, // Allow up to 3 lines
+                overflow: TextOverflow.visible,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        
+        // Content Container - Takes remaining space
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: _getColorForContentType(currentContent.contentType),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: _getColorForContentType(currentContent.contentType).withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: _buildContentView(currentContent),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Removed old portrait layout code - replaced with simpler version above
+  Widget _buildOldPortraitLayout(
+    BuildContext context,
+    Size screenSize,
+    double safeAreaBottom,
+    List<ContentModel> contentList,
+    ContentModel currentContent,
+    bool isTablet,
+  ) {
     return Container(
       width: screenSize.width,
       height: screenSize.height,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Color(0xFFF5F5F5),
-            Colors.white,
-          ],
-        ),
-      ),
+      color: Colors.grey[50],
       child: Column(
         children: [
           // Modern Header Card with content title
@@ -1481,17 +1722,17 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     );
   }
 
-  // Helper method to get color for content type
+  // Helper method to get color for content type - UPDATED PDF COLOR
   Color _getColorForContentType(String type) {
     switch (type.toLowerCase()) {
       case 'video':
-        return const Color(0xFFE53935); // Red
+        return const Color(0xFF1565C0); // Blue
       case 'pdf':
-        return const Color(0xFFD32F2F); // Deep red
+        return const Color(0xFF29ACD6); // Light Blue (changed from purple)
       case 'ppt':
         return const Color(0xFFFB8C00); // Orange
       case 'image':
-        return const Color(0xFF7B1FA2); // Purple
+        return const Color(0xFFE53935); // Red
       case 'link':
         return const Color(0xFF1976D2); // Blue
       case 'text':

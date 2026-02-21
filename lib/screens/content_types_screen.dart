@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../models/content_model.dart';
 import '../models/course_model.dart';
@@ -9,17 +10,18 @@ import '../services/content_update_service.dart';
 import '../utils/logger.dart';
 import '../utils/route_transitions.dart';
 import '../widgets/custom_bottom_navigation.dart';
-import '../widgets/update_badge.dart';
 import 'content_by_type_screen.dart';
 
 class ContentTypesScreen extends StatefulWidget {
   final CourseModel course;
   final ModuleModel module;
+  final bool isExamOverviewMode;
 
   const ContentTypesScreen({
     super.key,
     required this.course,
     required this.module,
+    this.isExamOverviewMode = false,
   });
 
   @override
@@ -30,43 +32,15 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
   bool _isLoading = true;
   Map<String, List<ContentModel>> _contentByType = {};
   String? _errorMessage;
-  int _selectedIndex = 0; // For bottom navigation
+  int _selectedIndex = 0;
   final _updateService = ContentUpdateService();
-  Map<String, dynamic>? _contentChangeInfo;
+  String? _currentUserId;
 
   @override
   void initState() {
     super.initState();
+    _currentUserId = FirebaseAuth.instance.currentUser?.uid;
     _loadContent();
-    _markContentAsSeen();
-    _loadContentChangeInfo();
-  }
-
-  /// Mark content changes as seen when user opens this screen
-  Future<void> _markContentAsSeen() async {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId != null) {
-      await _updateService.markContentAsSeen(
-        widget.course.id,
-        widget.module.id,
-        userId,
-      );
-    }
-  }
-
-  /// Load content change information for this module
-  Future<void> _loadContentChangeInfo() async {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId != null) {
-      final changeInfo = await _updateService.getContentChangeInfo(
-        widget.course.id,
-        widget.module.id,
-        userId,
-      );
-      setState(() {
-        _contentChangeInfo = changeInfo;
-      });
-    }
   }
 
   Future<void> _loadContent() async {
@@ -138,23 +112,11 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
     }
   }
 
-  Color _getColorForContentType(String type) {
-    switch (type.toLowerCase()) {
-      case 'video':
-        return const Color(0xFFE53935); // Red
-      case 'pdf':
-        return const Color(0xFFD32F2F); // Deep red
-      case 'ppt':
-        return const Color(0xFFFB8C00); // Orange
-      case 'image':
-        return const Color(0xFF7B1FA2); // Purple
-      case 'link':
-        return const Color(0xFF1976D2); // Blue
-      case 'text':
-        return const Color(0xFF388E3C); // Green
-      default:
-        return const Color(0xFF323483); // Default brand color
-    }
+  Color _getColorForContentType(String type, int index) {
+    // Alternate between blue and light blue
+    return index % 2 == 0
+        ? const Color(0xFF1565C0)
+        : const Color(0xFF29ACD6);
   }
 
   String _getDisplayNameForContentType(String type) {
@@ -176,43 +138,62 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
     }
   }
 
+  // Dynamic font size calculation based on title length
+  double _getTitleFontSize(String title) {
+    final length = title.length;
+    if (length <= 20) return 18.0; // Short titles - normal size
+    if (length <= 40) return 16.0; // Medium titles - slightly smaller
+    return 14.0; // Long titles - smallest
+  }
+
+  // Dynamic card height based on title length
+  double _getCardHeight(String title) {
+    final length = title.length;
+    if (length <= 40) return 130.0; // Normal height for short/medium titles
+    return 145.0; // Taller for long titles
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF323483),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              widget.module.title,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+    return PopScope(
+      canPop: !widget.isExamOverviewMode,
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        if (!didPop && widget.isExamOverviewMode) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Please watch the Exam Overview before accessing the app',
+                style: TextStyle(color: Colors.white),
               ),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 3),
             ),
-            Text(
-              widget.course.title,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.normal,
+          );
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.grey[50],
+        appBar: AppBar(
+          backgroundColor: Colors.grey[50],
+          elevation: 0,
+          leading: widget.isExamOverviewMode
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.black),
+                onPressed: () => Navigator.of(context).pop(),
               ),
+          title: Text(
+            widget.module.title,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
             ),
-          ],
+          ),
         ),
-      ),
       body: _isLoading
           ? const Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF323483)),
-              ),
+              child: CircularProgressIndicator(),
             )
           : _errorMessage != null
               ? Center(
@@ -244,7 +225,7 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
                         ElevatedButton(
                           onPressed: _loadContent,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF323483),
+                            backgroundColor: const Color(0xFF1565C0),
                             foregroundColor: Colors.white,
                           ),
                           child: const Text('Retry'),
@@ -285,233 +266,325 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
                     )
                   : Column(
                       children: [
-                        // Header
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(24),
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF323483),
-                            borderRadius: BorderRadius.only(
-                              bottomLeft: Radius.circular(30),
-                              bottomRight: Radius.circular(30),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Content Header
+                                const Text(
+                                  'Content',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                
+                                // Content Type Cards — one per type, with live update badges
+                                ..._contentByType.entries.toList().asMap().entries.map((mapEntry) {
+                                  final index = mapEntry.key;
+                                  final entry = mapEntry.value;
+                                  final type = entry.key;
+                                  final contents = entry.value;
+                                  final color = _getColorForContentType(type, index);
+                                  final icon = _getIconForContentType(type);
+                                  final displayName = _getDisplayNameForContentType(type);
+
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 16),
+                                    child: _buildContentTypeCard(
+                                      type: type,
+                                      contents: contents,
+                                      displayName: displayName,
+                                      color: color,
+                                      icon: icon,
+                                    ),
+                                  );
+                                }).toList(),
+                              ],
                             ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        ),
+                      ],
+                    ),
+      bottomNavigationBar: widget.isExamOverviewMode
+        ? null
+        : CustomBottomNavigation(
+            selectedIndex: _selectedIndex,
+            onTap: (index) {
+              setState(() {
+                _selectedIndex = index;
+              });
+              CustomBottomNavigation.handleNavigation(context, index);
+            },
+          ),
+      ),
+    );
+  }
+
+  /// Returns the badge label and color for a content-type update record
+  _ContentTypeBadge? _resolveBadge(Map<String, dynamic>? updateInfo) {
+    if (updateInfo == null) return null;
+    final changeType = updateInfo['changeType'] as String? ?? '';
+    switch (changeType) {
+      case 'added':
+        return const _ContentTypeBadge(label: 'NEW', color: Colors.orange);
+      case 'removed':
+        return const _ContentTypeBadge(label: 'REMOVED', color: Colors.orange);
+      case 'reordered':
+        return const _ContentTypeBadge(label: 'REORDERED', color: Colors.orange);
+      default:
+        return const _ContentTypeBadge(label: 'UPDATED', color: Colors.orange);
+    }
+  }
+
+  /// Content-type card wrapped in a FutureBuilder for live update detection.
+  /// Uses dual-check (like module cards): content-type-level update OR item-level count.
+  Widget _buildContentTypeCard({
+    required String type,
+    required List<ContentModel> contents,
+    required String displayName,
+    required Color color,
+    required IconData icon,
+  }) {
+    if (_currentUserId == null) {
+      return _buildContentTypeCardContent(
+        type: type,
+        contents: contents,
+        displayName: displayName,
+        color: color,
+        icon: icon,
+        badge: null,
+        updateInfo: null,
+      );
+    }
+
+    return FutureBuilder<List<dynamic>>(
+      future: Future.wait([
+        _updateService.getContentTypeUpdateInfo(
+          widget.course.id,
+          widget.module.id,
+          type,
+          _currentUserId!,
+        ),
+        _updateService.getContentItemUpdateCountForType(
+          widget.course.id,
+          widget.module.id,
+          type,
+          _currentUserId!,
+        ),
+      ]),
+      builder: (context, snapshot) {
+        final updateInfo = snapshot.data?[0] as Map<String, dynamic>?;
+        final itemUpdateCount = (snapshot.data?[1] as int?) ?? 0;
+
+        // Content-type badge takes priority; fall back to "UPDATED" when only items changed
+        _ContentTypeBadge? badge = _resolveBadge(updateInfo);
+        if (badge == null && itemUpdateCount > 0) {
+          badge = _ContentTypeBadge(label: 'UPDATED', color: Colors.orange);
+        }
+
+        return _buildContentTypeCardContent(
+          type: type,
+          contents: contents,
+          displayName: displayName,
+          color: color,
+          icon: icon,
+          badge: badge,
+          updateInfo: updateInfo,
+          itemUpdateCount: itemUpdateCount,
+        );
+      },
+    );
+  }
+
+  Widget _buildContentTypeCardContent({
+    required String type,
+    required List<ContentModel> contents,
+    required String displayName,
+    required Color color,
+    required IconData icon,
+    required _ContentTypeBadge? badge,
+    required Map<String, dynamic>? updateInfo,
+    int itemUpdateCount = 0,
+  }) {
+    return GestureDetector(
+      onTap: () {
+        // Navigate immediately and wait for return
+        AppNavigator.navigateTo(
+          context: context,
+          page: ContentByTypeScreen(
+            course: widget.course,
+            module: widget.module,
+            contentType: type,
+            displayName: displayName,
+            isExamOverviewMode: widget.isExamOverviewMode,
+          ),
+        ).then((_) {
+          // Rebuild to refresh badges when returning
+          if (mounted) {
+            setState(() {
+              // The setState will trigger the FutureBuilder to re-run _updateService calls
+            });
+          }
+        });
+      },
+      child: Container(
+        width: double.infinity,
+        height: _getCardHeight(displayName),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.3),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Badge strip — always 28px tall; item count on left, update badge on right
+            SizedBox(
+              height: 28,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Left: item count bubble
+                    if (itemUpdateCount > 0)
+                      IgnorePointer(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7.2,
+                            vertical: 3.6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1565C0),
+                            borderRadius: BorderRadius.circular(10.8),
+                          ),
+                          child: Text(
+                            '+$itemUpdateCount',
+                            style: GoogleFonts.inter(
+                              fontSize: 8.1,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      const SizedBox.shrink(),
+                    // Right: update badge
+                    if (badge != null)
+                      IgnorePointer(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7.2,
+                            vertical: 3.6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: badge.color,
+                            borderRadius: BorderRadius.circular(10.8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Text(
-                                'Content Types',
-                                style: TextStyle(
-                                  fontSize: 24,
+                              const Icon(Icons.circle, size: 5.4, color: Colors.white),
+                              const SizedBox(width: 3.6),
+                              Text(
+                                badge.label,
+                                style: GoogleFonts.inter(
+                                  fontSize: 8.1,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Select a content type to view',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.white.withOpacity(0.8),
                                 ),
                               ),
                             ],
                           ),
                         ),
-
-                        // Content type cards
-                        Expanded(
-                          child: ListView.builder(
-                            padding: const EdgeInsets.all(16),
-                            itemCount: _contentByType.length,
-                            itemBuilder: (context, index) {
-                              final type = _contentByType.keys.elementAt(index);
-                              final contents = _contentByType[type]!;
-                              final color = _getColorForContentType(type);
-                              final icon = _getIconForContentType(type);
-                              final displayName = _getDisplayNameForContentType(type);
-
-                              // Check if this content type has changes
-                              Map<String, dynamic>? typeChange;
-                              if (_contentChangeInfo != null && 
-                                  _contentChangeInfo!['contentChanges'] != null) {
-                                final changes = List.from(_contentChangeInfo!['contentChanges']);
-                                typeChange = changes.firstWhere(
-                                  (c) => c['type'].toString().toLowerCase() == type.toLowerCase() + 's',
-                                  orElse: () => null as dynamic,
-                                );
-                              }
-
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 16),
-                                elevation: 2,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: InkWell(
-                                  onTap: () {
-                                    AppNavigator.navigateTo(
-                                      context: context,
-                                      page: ContentByTypeScreen(
-                                        course: widget.course,
-                                        module: widget.module,
-                                        contentType: type,
-                                        displayName: displayName,
-                                      ),
-                                    );
-                                  },
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: Stack(
-                                    children: [
-                                      Padding(
-                                        padding: const EdgeInsets.all(20),
-                                        child: Row(
-                                          children: [
-                                            // Icon container with pulse animation for changes
-                                            Stack(
-                                              children: [
-                                                Container(
-                                                  width: 60,
-                                                  height: 60,
-                                                  decoration: BoxDecoration(
-                                                    color: color.withOpacity(0.1),
-                                                    borderRadius: BorderRadius.circular(12),
-                                                    border: typeChange != null
-                                                        ? Border.all(
-                                                            color: typeChange['change'] == 'added'
-                                                                ? Colors.green
-                                                                : Colors.red,
-                                                            width: 2,
-                                                          )
-                                                        : null,
-                                                  ),
-                                                  child: Icon(
-                                                    icon,
-                                                    color: color,
-                                                    size: 32,
-                                                  ),
-                                                ),
-                                                // Badge indicator
-                                                if (typeChange != null)
-                                                  Positioned(
-                                                    top: 0,
-                                                    right: 0,
-                                                    child: Container(
-                                                      padding: const EdgeInsets.all(4),
-                                                      decoration: BoxDecoration(
-                                                        color: typeChange['change'] == 'added'
-                                                            ? Colors.green
-                                                            : Colors.red,
-                                                        shape: BoxShape.circle,
-                                                        boxShadow: [
-                                                          BoxShadow(
-                                                            color: (typeChange['change'] == 'added'
-                                                                    ? Colors.green
-                                                                    : Colors.red)
-                                                                .withOpacity(0.5),
-                                                            blurRadius: 4,
-                                                            spreadRadius: 1,
-                                                          ),
-                                                        ],
-                                                      ),
-                                                      child: Text(
-                                                        typeChange['change'] == 'added'
-                                                            ? '+${typeChange['count']}'
-                                                            : '-${typeChange['count']}',
-                                                        style: const TextStyle(
-                                                          color: Colors.white,
-                                                          fontSize: 10,
-                                                          fontWeight: FontWeight.bold,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ),
-                                              ],
-                                            ),
-                                            const SizedBox(width: 16),
-
-                                            // Content type info
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  Row(
-                                                    children: [
-                                                      Text(
-                                                        displayName,
-                                                        style: const TextStyle(
-                                                          fontSize: 18,
-                                                          fontWeight: FontWeight.bold,
-                                                          color: Color(0xFF323483),
-                                                        ),
-                                                      ),
-                                                      // Show "NEW" or "UPDATED" badge
-                                                      if (typeChange != null)
-                                                        Container(
-                                                          margin: const EdgeInsets.only(left: 8),
-                                                          padding: const EdgeInsets.symmetric(
-                                                            horizontal: 8,
-                                                            vertical: 4,
-                                                          ),
-                                                          decoration: BoxDecoration(
-                                                            color: typeChange['change'] == 'added'
-                                                                ? Colors.green
-                                                                : Colors.red,
-                                                            borderRadius: BorderRadius.circular(12),
-                                                          ),
-                                                          child: Text(
-                                                            typeChange['change'] == 'added'
-                                                                ? 'NEW'
-                                                                : 'REMOVED',
-                                                            style: const TextStyle(
-                                                              color: Colors.white,
-                                                              fontSize: 10,
-                                                              fontWeight: FontWeight.bold,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(height: 4),
-                                                  Text(
-                                                    '${contents.length} ${contents.length == 1 ? 'item' : 'items'}',
-                                                    style: const TextStyle(
-                                                      fontSize: 14,
-                                                      color: Colors.grey,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-
-                                            // Arrow icon
-                                            const Icon(
-                                              Icons.arrow_forward_ios,
-                                              color: Colors.grey,
-                                              size: 20,
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
+                      )
+                    else
+                      const SizedBox.shrink(),
+                  ],
+                ),
+              ),
+            ),
+            // Main content
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '${contents.length} ${contents.length == 1 ? 'Item' : 'Items'}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white70,
+                            ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 8),
+                          Flexible(
+                            child: Text(
+                              displayName,
+                              style: TextStyle(
+                                fontSize: _getTitleFontSize(displayName),
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                height: 1.2,
+                              ),
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-      bottomNavigationBar: CustomBottomNavigation(
-        selectedIndex: _selectedIndex,
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-          CustomBottomNavigation.handleNavigation(context, index);
-        },
+                    _buildContentIcon(icon),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Build the icon container for content cards
+  Widget _buildContentIcon(IconData icon) {
+    return Container(
+      width: 60,
+      height: 60,
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.white, width: 2.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Icon(
+        icon,
+        color: Colors.white,
+        size: 32,
       ),
     );
   }
 }
 
+/// Simple data holder for a content-type badge label + color
+class _ContentTypeBadge {
+  final String label;
+  final Color color;
+  const _ContentTypeBadge({required this.label, required this.color});
+}

@@ -9,7 +9,7 @@ import '../services/auth_service.dart';
 import '../services/storage_service.dart';
 import '../utils/logger.dart';
 import '../utils/route_transitions.dart';
-import 'assigned_courses_screen.dart';
+import 'main_screen.dart';
 
 class ProfileCompletionScreen extends StatefulWidget {
   const ProfileCompletionScreen({super.key});
@@ -302,7 +302,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
           // If initial setup, navigate to home
           AppNavigator.pushAndRemoveUntil(
             context: context,
-            page: const AssignedCoursesScreen(),
+            page: const MainScreen(),
             predicate: (route) => false,
           );
         }

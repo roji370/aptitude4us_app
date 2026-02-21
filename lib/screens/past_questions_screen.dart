@@ -25,8 +25,11 @@ class _PastQuestionsScreenState extends State<PastQuestionsScreen>
   final AuthService _authService = AuthService();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-
   final FocusNode _inputFocusNode = FocusNode();
+
+  // Stream key used to force StreamBuilder to re-subscribe on refresh
+  int _streamKey = 0;
+  bool _isRefreshing = false;
 
   // Get the actual user display name from UserModel
   Future<String> _getUserDisplayName() async {
@@ -61,8 +64,10 @@ class _PastQuestionsScreenState extends State<PastQuestionsScreen>
 
   late AnimationController _inputAnimationController;
   late AnimationController _fabAnimationController;
+  late AnimationController _refreshAnimationController;
   late Animation<double> _inputScaleAnimation;
   late Animation<double> _fabScaleAnimation;
+  late Animation<double> _refreshRotationAnimation;
 
   @override
   void initState() {
@@ -83,6 +88,11 @@ class _PastQuestionsScreenState extends State<PastQuestionsScreen>
       vsync: this,
     );
 
+    _refreshAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+
     _inputScaleAnimation = Tween<double>(begin: 1.0, end: 1.02).animate(
       CurvedAnimation(
         parent: _inputAnimationController,
@@ -92,6 +102,16 @@ class _PastQuestionsScreenState extends State<PastQuestionsScreen>
 
     _fabScaleAnimation = Tween<double>(begin: 1.0, end: 0.95).animate(
       CurvedAnimation(parent: _fabAnimationController, curve: Curves.easeInOut),
+    );
+
+    _refreshRotationAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(
+      CurvedAnimation(
+        parent: _refreshAnimationController,
+        curve: Curves.easeInOut,
+      ),
     );
   }
 
@@ -112,7 +132,50 @@ class _PastQuestionsScreenState extends State<PastQuestionsScreen>
     _inputFocusNode.dispose();
     _inputAnimationController.dispose();
     _fabAnimationController.dispose();
+    _refreshAnimationController.dispose();
     super.dispose();
+  }
+
+  /// Performs a functional refresh by:
+  /// 1. Showing a spinner animation on the refresh icon
+  /// 2. Re-initialising any welcome messages if the collection is empty
+  /// 3. Incrementing [_streamKey] so that the StreamBuilder rebuilds with a
+  ///    fresh subscription, discarding any cached / stale data
+  Future<void> _handleRefresh() async {
+    if (_isRefreshing) return;
+
+    HapticFeedback.lightImpact();
+
+    setState(() => _isRefreshing = true);
+    _refreshAnimationController.repeat();
+
+    try {
+      // Re-trigger the welcome message in case the collection was cleared
+      await _chatService.addWelcomeMessageIfNeeded();
+    } catch (e) {
+      Logger.e('Error during refresh: $e');
+      if (mounted) {
+        _showSnackBar('Refresh failed. Please try again.', isError: true);
+      }
+    } finally {
+      if (mounted) {
+        // Stop the spinner
+        await _refreshAnimationController.animateTo(
+          1.0,
+          duration: const Duration(milliseconds: 200),
+        );
+        _refreshAnimationController.stop();
+        _refreshAnimationController.reset();
+
+        setState(() {
+          _isRefreshing = false;
+          // Bump the key → StreamBuilder rebuilds with a brand-new stream
+          _streamKey++;
+        });
+
+        HapticFeedback.selectionClick();
+      }
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -191,16 +254,22 @@ class _PastQuestionsScreenState extends State<PastQuestionsScreen>
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: Colors.white,
       appBar: _buildAppBar(theme),
       body: ProtectedCourseContent(
         contentTitle: 'Past Questions',
         child: SafeArea(
+          bottom: false,
           child: Column(
             children: [
               // Messages list
-              Expanded(child: _buildMessagesList(currentUser)),
-              // Message input
+              Expanded(
+                child: Container(
+                  color: Colors.grey[100],
+                  child: _buildMessagesList(currentUser),
+                ),
+              ),
+              // Message input - no gap
               _buildMessageInput(theme),
             ],
           ),
@@ -211,24 +280,48 @@ class _PastQuestionsScreenState extends State<PastQuestionsScreen>
 
   PreferredSizeWidget _buildAppBar(ThemeData theme) {
     return AppBar(
-      title: Text(
+      backgroundColor: Colors.white,
+      elevation: 0.5,
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back, color: Colors.black),
+        onPressed: () => Navigator.pop(context),
+      ),
+      title: const Text(
         'Past Questions',
         style: TextStyle(
-          fontSize: ResponsiveHelper.adaptiveFontSize(context, 18.0),
-          fontWeight: FontWeight.w700,
-          color: theme.colorScheme.onPrimary,
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          color: Colors.black,
         ),
       ),
-      backgroundColor: theme.colorScheme.primary,
-      foregroundColor: theme.colorScheme.onPrimary,
-      elevation: 0,
-      shadowColor: theme.colorScheme.shadow.withValues(alpha: 0.1),
-      surfaceTintColor: Colors.transparent,
+      actions: [
+        // Animated refresh button – spins while refreshing, shows a subtle
+        // disabled appearance when a refresh is already in progress
+        AnimatedBuilder(
+          animation: _refreshRotationAnimation,
+          builder: (context, child) {
+            return IconButton(
+              icon: RotationTransition(
+                turns: _refreshRotationAnimation,
+                child: Icon(
+                  Icons.refresh,
+                  color: _isRefreshing ? Colors.grey[400] : Colors.black,
+                ),
+              ),
+              onPressed: _isRefreshing ? null : _handleRefresh,
+              tooltip: 'Refresh',
+            );
+          },
+        ),
+      ],
     );
   }
 
   Widget _buildMessagesList(User? currentUser) {
     return StreamBuilder<List<PastQuestionsMessage>>(
+      // Using a keyed stream so incrementing _streamKey forces a fresh
+      // subscription (and therefore a genuine data reload) on refresh.
+      key: ValueKey(_streamKey),
       stream: _chatService.getPastQuestionsMessages(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
@@ -368,6 +461,22 @@ class _PastQuestionsScreenState extends State<PastQuestionsScreen>
               ),
               textAlign: TextAlign.center,
             ),
+            SizedBox(
+              height: ResponsiveHelper.getAdaptiveSpacing(
+                context,
+                compact: 16.0,
+                regular: 20.0,
+                pro: 24.0,
+                large: 28.0,
+                extraLarge: 32.0,
+              ),
+            ),
+            // Retry button shown in the error state as well
+            FilledButton.icon(
+              onPressed: _isRefreshing ? null : _handleRefresh,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try Again'),
+            ),
           ],
         ),
       ),
@@ -433,175 +542,101 @@ class _PastQuestionsScreenState extends State<PastQuestionsScreen>
 
   Widget _buildMessageInput(ThemeData theme) {
     return Container(
-      padding: EdgeInsets.all(
-        ResponsiveHelper.getAdaptiveSpacing(
-          context,
-          compact: 12.0,
-          regular: 16.0,
-          pro: 20.0,
-          large: 24.0,
-          extraLarge: 28.0,
-        ),
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 8,
+        bottom: MediaQuery.of(context).padding.bottom + 8,
       ),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        border: Border(
-          top: BorderSide(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
-            width: 1,
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
           ),
-        ),
+        ],
       ),
-      child: ScaleTransition(
-        scale: _inputScaleAnimation,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            // Attachment button
-            Container(
-              width: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-              height: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-              margin: EdgeInsets.only(
-                right: ResponsiveHelper.getAdaptiveSpacing(
-                  context,
-                  compact: 8.0,
-                  regular: 12.0,
-                  pro: 16.0,
-                  large: 20.0,
-                  extraLarge: 24.0,
-                ),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap:
-                      _isSending ? null : () => _showAttachmentPicker(context),
-                  borderRadius: BorderRadius.circular(
-                    ResponsiveHelper.getAdaptiveSpacing(
-                      context,
-                      compact: 24.0,
-                      regular: 28.0,
-                      pro: 32.0,
-                      large: 36.0,
-                      extraLarge: 40.0,
-                    ),
-                  ),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest
-                          .withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(
-                        ResponsiveHelper.getAdaptiveSpacing(
-                          context,
-                          compact: 24.0,
-                          regular: 28.0,
-                          pro: 32.0,
-                          large: 36.0,
-                          extraLarge: 40.0,
-                        ),
-                      ),
-                      border: Border.all(
-                        color: theme.colorScheme.outline.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.attach_file_rounded,
-                      size: ResponsiveHelper.adaptiveFontSize(context, 20.0),
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Attachment Button
+          GestureDetector(
+            onTap: () {
+              _showAttachmentPicker(context);
+            },
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              child: Icon(
+                Icons.attach_file,
+                color: Colors.grey[600],
+                size: 24,
               ),
             ),
+          ),
+          const SizedBox(width: 8),
 
-            // Message input field
-            Expanded(
-              child: Container(
-                constraints: BoxConstraints(
-                  minHeight: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-                  maxHeight: ResponsiveHelper.adaptiveFontSize(context, 120.0),
+          // Pill-shaped Text Input Field
+          Expanded(
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(100),
+                border: Border.all(
+                  color: Colors.grey[300]!,
+                  width: 1,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(100),
                 child: TextField(
                   controller: _messageController,
                   focusNode: _inputFocusNode,
                   decoration: InputDecoration(
-                    hintText: 'Share a past question or study material...',
+                    hintText: 'Type a message',
                     hintStyle: TextStyle(
-                      color: theme.colorScheme.onSurfaceVariant.withValues(
-                        alpha: 0.6,
-                      ),
+                      fontSize: 15,
+                      color: Colors.grey[400],
                     ),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(
-                        ResponsiveHelper.getAdaptiveSpacing(
-                          context,
-                          compact: 24.0,
-                          regular: 28.0,
-                          pro: 32.0,
-                          large: 36.0,
-                          extraLarge: 40.0,
-                        ),
-                      ),
-                      borderSide: BorderSide(
-                        color: theme.colorScheme.outline.withValues(alpha: 0.3),
-                      ),
+                      borderRadius: BorderRadius.circular(100),
+                      borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(
-                        ResponsiveHelper.getAdaptiveSpacing(
-                          context,
-                          compact: 24.0,
-                          regular: 28.0,
-                          pro: 32.0,
-                          large: 36.0,
-                          extraLarge: 40.0,
-                        ),
-                      ),
-                      borderSide: BorderSide(
-                        color: theme.colorScheme.outline.withValues(alpha: 0.3),
-                      ),
+                      borderRadius: BorderRadius.circular(100),
+                      borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(
-                        ResponsiveHelper.getAdaptiveSpacing(
-                          context,
-                          compact: 24.0,
-                          regular: 28.0,
-                          pro: 32.0,
-                          large: 36.0,
-                          extraLarge: 40.0,
-                        ),
-                      ),
-                      borderSide: BorderSide(
-                        color: theme.colorScheme.primary,
-                        width: 2,
-                      ),
+                      borderRadius: BorderRadius.circular(100),
+                      borderSide: BorderSide.none,
+                    ),
+                    errorBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(100),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedErrorBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(100),
+                      borderSide: BorderSide.none,
+                    ),
+                    disabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(100),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
                     ),
                     filled: true,
-                    fillColor: theme.colorScheme.surfaceContainerHighest
-                        .withValues(alpha: 0.5),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: ResponsiveHelper.getAdaptiveSpacing(
-                        context,
-                        compact: 16.0,
-                        regular: 20.0,
-                        pro: 24.0,
-                        large: 28.0,
-                        extraLarge: 32.0,
-                      ),
-                      vertical: ResponsiveHelper.getAdaptiveSpacing(
-                        context,
-                        compact: 12.0,
-                        regular: 14.0,
-                        pro: 16.0,
-                        large: 18.0,
-                        extraLarge: 20.0,
-                      ),
-                    ),
-                  ),
-                  style: TextStyle(
-                    fontSize: ResponsiveHelper.adaptiveFontSize(context, 16.0),
-                    color: theme.colorScheme.onSurface,
+                    fillColor: Colors.white,
                   ),
                   maxLines: null,
                   textCapitalization: TextCapitalization.sentences,
@@ -609,74 +644,33 @@ class _PastQuestionsScreenState extends State<PastQuestionsScreen>
                 ),
               ),
             ),
+          ),
+          const SizedBox(width: 8),
 
-            SizedBox(
-              width: ResponsiveHelper.getAdaptiveSpacing(
-                context,
-                compact: 8.0,
-                regular: 12.0,
-                pro: 16.0,
-                large: 20.0,
-                extraLarge: 24.0,
-              ),
-            ),
-
-            // Send button
-            ScaleTransition(
-              scale: _fabScaleAnimation,
-              child: Container(
-                width: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-                height: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-                child: FilledButton(
-                  onPressed: _isSending ? null : _sendMessage,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: theme.colorScheme.primary,
-                    foregroundColor: theme.colorScheme.onPrimary,
-                    disabledBackgroundColor:
-                        theme.colorScheme.surfaceContainerHighest,
-                    padding: EdgeInsets.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(
-                        ResponsiveHelper.getAdaptiveSpacing(
-                          context,
-                          compact: 24.0,
-                          regular: 28.0,
-                          pro: 32.0,
-                          large: 36.0,
-                          extraLarge: 40.0,
+          // Send Button
+          GestureDetector(
+            onTap: _sendMessage,
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              child: _isSending
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Color(0xFF1565C0),
                         ),
                       ),
+                    )
+                  : Icon(
+                      Icons.send,
+                      color: Colors.grey[600],
+                      size: 24,
                     ),
-                    elevation: ResponsiveHelper.getAdaptiveElevation(context),
-                  ),
-                  child:
-                      _isSending
-                          ? SizedBox(
-                            width: ResponsiveHelper.adaptiveFontSize(
-                              context,
-                              20.0,
-                            ),
-                            height: ResponsiveHelper.adaptiveFontSize(
-                              context,
-                              20.0,
-                            ),
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: theme.colorScheme.onPrimary,
-                            ),
-                          )
-                          : Icon(
-                            Icons.send_rounded,
-                            size: ResponsiveHelper.adaptiveFontSize(
-                              context,
-                              20.0,
-                            ),
-                          ),
-                ),
-              ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../utils/app_colors.dart';
 import '../utils/responsive_helper.dart';
-import '../screens/assigned_courses_screen.dart';
-import '../screens/profile_screen.dart';
+import '../screens/main_screen.dart';
 
 class CustomBottomNavigation extends StatelessWidget {
   final int selectedIndex;
@@ -18,41 +17,40 @@ class CustomBottomNavigation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      margin: const EdgeInsets.fromLTRB(28, 20, 28, 20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: const Color(0xFF1565C0),
+        borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
+            color: Colors.blue.withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: SafeArea(
-        child: Container(
-          height: ResponsiveHelper.adaptiveFontSize(context, 80.0),
-          padding: ResponsiveHelper.getScreenHorizontalPadding(context),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(
-                context: context,
-                icon: Icons.home_outlined,
-                selectedIcon: Icons.home,
-                label: 'Home',
-                index: 0,
-                isSelected: selectedIndex == 0,
-              ),
-              _buildNavItem(
-                context: context,
-                icon: Icons.person_outline,
-                selectedIcon: Icons.person,
-                label: 'Profile',
-                index: 1,
-                isSelected: selectedIndex == 1,
-              ),
-            ],
-          ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildNavItem(
+              context: context,
+              icon: Icons.home_outlined,
+              selectedIcon: Icons.home,
+              label: 'Home',
+              index: 0,
+              isSelected: selectedIndex == 0,
+            ),
+            _buildNavItem(
+              context: context,
+              icon: Icons.person_outline,
+              selectedIcon: Icons.person,
+              label: 'Profile',
+              index: 1,
+              isSelected: selectedIndex == 1,
+            ),
+          ],
         ),
       ),
     );
@@ -66,64 +64,44 @@ class CustomBottomNavigation extends StatelessWidget {
     required int index,
     required bool isSelected,
   }) {
-    return Expanded(
-      child: Material(
+    return GestureDetector(
+      onTap: () => onTap(index),
+      child: Container(
         color: Colors.transparent,
-        child: InkWell(
-          onTap: () => onTap(index),
-          borderRadius: BorderRadius.circular(12.0),
-          child: Container(
-            constraints: ResponsiveHelper.getLargeTouchTarget(),
-            padding: EdgeInsets.symmetric(
-              vertical: ResponsiveHelper.getAdaptiveSpacing(context, 
-                compact: 8.0, regular: 12.0, pro: 14.0, large: 16.0, extraLarge: 18.0),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isSelected ? selectedIcon : icon,
+              color: Colors.white,
+              size: 24,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  isSelected ? selectedIcon : icon,
-                  color: isSelected ? AppColors.primary : Colors.grey[500],
-                  size: ResponsiveHelper.adaptiveFontSize(context, 24.0),
-                ),
-                SizedBox(height: ResponsiveHelper.getAdaptiveSpacing(context, 
-                  compact: 4.0, regular: 6.0, pro: 6.0, large: 8.0, extraLarge: 8.0)),
-                Text(
-                  label,
-                  style: GoogleFonts.inter(
-                    fontSize: ResponsiveHelper.adaptiveFontSize(context, 12.0),
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                    color: isSelected ? AppColors.primary : Colors.grey[500],
-                  ),
-                ),
-              ],
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
   }
 
-  // Static method to handle navigation
+  /// Navigate to MainScreen with the selected tab index.
+  /// Used by sub-screens (module_list, content_viewer, etc.) that have
+  /// their own bottom nav to navigate back to the persistent shell.
   static void handleNavigation(BuildContext context, int index) {
-    switch (index) {
-      case 0:
-        if (ModalRoute.of(context)?.settings.name != '/home') {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (context) => const AssignedCoursesScreen()),
-            (route) => false,
-          );
-        }
-        break;
-      case 1:
-        if (ModalRoute.of(context)?.settings.name != '/profile') {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (context) => const ProfileScreen()),
-            (route) => false,
-          );
-        }
-        break;
-    }
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (context) => MainScreen(initialIndex: index),
+      ),
+      (route) => false,
+    );
   }
-} 
+}

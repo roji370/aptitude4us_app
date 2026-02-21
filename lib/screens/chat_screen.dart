@@ -474,62 +474,39 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: Colors.white,
       appBar: _buildAppBar(theme),
       body: ProtectedCourseContent(
         contentTitle: 'Admin Chat',
-        child: SafeArea(child: _buildBody()),
+        child: SafeArea(
+          bottom: false, // Remove bottom safe area padding
+          child: _buildBody(),
+        ),
       ),
     );
   }
 
   PreferredSizeWidget _buildAppBar(ThemeData theme) {
     return AppBar(
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Chat with Admin',
-            style: TextStyle(
-              fontSize: ResponsiveHelper.adaptiveFontSize(context, 20.0),
-              fontWeight: FontWeight.w700,
-              color: theme.colorScheme.onPrimary,
-            ),
-          ),
-          Text(
-            _messages.isEmpty ? 'Loading...' : '${_messages.length} messages',
-            style: TextStyle(
-              fontSize: ResponsiveHelper.adaptiveFontSize(context, 12.0),
-              color: theme.colorScheme.onPrimary.withValues(alpha: 0.8),
-            ),
-          ),
-        ],
+      backgroundColor: Colors.white,
+      elevation: 0.5,
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back, color: Colors.black),
+        onPressed: () => Navigator.pop(context),
       ),
-      backgroundColor: theme.colorScheme.primary,
-      foregroundColor: theme.colorScheme.onPrimary,
-      elevation: 0,
-      shadowColor: theme.colorScheme.shadow.withValues(alpha: 0.1),
-      surfaceTintColor: Colors.transparent,
+      title: const Text(
+        'Chat',
+        style: TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          color: Colors.black,
+        ),
+      ),
       actions: [
         IconButton(
-          icon: const Icon(Icons.refresh_rounded),
+          icon: const Icon(Icons.refresh, color: Colors.black),
           onPressed: _loadInitialMessages,
-          tooltip: 'Refresh messages',
-          style: IconButton.styleFrom(
-            backgroundColor: theme.colorScheme.onPrimary.withValues(alpha: 0.1),
-            foregroundColor: theme.colorScheme.onPrimary,
-          ),
-        ),
-
-        SizedBox(
-          width: ResponsiveHelper.getAdaptiveSpacing(
-            context,
-            compact: 8.0,
-            regular: 12.0,
-            pro: 16.0,
-            large: 16.0,
-            extraLarge: 20.0,
-          ),
+          tooltip: 'Refresh',
         ),
       ],
     );
@@ -547,41 +524,102 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     return Column(
       children: [
         // Messages list
-        Expanded(child: _buildMessagesList()),
-        // Message input
+        Expanded(
+          child: Container(
+            color: Colors.grey[100],
+            child: _buildMessagesList(),
+          ),
+        ),
+        // Message input - no gap
         _buildMessageInput(),
       ],
     );
   }
 
   Widget _buildLoadingState() {
-    return Center(
+    // Skeleton loader for smoother perceived performance
+    return Container(
+      color: Colors.grey[100],
+      child: ListView.builder(
+        padding: EdgeInsets.all(
+          ResponsiveHelper.getAdaptiveSpacing(
+            context,
+            compact: 8.0,
+            regular: 12.0,
+            pro: 16.0,
+            large: 20.0,
+            extraLarge: 24.0,
+          ),
+        ),
+        itemCount: 8, // Show 8 skeleton items
+        itemBuilder: (context, index) {
+          final isMe = index % 2 == 0;
+          return Align(
+            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+            child: Container(
+              margin: EdgeInsets.symmetric(
+                vertical: ResponsiveHelper.getAdaptiveSpacing(
+                  context,
+                  compact: 4.0,
+                  regular: 6.0,
+                  pro: 8.0,
+                  large: 10.0,
+                  extraLarge: 12.0,
+                ),
+                horizontal: ResponsiveHelper.getAdaptiveSpacing(
+                  context,
+                  compact: 8.0,
+                  regular: 12.0,
+                  pro: 16.0,
+                  large: 20.0,
+                  extraLarge: 24.0,
+                ),
+              ),
+              child: _buildSkeletonBubble(isMe),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildSkeletonBubble(bool isMe) {
+    return Container(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.of(context).size.width * 0.7,
+      ),
+      padding: EdgeInsets.all(
+        ResponsiveHelper.getAdaptiveSpacing(
+          context,
+          compact: 12.0,
+          regular: 14.0,
+          pro: 16.0,
+          large: 18.0,
+          extraLarge: 20.0,
+        ),
+      ),
+      decoration: BoxDecoration(
+        color: isMe ? Colors.blue[50] : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-            height: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              color: Theme.of(context).colorScheme.primary,
+          Container(
+            width: 120,
+            height: 12,
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(6),
             ),
           ),
-          SizedBox(
-            height: ResponsiveHelper.getAdaptiveSpacing(
-              context,
-              compact: 16.0,
-              regular: 20.0,
-              pro: 24.0,
-              large: 28.0,
-              extraLarge: 32.0,
-            ),
-          ),
-          Text(
-            'Loading messages...',
-            style: TextStyle(
-              fontSize: ResponsiveHelper.adaptiveFontSize(context, 16.0),
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+          SizedBox(height: 8),
+          Container(
+            width: 80,
+            height: 12,
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(6),
             ),
           ),
         ],
@@ -687,7 +725,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     return ListView.builder(
       controller: _scrollController,
       reverse: true,
-      physics: const BouncingScrollPhysics(),
+      physics: const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      ),
+      // Add cacheExtent for smoother scrolling
+      cacheExtent: 500,
       itemCount: _messages.length + (_hasMoreMessages ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == _messages.length) {
@@ -696,21 +738,34 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                 padding: EdgeInsets.all(
                   ResponsiveHelper.getAdaptiveSpacing(
                     context,
-                    compact: 16.0,
-                    regular: 20.0,
-                    pro: 24.0,
-                    large: 28.0,
-                    extraLarge: 32.0,
+                    compact: 12.0,
+                    regular: 16.0,
+                    pro: 20.0,
+                    large: 24.0,
+                    extraLarge: 28.0,
                   ),
                 ),
                 child: Center(
-                  child: SizedBox(
-                    width: ResponsiveHelper.adaptiveFontSize(context, 24.0),
-                    height: ResponsiveHelper.adaptiveFontSize(context, 24.0),
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      Text(
+                        'Loading more...',
+                        style: TextStyle(
+                          fontSize: ResponsiveHelper.adaptiveFontSize(context, 13.0),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               )
@@ -795,261 +850,134 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildMessageInput() {
-    final theme = Theme.of(context);
-
     return Container(
-      padding: EdgeInsets.all(
-        ResponsiveHelper.getAdaptiveSpacing(
-          context,
-          compact: 12.0,
-          regular: 16.0,
-          pro: 20.0,
-          large: 24.0,
-          extraLarge: 28.0,
-        ),
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 8,
+        bottom: MediaQuery.of(context).padding.bottom + 8,
       ),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        border: Border(
-          top: BorderSide(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
-            width: 1,
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
           ),
-        ),
+        ],
       ),
-      child: Column(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Reply input widget (if replying)
-          if (_replyingToMessage != null)
-            _buildReplyInputWidget(),
-          
-          // Regular message input
-          ScaleTransition(
-            scale: _inputScaleAnimation,
-            child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            // Attachment button
-            Container(
-              width: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-              height: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-              margin: EdgeInsets.only(
-                right: ResponsiveHelper.getAdaptiveSpacing(
-                  context,
-                  compact: 8.0,
-                  regular: 12.0,
-                  pro: 16.0,
-                  large: 20.0,
-                  extraLarge: 24.0,
-                ),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap:
-                      _isSending ? null : () => _showAttachmentPicker(context),
-                  borderRadius: BorderRadius.circular(
-                    ResponsiveHelper.getAdaptiveSpacing(
-                      context,
-                      compact: 24.0,
-                      regular: 28.0,
-                      pro: 32.0,
-                      large: 36.0,
-                      extraLarge: 40.0,
-                    ),
-                  ),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest
-                          .withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(
-                        ResponsiveHelper.getAdaptiveSpacing(
-                          context,
-                          compact: 24.0,
-                          regular: 28.0,
-                          pro: 32.0,
-                          large: 36.0,
-                          extraLarge: 40.0,
-                        ),
-                      ),
-                      border: Border.all(
-                        color: theme.colorScheme.outline.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.attach_file_rounded,
-                      size: ResponsiveHelper.adaptiveFontSize(context, 20.0),
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
+          // Attachment Button
+          GestureDetector(
+            onTap: () {
+              _showAttachmentPicker(context);
+            },
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              child: Icon(
+                Icons.attach_file,
+                color: Colors.grey[600],
+                size: 24,
               ),
             ),
-
-            // Message input field
-            Expanded(
-              child: Container(
-                constraints: BoxConstraints(
-                  minHeight: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-                  maxHeight: ResponsiveHelper.adaptiveFontSize(context, 120.0),
+          ),
+          const SizedBox(width: 8),
+          
+          // Pill-shaped Text Input Field (matching search bar design)
+          Expanded(
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(100),
+                border: Border.all(
+                  color: Colors.grey[300]!,
+                  width: 1,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(100),
                 child: TextField(
                   controller: _messageController,
                   focusNode: _inputFocusNode,
                   decoration: InputDecoration(
-                    hintText: 'Type your message...',
+                    hintText: 'Type a message',
                     hintStyle: TextStyle(
-                      color: theme.colorScheme.onSurfaceVariant.withValues(
-                        alpha: 0.6,
-                      ),
+                      fontSize: 15,
+                      color: Colors.grey[400],
                     ),
+                    // Explicitly set all border states to maintain rounded corners
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(
-                        ResponsiveHelper.getAdaptiveSpacing(
-                          context,
-                          compact: 24.0,
-                          regular: 28.0,
-                          pro: 32.0,
-                          large: 36.0,
-                          extraLarge: 40.0,
-                        ),
-                      ),
-                      borderSide: BorderSide(
-                        color: theme.colorScheme.outline.withValues(alpha: 0.3),
-                      ),
+                      borderRadius: BorderRadius.circular(100),
+                      borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(
-                        ResponsiveHelper.getAdaptiveSpacing(
-                          context,
-                          compact: 24.0,
-                          regular: 28.0,
-                          pro: 32.0,
-                          large: 36.0,
-                          extraLarge: 40.0,
-                        ),
-                      ),
-                      borderSide: BorderSide(
-                        color: theme.colorScheme.outline.withValues(alpha: 0.3),
-                      ),
+                      borderRadius: BorderRadius.circular(100),
+                      borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(
-                        ResponsiveHelper.getAdaptiveSpacing(
-                          context,
-                          compact: 24.0,
-                          regular: 28.0,
-                          pro: 32.0,
-                          large: 36.0,
-                          extraLarge: 40.0,
-                        ),
-                      ),
-                      borderSide: BorderSide(
-                        color: theme.colorScheme.primary,
-                        width: 2,
-                      ),
+                      borderRadius: BorderRadius.circular(100),
+                      borderSide: BorderSide.none,
+                    ),
+                    errorBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(100),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedErrorBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(100),
+                      borderSide: BorderSide.none,
+                    ),
+                    disabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(100),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
                     ),
                     filled: true,
-                    fillColor: theme.colorScheme.surfaceContainerHighest
-                        .withValues(alpha: 0.5),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: ResponsiveHelper.getAdaptiveSpacing(
-                        context,
-                        compact: 16.0,
-                        regular: 20.0,
-                        pro: 24.0,
-                        large: 28.0,
-                        extraLarge: 32.0,
-                      ),
-                      vertical: ResponsiveHelper.getAdaptiveSpacing(
-                        context,
-                        compact: 12.0,
-                        regular: 14.0,
-                        pro: 16.0,
-                        large: 18.0,
-                        extraLarge: 20.0,
-                      ),
-                    ),
+                    fillColor: Colors.white,
                   ),
-                  style: TextStyle(
-                    fontSize: ResponsiveHelper.adaptiveFontSize(context, 16.0),
-                    color: theme.colorScheme.onSurface,
-                  ),
-                  textCapitalization: TextCapitalization.sentences,
                   maxLines: null,
+                  textCapitalization: TextCapitalization.sentences,
                   onSubmitted: (_) => _sendMessage(),
                 ),
               ),
             ),
-
-            SizedBox(
-              width: ResponsiveHelper.getAdaptiveSpacing(
-                context,
-                compact: 8.0,
-                regular: 12.0,
-                pro: 16.0,
-                large: 20.0,
-                extraLarge: 24.0,
-              ),
-            ),
-
-            // Send button
-            ScaleTransition(
-              scale: _fabScaleAnimation,
-              child: Container(
-                width: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-                height: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-                child: FilledButton(
-                  onPressed: _isSending ? null : _sendMessage,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: theme.colorScheme.primary,
-                    foregroundColor: theme.colorScheme.onPrimary,
-                    disabledBackgroundColor:
-                        theme.colorScheme.surfaceContainerHighest,
-                    padding: EdgeInsets.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(
-                        ResponsiveHelper.getAdaptiveSpacing(
-                          context,
-                          compact: 24.0,
-                          regular: 28.0,
-                          pro: 32.0,
-                          large: 36.0,
-                          extraLarge: 40.0,
-                        ),
-                      ),
-                    ),
-                    elevation: ResponsiveHelper.getAdaptiveElevation(context),
-                  ),
-                  child:
-                      _isSending
-                          ? SizedBox(
-                            width: ResponsiveHelper.adaptiveFontSize(
-                              context,
-                              20.0,
-                            ),
-                            height: ResponsiveHelper.adaptiveFontSize(
-                              context,
-                              20.0,
-                            ),
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: theme.colorScheme.onPrimary,
-                            ),
-                          )
-                          : Icon(
-                            Icons.send_rounded,
-                            size: ResponsiveHelper.adaptiveFontSize(
-                              context,
-                              20.0,
-                            ),
-                          ),
-                ),
-              ),
-            ),
-            ],
           ),
-        ),
+          const SizedBox(width: 8),
+          
+          // Send Button
+          GestureDetector(
+            onTap: _sendMessage,
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              child: _isSending
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1565C0)),
+                      ),
+                    )
+                  : Icon(
+                      Icons.send,
+                      color: Colors.grey[600],
+                      size: 24,
+                    ),
+            ),
+          ),
         ],
       ),
     );
@@ -1234,4 +1162,3 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 }
-

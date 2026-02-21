@@ -15,6 +15,8 @@ class ContentModel {
   final String? processingStatus; // 'pending', 'processing', 'completed', 'failed'
   final double? duration;         // Video duration in seconds
 
+  final DateTime? createdAt;      // When this item was created in Firestore
+
   ContentModel({
     required this.id,
     required this.title,
@@ -27,6 +29,7 @@ class ContentModel {
     this.originalUrl,
     this.processingStatus,
     this.duration,
+    this.createdAt,
   });
 
   factory ContentModel.fromJson(Map<String, dynamic> json, String id) {
@@ -107,6 +110,21 @@ class ContentModel {
     // Parse isPublished field (null if not present for backwards compatibility)
     bool? isPublishedValue = json['isPublished'] as bool?;
 
+    // Parse createdAt — Firestore Timestamp, DateTime, or ISO string
+    DateTime? createdAtValue;
+    final rawCreatedAt = json['createdAt'];
+    if (rawCreatedAt != null) {
+      try {
+        createdAtValue = (rawCreatedAt as dynamic).toDate() as DateTime;
+      } catch (_) {
+        if (rawCreatedAt is String) {
+          createdAtValue = DateTime.tryParse(rawCreatedAt);
+        } else if (rawCreatedAt is DateTime) {
+          createdAtValue = rawCreatedAt;
+        }
+      }
+    }
+
     // Parse HLS-specific fields for video content
     String? hlsUrlValue;
     String? originalUrlValue;
@@ -148,6 +166,7 @@ class ContentModel {
       originalUrl: originalUrlValue,
       processingStatus: processingStatusValue,
       duration: durationValue,
+      createdAt: createdAtValue,
     );
   }
 

@@ -4,13 +4,11 @@ import 'package:google_fonts/google_fonts.dart';
 /// Simple badge showing "NEW" for updates
 class UpdateBadge extends StatelessWidget {
   final bool hasUpdate;
-  final String? priority;
   final double? size;
 
   const UpdateBadge({
     super.key,
     required this.hasUpdate,
-    this.priority,
     this.size,
   });
 
@@ -18,23 +16,13 @@ class UpdateBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!hasUpdate) return const SizedBox.shrink();
 
-    // Determine color based on priority
-    Color backgroundColor = Colors.orange; // Default for important
-    if (priority == 'critical') {
-      backgroundColor = Colors.red;
-    } else if (priority == 'medium') {
-      backgroundColor = Colors.amber;
-    } else if (priority == 'low') {
-      backgroundColor = Colors.blue;
-    }
-
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: size != null ? size! * 0.5 : 6,
         vertical: size != null ? size! * 0.25 : 3,
       ),
       decoration: BoxDecoration(
-        color: backgroundColor,
+        color: Colors.orange,
         borderRadius: BorderRadius.circular(size != null ? size! : 10),
       ),
       child: Text(
@@ -50,16 +38,14 @@ class UpdateBadge extends StatelessWidget {
   }
 }
 
-/// Pulsing dot indicator for critical updates
+/// Pulsing dot indicator for updates
 class PulsingDot extends StatefulWidget {
   final bool hasUpdate;
-  final String? priority;
   final double size;
 
   const PulsingDot({
     super.key,
     required this.hasUpdate,
-    this.priority,
     this.size = 12.0,
   });
 
@@ -98,33 +84,7 @@ class _PulsingDotState extends State<PulsingDot>
   Widget build(BuildContext context) {
     if (!widget.hasUpdate) return const SizedBox.shrink();
 
-    // Only pulse for critical and important updates
-    final shouldPulse = widget.priority == 'critical' ||
-        widget.priority == 'important';
-
-    Color color = Colors.orange;
-    if (widget.priority == 'critical') {
-      color = Colors.red;
-    } else if (widget.priority == 'important') {
-      color = Colors.deepOrange;
-    } else if (widget.priority == 'medium') {
-      color = Colors.amber;
-    }
-
-    if (!shouldPulse) {
-      return Container(
-        width: widget.size,
-        height: widget.size,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: Colors.white,
-            width: 2,
-          ),
-        ),
-      );
-    }
+    const color = Colors.orange;
 
     return AnimatedBuilder(
       animation: _animation,
@@ -156,54 +116,33 @@ class _PulsingDotState extends State<PulsingDot>
 /// Update indicator with message
 class UpdateIndicator extends StatelessWidget {
   final String message;
-  final String? priority;
   final VoidCallback? onDismiss;
 
   const UpdateIndicator({
     super.key,
     required this.message,
-    this.priority,
     this.onDismiss,
   });
 
   @override
   Widget build(BuildContext context) {
-    Color backgroundColor = Colors.orange[50]!;
-    Color borderColor = Colors.orange[200]!;
-    Color textColor = Colors.orange[700]!;
-    Color iconColor = Colors.orange[600]!;
-
-    if (priority == 'critical') {
-      backgroundColor = Colors.red[50]!;
-      borderColor = Colors.red[200]!;
-      textColor = Colors.red[700]!;
-      iconColor = Colors.red[600]!;
-    } else if (priority == 'medium') {
-      backgroundColor = Colors.amber[50]!;
-      borderColor = Colors.amber[200]!;
-      textColor = Colors.amber[800]!;
-      iconColor = Colors.amber[600]!;
-    }
-
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: backgroundColor,
+        color: Colors.orange[50]!,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: borderColor,
+          color: Colors.orange[200]!,
           width: 1,
         ),
       ),
       child: Row(
         children: [
           Icon(
-            priority == 'critical' 
-                ? Icons.warning_amber_rounded
-                : Icons.info_outline,
+            Icons.info_outline,
             size: 18,
-            color: iconColor,
+            color: Colors.orange[600]!,
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -211,7 +150,7 @@ class UpdateIndicator extends StatelessWidget {
               message,
               style: GoogleFonts.inter(
                 fontSize: 12,
-                color: textColor,
+                color: Colors.orange[700]!,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -225,7 +164,7 @@ class UpdateIndicator extends StatelessWidget {
                 child: Icon(
                   Icons.close,
                   size: 16,
-                  color: textColor,
+                  color: Colors.orange[700]!,
                 ),
               ),
             ),
@@ -234,4 +173,3 @@ class UpdateIndicator extends StatelessWidget {
     );
   }
 }
-

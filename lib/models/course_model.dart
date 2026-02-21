@@ -4,6 +4,7 @@ class CourseModel {
   final String description;
   final String imageUrl;
   final bool isPublished;
+  final bool isPinned;
 
   CourseModel({
     required this.id,
@@ -11,6 +12,7 @@ class CourseModel {
     required this.description,
     required this.imageUrl,
     this.isPublished = true,
+    this.isPinned = false,
   });
 
   factory CourseModel.fromJson(Map<String, dynamic> json, String id) {
@@ -37,6 +39,7 @@ class CourseModel {
       description: json['description'] ?? '',
       imageUrl: json['imageUrl'] ?? '',
       isPublished: publishedStatus,
+      isPinned: json['isPinned'] ?? false,
     );
   }
 
@@ -46,6 +49,7 @@ class CourseModel {
       'description': description,
       'imageUrl': imageUrl,
       'isPublished': isPublished,
+      'isPinned': isPinned,
     };
   }
 } 

@@ -3,28 +3,14 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
 import '../utils/logger.dart';
-import '../widgets/custom_bottom_navigation.dart';
+import '../models/user_model.dart';
+import '../utils/adaptive_navigation.dart';
 import 'login_screen.dart';
 import 'chat_screen.dart';
 import 'community_chat_screen.dart';
 import 'past_questions_screen.dart';
 import 'dart:async';
 import 'terms_conditions_screen.dart';
-
-// Navigation helper functions that avoid BuildContext across async gaps issues
-void _safeNavigatePushAndRemoveUntil(BuildContext context, Widget page) {
-  if (!context.mounted) return;
-
-  // Navigate in a safe manner that works even after async operations
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (context.mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => page),
-        (route) => false,
-      );
-    }
-  });
-}
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -34,8 +20,14 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  int _selectedIndex = 1; // Profile tab selected by default
-  bool _isLoading = false;
+  Future<UserModel?>? _userDataFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    // Cache the future to prevent re-firing on rebuild
+    _userDataFuture = Provider.of<AuthService>(context, listen: false).getUserData();
+  }
 
   Future<void> _logout() async {
     if (!mounted) return;
@@ -44,7 +36,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       // Show loading indicator
-      if (!mounted) return; // Exit if not mounted
+      if (!mounted) return;
 
       dialogShown = true;
       showDialog(
@@ -53,13 +45,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         builder: (BuildContext dialogContext) {
           return const Center(
             child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF323483)),
+              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1565C0)),
             ),
           );
         },
       );
 
-      if (!mounted) return; // Check again after dialog shown
+      if (!mounted) return;
 
       final authService = Provider.of<AuthService>(context, listen: false);
 
@@ -105,7 +97,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       // Close the dialog if it was shown
       if (dialogShown && mounted) {
-        // Use mounted check and navigate safely
         if (Navigator.canPop(context)) {
           Navigator.pop(context);
         }
@@ -113,7 +104,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       // Navigate to login screen
       if (mounted) {
-        // Use proper WidgetsBinding.instance to avoid context issues
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             Navigator.of(context).pushAndRemoveUntil(
@@ -135,11 +125,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       // Show error message if still mounted
       if (mounted) {
-        // Use ScaffoldMessenger directly with a post-frame callback
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
+              const SnackBar(
                 content: Text('Could not sign out. Please restart the app.'),
                 backgroundColor: Colors.red,
               ),
@@ -150,413 +139,345 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-    CustomBottomNavigation.handleNavigation(context, index);
+  void _showLogoutDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Logout'),
+          content: const Text('Are you sure you want to logout?'),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context); // Close dialog
+                _logout(); // Perform logout
+              },
+              child: const Text(
+                'Logout',
+                style: TextStyle(color: Color(0xFF1565C0)),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context);
-    final currentUser = authService.currentUser;
+    final currentUserId = authService.currentUser?.uid;
 
-    // Get screen dimensions for responsiveness
-    final screenSize = MediaQuery.of(context).size;
-    final safeAreaBottom = MediaQuery.of(context).padding.bottom;
+    if (currentUserId == null) {
+      return const Scaffold(
+        body: Center(
+          child: Text('Please log in to view your profile'),
+        ),
+      );
+    }
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    SizedBox(height: 16),
-                    // User Profile Card
-                    Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: screenSize.width * 0.05,
-                      ),
-                      child: Container(
-                        width: double.infinity,
-                        height: screenSize.height * 0.18,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF323483),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: const Color(0xFFC9C8D8),
-                            width: 1,
-                          ),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0x1F171A1F),
-                              offset: Offset(0, 0),
-                              blurRadius: 2,
-                            ),
-                            BoxShadow(
-                              color: Color(0x12171A1F),
-                              offset: Offset(0, 0),
-                              blurRadius: 1,
-                            ),
-                          ],
-                        ),
-                        child: Stack(
-                          children: [
-                            // User icon
-                            Positioned(
-                              top: screenSize.height * 0.045,
-                              left: screenSize.width * 0.05,
-                              child: Icon(
-                                Icons.account_circle,
-                                size: screenSize.width * 0.12,
-                                color: Colors.white,
-                              ),
-                            ),
+    return FutureBuilder<UserModel?>(
+      future: _userDataFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: Color(0xFF1565C0),
+            body: Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+          );
+        }
 
-                            // User's name
-                            Positioned(
-                              top: screenSize.height * 0.05,
-                              left: screenSize.width * 0.2,
-                              child: Text(
-                                currentUser?.displayName ?? "User",
-                                style: GoogleFonts.archivo(
-                                  fontSize: screenSize.width * 0.06,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
+        final userData = snapshot.data;
 
-                            // Email
-                            Positioned(
-                              top: screenSize.height * 0.09,
-                              left: screenSize.width * 0.2,
-                              child: Text(
-                                currentUser?.email ?? "user@example.com",
-                                style: GoogleFonts.inter(
-                                  fontSize: screenSize.width * 0.04,
-                                  fontWeight: FontWeight.w400,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+        return Scaffold(
+          backgroundColor: Colors.white,
+          body: Column(
+            children: [
+              // Top Profile Header Section
+              _buildProfileHeader(context, userData),
+
+              // Bottom Content Section
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(30),
+                      topRight: Radius.circular(30),
                     ),
+                  ),
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                children: [
+                                  const SizedBox(height: 10),
 
-                    SizedBox(height: screenSize.height * 0.03),
-
-                    // Chat Card
-                    Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: screenSize.width * 0.05,
-                      ),
-                      child: Card(
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          side: BorderSide(
-                            color: const Color(0xFFC9C8D8),
-                            width: 1,
-                          ),
-                        ),
-                        child: ListTile(
-                          leading: Container(
-                            padding: EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF323483).withAlpha(26),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              Icons.chat_outlined,
-                              color: const Color(0xFF323483),
-                              size: screenSize.width * 0.06,
-                            ),
-                          ),
-                          title: Text(
-                            'Chat with Admin',
-                            style: GoogleFonts.inter(
-                              fontSize: screenSize.width * 0.045,
-                              fontWeight: FontWeight.w500,
-                              color: const Color(0xFF323483),
-                            ),
-                          ),
-                          trailing: Icon(
-                            Icons.arrow_forward_ios,
-                            color: const Color(0xFF323483),
-                            size: screenSize.width * 0.05,
-                          ),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const ChatScreen(),
+                                  // Menu Items
+                                  _buildMenuItem(
+                                    context,
+                                    Icons.settings,
+                                    'Manage Profile',
+                                    () {
+                                      // Navigate to Manage Profile with smooth transition
+                                      AdaptiveNavigation.pushNamed(context, '/settings');
+                                    },
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _buildMenuItem(
+                                    context,
+                                    Icons.person_outline,
+                                    'Student Details',
+                                    () {
+                                      AdaptiveNavigation.navigateTo(
+                                        context: context,
+                                        page: const CommunityChatScreen(),
+                                      );
+                                    },
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _buildMenuItem(
+                                    context,
+                                    Icons.quiz_outlined,
+                                    'Past Questions',
+                                    () {
+                                      AdaptiveNavigation.navigateTo(
+                                        context: context,
+                                        page: const PastQuestionsScreen(),
+                                      );
+                                    },
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _buildMenuItem(
+                                    context,
+                                    Icons.chat_bubble_outline,
+                                    'Chat With Admin',
+                                    () {
+                                      AdaptiveNavigation.navigateTo(
+                                        context: context,
+                                        page: const ChatScreen(),
+                                      );
+                                    },
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _buildMenuItem(
+                                    context,
+                                    Icons.description_outlined,
+                                    'Terms And Conditions',
+                                    () {
+                                      AdaptiveNavigation.navigateTo(
+                                        context: context,
+                                        page: const TermsConditionsScreen(),
+                                      );
+                                    },
+                                  ),
+                                ],
                               ),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
 
-                    SizedBox(height: screenSize.height * 0.02),
-
-                    // Student Details Card
-                    Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: screenSize.width * 0.05,
-                      ),
-                      child: Card(
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          side: BorderSide(
-                            color: const Color(0xFFC9C8D8),
-                            width: 1,
-                          ),
-                        ),
-                        child: ListTile(
-                          leading: Container(
-                            padding: EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF323483).withAlpha(26),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              Icons.groups_outlined,
-                              color: const Color(0xFF323483),
-                              size: screenSize.width * 0.06,
-                            ),
-                          ),
-                          title: Text(
-                            'Student Details',
-                            style: GoogleFonts.inter(
-                              fontSize: screenSize.width * 0.045,
-                              fontWeight: FontWeight.w500,
-                              color: const Color(0xFF323483),
-                            ),
-                          ),
-                          trailing: Icon(
-                            Icons.arrow_forward_ios,
-                            color: const Color(0xFF323483),
-                            size: screenSize.width * 0.05,
-                          ),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const CommunityChatScreen(),
+                              // Logout Button at bottom
+                              Column(
+                                children: [
+                                  const SizedBox(height: 16),
+                                  _buildLogoutButton(context),
+                                  const SizedBox(height: 10),
+                                ],
                               ),
-                            );
-                          },
+                            ],
+                          ),
                         ),
                       ),
-                    ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
-                    SizedBox(height: screenSize.height * 0.02),
-
-                    // Past Questions Card
-                    Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: screenSize.width * 0.05,
-                      ),
-                      child: Card(
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          side: BorderSide(
-                            color: const Color(0xFFC9C8D8),
-                            width: 1,
-                          ),
-                        ),
-                        child: ListTile(
-                          leading: Container(
-                            padding: EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF323483).withAlpha(26),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              Icons.quiz_outlined,
-                              color: const Color(0xFF323483),
-                              size: screenSize.width * 0.06,
-                            ),
-                          ),
-                          title: Text(
-                            'Past Questions',
-                            style: GoogleFonts.inter(
-                              fontSize: screenSize.width * 0.045,
-                              fontWeight: FontWeight.w500,
-                              color: const Color(0xFF323483),
-                            ),
-                          ),
-                          trailing: Icon(
-                            Icons.arrow_forward_ios,
-                            color: const Color(0xFF323483),
-                            size: screenSize.width * 0.05,
-                          ),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const PastQuestionsScreen(),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-
-                    SizedBox(height: screenSize.height * 0.02),
-
-                    // Settings Card
-                    Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: screenSize.width * 0.05,
-                      ),
-                      child: Card(
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          side: BorderSide(
-                            color: const Color(0xFFC9C8D8),
-                            width: 1,
-                          ),
-                        ),
-                        child: ListTile(
-                          leading: Container(
-                            padding: EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF323483).withAlpha(26),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              Icons.settings_outlined,
-                              color: const Color(0xFF323483),
-                              size: screenSize.width * 0.06,
-                            ),
-                          ),
-                          title: Text(
-                            'Settings',
-                            style: GoogleFonts.inter(
-                              fontSize: screenSize.width * 0.045,
-                              fontWeight: FontWeight.w500,
-                              color: const Color(0xFF323483),
-                            ),
-                          ),
-                          trailing: Icon(
-                            Icons.arrow_forward_ios,
-                            color: const Color(0xFF323483),
-                            size: screenSize.width * 0.05,
-                          ),
-                          onTap: () {
-                            Navigator.pushNamed(context, '/settings');
-                          },
-                        ),
-                      ),
-                    ),
-
-                    SizedBox(height: screenSize.height * 0.02),
-
-                    // Terms & Conditions Card
-                    Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: screenSize.width * 0.05,
-                      ),
-                      child: Card(
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          side: BorderSide(
-                            color: const Color(0xFFC9C8D8),
-                            width: 1,
-                          ),
-                        ),
-                        child: ListTile(
-                          leading: Container(
-                            padding: EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF323483).withAlpha(26),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              Icons.description_outlined,
-                              color: const Color(0xFF323483),
-                              size: screenSize.width * 0.06,
-                            ),
-                          ),
-                          title: Text(
-                            'Terms & Conditions',
-                            style: GoogleFonts.inter(
-                              fontSize: screenSize.width * 0.045,
-                              fontWeight: FontWeight.w500,
-                              color: const Color(0xFF323483),
-                            ),
-                          ),
-                          trailing: Icon(
-                            Icons.arrow_forward_ios,
-                            color: const Color(0xFF323483),
-                            size: screenSize.width * 0.05,
-                          ),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const TermsConditionsScreen(),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-
-                    SizedBox(height: screenSize.height * 0.03),
-
-                    // Log Out Button
-                    ElevatedButton(
-                      onPressed: _logout,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF323483),
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(
-                          horizontal: screenSize.width * 0.08,
-                          vertical: screenSize.height * 0.015,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                      ),
+  Widget _buildProfileHeader(BuildContext context, UserModel? userData) {
+    final photoUrl = userData?.photoUrl;
+    
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        color: Color(0xFF1565C0),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          child: Column(
+            children: [
+              // Back button and Title
+              Row(
+                children: [
+                  const SizedBox(width: 48), // Balance spacing
+                  const Expanded(
+                    child: Center(
                       child: Text(
-                        "Log Out",
-                        style: GoogleFonts.inter(
-                          fontSize: screenSize.width * 0.04,
-                          fontWeight: FontWeight.w400,
+                        'Profile',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
                           color: Colors.white,
                         ),
                       ),
                     ),
+                  ),
+                  const SizedBox(width: 48), // Balance spacing
+                ],
+              ),
+              const SizedBox(height: 8),
 
-                    SizedBox(height: screenSize.height * 0.03),
-                  ],
+              // Profile Picture
+              Container(
+                width: 90,
+                height: 90,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 3),
+                  color: Colors.white.withOpacity(0.3),
+                ),
+                child: ClipOval(
+                  child: photoUrl != null && photoUrl.isNotEmpty
+                      ? Image.network(
+                          photoUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return const Icon(
+                              Icons.account_circle,
+                              size: 84,
+                              color: Colors.white,
+                            );
+                          },
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            return const Center(
+                              child: CircularProgressIndicator(
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                strokeWidth: 2,
+                              ),
+                            );
+                          },
+                        )
+                      : const Icon(
+                          Icons.account_circle,
+                          size: 84,
+                          color: Colors.white,
+                        ),
                 ),
               ),
+              const SizedBox(height: 10),
+
+              // Name
+              Text(
+                userData?.displayName ?? 'User',
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 2),
+
+              // Email
+              Text(
+                userData?.email ?? 'user@example.com',
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuItem(
+    BuildContext context,
+    IconData icon,
+    String title,
+    VoidCallback onTap,
+  ) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        decoration: BoxDecoration(
+          color: Colors.grey[200],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              color: Colors.black87,
+              size: 24,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.black87,
+                ),
+              ),
+            ),
+            const Icon(
+              Icons.arrow_forward,
+              color: Colors.black87,
+              size: 22,
             ),
           ],
         ),
       ),
-      bottomNavigationBar: CustomBottomNavigation(
-        selectedIndex: _selectedIndex,
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-          CustomBottomNavigation.handleNavigation(context, index);
-        },
+    );
+  }
+
+  Widget _buildLogoutButton(BuildContext context) {
+    return ElevatedButton(
+      onPressed: _showLogoutDialog,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF1565C0),
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(25),
+        ),
+        elevation: 3,
+      ),
+      child: const Text(
+        'Logout',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

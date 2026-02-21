@@ -10,7 +10,6 @@ import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
 import '../utils/route_transitions.dart';
-import '../widgets/custom_bottom_navigation.dart';
 import '../widgets/protected_course_content.dart';
 import '../widgets/update_badge.dart';
 import 'module_list_screen.dart';
@@ -26,10 +25,13 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
   late Future<List<CourseModel>> _coursesFuture;
   late Future<UserModel?> _userFuture;
   bool _isLoading = true;
-  int _selectedIndex = 0;
   bool _hasLoadedData = false;
   int _totalAssignedCourses = 0; // Track total vs published courses
   final ContentUpdateService _updateService = ContentUpdateService();
+  
+  // Search functionality
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -50,6 +52,12 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
         _loadData();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -159,7 +167,6 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
         final updateInfo = snapshot.data?[0] as Map<String, dynamic>?;
         final totalUpdateCount = (snapshot.data?[1] as int?) ?? 0;
         final hasUpdate = updateInfo != null;
-        final priority = updateInfo?['priority'] as String?;
         final message = updateInfo?['message'] as String?;
 
         return GestureDetector(
@@ -168,7 +175,9 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
             AppNavigator.navigateTo(
               context: context,
               page: ModuleListScreen(course: course),
-            );
+            ).then((_) {
+              if (mounted) setState(() {});
+            });
             
             // Mark course as seen in the background (don't await)
             if (hasUpdate) {
@@ -192,10 +201,8 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
               color: Colors.white,
               borderRadius: borderRadius,
               border: Border.all(
-                color: hasUpdate && priority == 'critical'
-                    ? Colors.red
-                    : const Color(0xFF656BE9),
-                width: hasUpdate && priority == 'critical' ? 2 : 1,
+                color: const Color(0xFF656BE9),
+                width: 1,
               ),
               boxShadow: [
                 BoxShadow(
@@ -243,13 +250,11 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                         const SizedBox(width: 16),
                         UpdateBadge(
                           hasUpdate: true,
-                          priority: priority,
                           size: 14,
                         ),
                         const SizedBox(width: 8),
                         PulsingDot(
                           hasUpdate: true,
-                          priority: priority,
                           size: 10,
                         ),
                       ],
@@ -265,18 +270,14 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: priority == 'critical'
-                          ? Colors.red[50]
-                          : Colors.orange[50],
+                      color: Colors.orange[50],
                       borderRadius: BorderRadius.only(
                         bottomLeft: borderRadius.bottomLeft,
                         bottomRight: borderRadius.bottomRight,
                       ),
                       border: Border(
                         top: BorderSide(
-                          color: priority == 'critical'
-                              ? Colors.red[200]!
-                              : Colors.orange[200]!,
+                          color: Colors.orange[200]!,
                           width: 1,
                         ),
                       ),
@@ -284,13 +285,9 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                     child: Row(
                       children: [
                         Icon(
-                          priority == 'critical'
-                              ? Icons.warning_amber_rounded
-                              : Icons.info_outline,
+                          Icons.info_outline,
                           size: 16,
-                          color: priority == 'critical'
-                              ? Colors.red[600]
-                              : Colors.orange[600],
+                          color: Colors.orange[600],
                         ),
                         const SizedBox(width: 8),
                         Expanded(
@@ -298,9 +295,7 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                             message,
                             style: GoogleFonts.inter(
                               fontSize: 11,
-                              color: priority == 'critical'
-                                  ? Colors.red[700]
-                                  : Colors.orange[700],
+                              color: Colors.orange[700],
                               fontWeight: FontWeight.w500,
                             ),
                             maxLines: 2,
@@ -310,6 +305,190 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                       ],
                     ),
                   ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // New modern course card design matching the UI mockup - MADE 20% MORE COMPACT WITH UNIFORM HEIGHT
+  Widget _buildModernCourseCard(
+    CourseModel course,
+    BuildContext context,
+    String userId,
+    int index,
+  ) {
+    // Alternate between blue and light blue gradients
+    final backgroundColor = index % 2 == 0
+        ? const Color(0xFF1565C0)
+        : const Color(0xFF29ACD6);
+
+    // Dynamic font size calculation based on title length
+    double getTitleFontSize(String title) {
+      final length = title.length;
+      if (length <= 20) return 18.0; // Short titles - normal size
+      if (length <= 40) return 16.0; // Medium titles - slightly smaller
+      return 14.0; // Long titles - smallest
+    }
+
+    // Dynamic card height based on title length
+    double getCardHeight(String title) {
+      final length = title.length;
+      if (length <= 40) return 130.0; // Normal height for short/medium titles
+      return 145.0; // Taller for long titles
+    }
+
+    return FutureBuilder<List<dynamic>>(
+      future: Future.wait([
+        _updateService.getCourseUpdateInfo(course.id, userId),
+        _updateService.getTotalCourseUpdateCount(course.id, userId),
+        Provider.of<FirestoreService>(context, listen: false).getModules(course.id),
+      ]),
+      builder: (context, snapshot) {
+        final updateInfo = snapshot.data?[0] as Map<String, dynamic>?;
+        final hasUpdate = updateInfo != null;
+        final modules = snapshot.data?[2] as List?;
+        final moduleCount = modules?.length ?? 0;
+
+        return GestureDetector(
+          onTap: () {
+            AppNavigator.navigateTo(
+              context: context,
+              page: ModuleListScreen(course: course),
+            ).then((_) {
+              if (mounted) setState(() {});
+            });
+            
+            if (hasUpdate) {
+              _updateService.markCourseAsSeen(
+                course.id,
+                userId,
+              ).then((_) {
+                if (mounted) {
+                  setState(() {});
+                }
+              }).catchError((error) {
+                Logger.w("Failed to mark course as seen: $error");
+              });
+            }
+          },
+          child: Container(
+            height: getCardHeight(course.title), // Dynamic height based on title length
+            margin: const EdgeInsets.only(bottom: 10),
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: backgroundColor.withOpacity(0.3),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Badge strip — always 26px tall, badge right-aligned when present
+                SizedBox(
+                  height: 26,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: hasUpdate
+                          ? IgnorePointer(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5.4, vertical: 2.7),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange,
+                                  borderRadius: BorderRadius.circular(9),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.circle,
+                                      size: 5.4,
+                                      color: Colors.white,
+                                    ),
+                                    const SizedBox(width: 2.7),
+                                    Text(
+                                      'NEW',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 8.1,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
+                // Main content - horizontal layout
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(19, 2, 19, 14),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // Left side - Text content
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Course ${index + 1}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              // Title with dynamic font size
+                              Flexible(
+                                child: Text(
+                                  course.title,
+                                  style: GoogleFonts.inter(
+                                    fontSize: getTitleFontSize(course.title),
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                    height: 1.2,
+                                  ),
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '$moduleCount Module${moduleCount != 1 ? 's' : ''}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Right side - Book icon
+                        Icon(
+                          Icons.book_outlined,
+                          size: 50,
+                          color: Colors.white.withOpacity(0.3),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -602,17 +781,87 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
     );
   }
 
+  Widget _buildNoSearchResults() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: ResponsiveHelper.adaptiveFontSize(context, 100.0),
+              height: ResponsiveHelper.adaptiveFontSize(context, 100.0),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.search_off,
+                size: ResponsiveHelper.adaptiveFontSize(context, 50.0),
+                color: Colors.grey[400],
+              ),
+            ),
+            SizedBox(
+              height: ResponsiveHelper.getAdaptiveSpacing(context, compact: 20.0, regular: 24.0),
+            ),
+            Text(
+              'No Courses Found',
+              style: GoogleFonts.inter(
+                fontSize: ResponsiveHelper.adaptiveFontSize(context, 20.0),
+                fontWeight: FontWeight.bold,
+                color: Colors.grey[700],
+              ),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(
+              height: ResponsiveHelper.getAdaptiveSpacing(context, compact: 12.0, regular: 16.0),
+            ),
+            Text(
+              'No courses match "${_searchController.text}"',
+              style: GoogleFonts.inter(
+                fontSize: ResponsiveHelper.adaptiveFontSize(context, 14.0),
+                color: Colors.grey[600],
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(
+              height: ResponsiveHelper.getAdaptiveSpacing(context, compact: 16.0, regular: 20.0),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                setState(() {
+                  _searchController.clear();
+                  _searchQuery = '';
+                });
+              },
+              icon: Icon(Icons.clear, color: const Color(0xFF4A90E2)),
+              label: Text(
+                'Clear Search',
+                style: GoogleFonts.inter(
+                  fontSize: ResponsiveHelper.adaptiveFontSize(context, 14.0),
+                  color: const Color(0xFF4A90E2),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF5F5F5),
       body: ProtectedCourseContent(
         contentTitle: 'Course Library',
         showLoadingSpinner: false,
         child:
             _isLoading
                 ? Container(
-                  color: Colors.white,
+                  color: const Color(0xFFF5F5F5),
                   child: const Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -700,348 +949,336 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                             }
 
                             final courses = courseSnapshot.data ?? [];
-                            // Sort courses alphabetically by title
-                            courses.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+                            // Sort courses: pinned first, then alphabetically within each group
+                            courses.sort((a, b) {
+                              // If one is pinned and the other isn't, pinned comes first
+                              if (a.isPinned && !b.isPinned) return -1;
+                              if (!a.isPinned && b.isPinned) return 1;
+                              // If both have same pinned status, sort alphabetically
+                              return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+                            });
+                            
+                            // Filter courses based on search query
+                            final filteredCourses = _searchQuery.isEmpty
+                                ? courses
+                                : courses.where((course) {
+                                    return course.title.toLowerCase().contains(_searchQuery);
+                                  }).toList();
                             
                             Logger.i(
-                              "📋 Course data received: ${courses.length} courses",
+                              "📋 Course data received: ${courses.length} courses (${filteredCourses.length} after filtering)",
                             );
                             Logger.i(
-                              "🎨 AssignedCoursesScreen: Building main UI with ${courses.length} courses (sorted alphabetically)",
+                              "🎨 AssignedCoursesScreen: Building main UI with ${filteredCourses.length} courses${_searchQuery.isNotEmpty ? ' (filtered)' : ' (sorted alphabetically)'}",
                             );
 
+                            // Get first name from display name
+                            final firstName = user.displayName.split(' ').first;
+                            
+                            // Get current date
+                            final now = DateTime.now();
+                            final weekday = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'][now.weekday - 1];
+                            final day = now.day;
+                            final month = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][now.month - 1];
+
                             return Container(
-                              color: Colors.white, // Failsafe background
-                              child: Padding(
-                                padding:
-                                    ResponsiveHelper.getScreenHorizontalPadding(
-                                      context,
-                                    ),
+                              color: const Color(0xFFF5F5F5),
+                              child: GestureDetector(
+                                onTap: () {
+                                  // Dismiss keyboard when tapping outside
+                                  FocusScope.of(context).unfocus();
+                                },
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    SizedBox(
-                                      height:
-                                          ResponsiveHelper.getAdaptiveSpacing(
-                                            context,
-                                          ),
-                                    ),
-
-                                    // Welcome Text
-                                    Text(
-                                      "Welcome",
-                                      style: GoogleFonts.inter(
-                                        fontSize:
-                                            ResponsiveHelper.adaptiveFontSize(
-                                              context,
-                                              24.0,
-                                            ),
-                                        fontWeight: FontWeight.w500,
-                                        color: Colors.black87,
-                                      ),
-                                    ),
-
-                                    SizedBox(
-                                      height:
-                                          ResponsiveHelper.getAdaptiveSpacing(
-                                            context,
-                                            compact: 8.0,
-                                            regular: 12.0,
-                                            large: 16.0,
-                                          ),
-                                    ),
-
-                                    // User Profile Card with responsive design
-                                    Container(
-                                      width: double.infinity,
-                                      height: ResponsiveHelper.adaptiveFontSize(
-                                        context,
-                                        100.0,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF323483),
-                                        borderRadius:
-                                            ResponsiveHelper.getAdaptiveBorderRadius(
-                                              context,
-                                            ),
-                                      ),
-                                      child: Stack(
-                                        children: [
-                                          // User's Name
-                                          Positioned(
-                                            top:
-                                                ResponsiveHelper.getAdaptiveSpacing(
-                                                  context,
-                                                ),
-                                            left:
-                                                ResponsiveHelper.getAdaptiveSpacing(
-                                                  context,
-                                                  compact: 16.0,
-                                                  regular: 20.0,
-                                                  large: 24.0,
-                                                ),
-                                            child: Text(
-                                              user.displayName,
-                                              style: GoogleFonts.inter(
-                                                fontSize:
-                                                    ResponsiveHelper.adaptiveFontSize(
-                                                      context,
-                                                      20.0,
-                                                    ),
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ),
-
-                                          // Email
-                                          Positioned(
-                                            top:
-                                                ResponsiveHelper.adaptiveFontSize(
-                                                  context,
-                                                  44.0,
-                                                ),
-                                            left:
-                                                ResponsiveHelper.getAdaptiveSpacing(
-                                                  context,
-                                                  compact: 16.0,
-                                                  regular: 20.0,
-                                                  large: 24.0,
-                                                ),
-                                            child: Text(
-                                              user.email,
-                                              style: GoogleFonts.inter(
-                                                fontSize:
-                                                    ResponsiveHelper.adaptiveFontSize(
-                                                      context,
-                                                      14.0,
-                                                    ),
-                                                color: Colors.white70,
-                                              ),
-                                            ),
-                                          ),
-
-                                          // Student label
-                                          Positioned(
-                                            top:
-                                                ResponsiveHelper.adaptiveFontSize(
-                                                  context,
-                                                  64.0,
-                                                ),
-                                            left:
-                                                ResponsiveHelper.getAdaptiveSpacing(
-                                                  context,
-                                                  compact: 16.0,
-                                                  regular: 20.0,
-                                                  large: 24.0,
-                                                ),
-                                            child: Text(
-                                              "student",
-                                              style: GoogleFonts.inter(
-                                                fontSize:
-                                                    ResponsiveHelper.adaptiveFontSize(
-                                                      context,
-                                                      12.0,
-                                                    ),
-                                                color: Colors.white60,
-                                              ),
-                                            ),
-                                          ),
-
-                                          // Profile icon - positioned responsively
-                                          Positioned(
-                                            top:
-                                                ResponsiveHelper.getAdaptiveSpacing(
-                                                  context,
-                                                ),
-                                            right:
-                                                ResponsiveHelper.getAdaptiveSpacing(
-                                                  context,
-                                                  compact: 16.0,
-                                                  regular: 20.0,
-                                                  large: 24.0,
-                                                ),
-                                            child: Container(
-                                              width:
-                                                  ResponsiveHelper.adaptiveFontSize(
-                                                    context,
-                                                    48.0,
-                                                  ),
-                                              height:
-                                                  ResponsiveHelper.adaptiveFontSize(
-                                                    context,
-                                                    48.0,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white.withOpacity(
-                                                  0.2,
-                                                ),
-                                                borderRadius:
-                                                    BorderRadius.circular(8.0),
-                                              ),
-                                              child: Icon(
-                                                Icons.person_outline,
-                                                color: Colors.white,
-                                                size:
-                                                    ResponsiveHelper.adaptiveFontSize(
-                                                      context,
-                                                      24.0,
-                                                    ),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-
-                                    SizedBox(
-                                      height:
-                                          ResponsiveHelper.getAdaptiveSpacing(
-                                            context,
-                                            compact: 20.0,
-                                            regular: 24.0,
-                                            pro: 28.0,
-                                            large: 32.0,
-                                            extraLarge: 36.0,
-                                          ),
-                                    ),
-
-                                    // My Courses Text with iPhone 16 Pro Max optimization
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
+                                  // Header Section
+                                  Container(
+                                    color: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13), // Reduced from 16 (20% reduction)
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(
-                                          "My Courses",
-                                          style: GoogleFonts.inter(
-                                            fontSize:
-                                                ResponsiveHelper.adaptiveFontSize(
-                                                  context,
-                                                  20.0,
-                                                ),
-                                            fontWeight: FontWeight.w600,
-                                            color: const Color(0xFF323483),
-                                          ),
-                                        ),
+                                        // Logo and Profile Row
                                         Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                           children: [
-                                            // Show course count on larger screens
-                                            if (ResponsiveHelper.getIPhoneSize(
-                                                      context,
-                                                    ) ==
-                                                    IPhoneSize.extraLarge ||
-                                                ResponsiveHelper.getIPhoneSize(
-                                                      context,
-                                                    ) ==
-                                                    IPhoneSize.large)
-                                              FutureBuilder<List<CourseModel>>(
-                                                future: _coursesFuture,
-                                                builder: (context, snapshot) {
-                                                  final courseCount =
-                                                      snapshot.data?.length ?? 0;
-                                                  return Container(
-                                                    padding: EdgeInsets.symmetric(
-                                                      horizontal:
-                                                          ResponsiveHelper.getAdaptiveSpacing(
-                                                            context,
-                                                            compact: 8.0,
-                                                            regular: 10.0,
-                                                            pro: 12.0,
-                                                            large: 12.0,
-                                                            extraLarge: 14.0,
-                                                          ),
-                                                      vertical:
-                                                          ResponsiveHelper.getAdaptiveSpacing(
-                                                            context,
-                                                            compact: 4.0,
-                                                            regular: 6.0,
-                                                            pro: 6.0,
-                                                            large: 6.0,
-                                                            extraLarge: 8.0,
-                                                          ),
+                                            // Logo - UPDATED TO USE CUSTOM IMAGE
+                                            Row(
+                                              children: [
+                                                Container(
+                                                  width: 40,
+                                                  height: 40,
+                                                  decoration: BoxDecoration(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                  ),
+                                                  child: ClipRRect(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    child: Image.asset(
+                                                      'assets/images/xfini_logo.png', // Your custom logo path
+                                                      width: 40,
+                                                      height: 40,
+                                                      fit: BoxFit.cover,
                                                     ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Text(
+                                                  'XFINI ACADEMY',
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 18,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: Colors.black87,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            // Profile Picture
+                                            Stack(
+                                              children: [
+                                                Container(
+                                                  width: 48,
+                                                  height: 48,
+                                                  decoration: BoxDecoration(
+                                                    shape: BoxShape.circle,
+                                                    border: Border.all(
+                                                      color: Colors.grey[300]!,
+                                                      width: 2,
+                                                    ),
+                                                    image: user.photoUrl != null && user.photoUrl!.isNotEmpty
+                                                        ? DecorationImage(
+                                                            image: NetworkImage(user.photoUrl!),
+                                                            fit: BoxFit.cover,
+                                                          )
+                                                        : null,
+                                                  ),
+                                                  child: user.photoUrl == null || user.photoUrl!.isEmpty
+                                                      ? Icon(
+                                                          Icons.person,
+                                                          size: 28,
+                                                          color: Colors.grey[400],
+                                                        )
+                                                      : null,
+                                                ),
+                                                // Online indicator
+                                                Positioned(
+                                                  right: 0,
+                                                  bottom: 0,
+                                                  child: Container(
+                                                    width: 14,
+                                                    height: 14,
                                                     decoration: BoxDecoration(
-                                                      color: AppColors.primary
-                                                          .withOpacity(0.1),
-                                                      borderRadius:
-                                                          ResponsiveHelper.getAdaptiveBorderRadius(
-                                                            context,
-                                                          ),
-                                                    ),
-                                                    child: Text(
-                                                      '$courseCount ${courseCount == 1 ? 'Course' : 'Courses'}',
-                                                      style: GoogleFonts.inter(
-                                                        fontSize:
-                                                            ResponsiveHelper.adaptiveFontSize(
-                                                              context,
-                                                              12.0,
-                                                            ),
-                                                        fontWeight: FontWeight.w500,
-                                                        color: AppColors.primary,
+                                                      color: const Color(0xFF4CAF50),
+                                                      shape: BoxShape.circle,
+                                                      border: Border.all(
+                                                        color: Colors.white,
+                                                        width: 2,
                                                       ),
                                                     ),
-                                                  );
-                                                },
-                                              ),
-                                            // Refresh account data button
-                                            IconButton(
-                                              icon: Icon(
-                                                Icons.refresh,
-                                                color: AppColors.primary,
-                                                size: ResponsiveHelper.adaptiveFontSize(
-                                                  context,
-                                                  24.0,
+                                                  ),
                                                 ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 11), // Reduced from 14 (20% reduction)
+                                        // Date and Greeting Row
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.wb_sunny_outlined,
+                                              size: 16,
+                                              color: Colors.grey[600],
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              '$weekday $day $month',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 12,
+                                                color: Colors.grey[600],
+                                                fontWeight: FontWeight.w500,
                                               ),
-                                              onPressed: _refreshAccountData,
-                                              tooltip: 'Refresh Account Data',
-                                              padding: EdgeInsets.all(
-                                                ResponsiveHelper.getAdaptiveSpacing(
-                                                  context,
-                                                  compact: 8.0,
-                                                  regular: 8.0,
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 6), // Reduced from 7 (20% reduction)
+                                        // Greeting and Refresh
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Text(
+                                              'Hi, $firstName',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 28,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.black87,
+                                              ),
+                                            ),
+                                            Container(
+                                              decoration: BoxDecoration(
+                                                border: Border.all(
+                                                  color: const Color(0xFF4A90E2),
+                                                  width: 1.5,
+                                                ),
+                                                borderRadius: BorderRadius.circular(20),
+                                              ),
+                                              child: Material(
+                                                color: Colors.transparent,
+                                                child: InkWell(
+                                                  onTap: _refreshAccountData,
+                                                  borderRadius: BorderRadius.circular(20),
+                                                  child: Padding(
+                                                    padding: const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 6,
+                                                    ),
+                                                    child: Row(
+                                                      mainAxisSize: MainAxisSize.min,
+                                                      children: [
+                                                        Icon(
+                                                          Icons.refresh,
+                                                          size: 16,
+                                                          color: const Color(0xFF4A90E2),
+                                                        ),
+                                                        const SizedBox(width: 4),
+                                                        Text(
+                                                          'Refresh',
+                                                          style: GoogleFonts.inter(
+                                                            fontSize: 12,
+                                                            fontWeight: FontWeight.w600,
+                                                            color: const Color(0xFF4A90E2),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
                                                 ),
                                               ),
                                             ),
                                           ],
                                         ),
+                                        const SizedBox(height: 14), // Reduced from 18 (20% reduction)
+                                        // Search Bar - WITH BORDER AND FOCUSED STATE
+                                        Container(
+                                          height: 48,
+                                          decoration: BoxDecoration(
+                                            color: Colors.grey[100],
+                                            borderRadius: BorderRadius.circular(24),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(0.03),
+                                                blurRadius: 8,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ],
+                                          ),
+                                          child: TextField(
+                                            controller: _searchController,
+                                            onChanged: (value) {
+                                              setState(() {
+                                                _searchQuery = value.toLowerCase();
+                                              });
+                                            },
+                                            decoration: InputDecoration(
+                                              hintText: 'Search courses',
+                                              hintStyle: GoogleFonts.inter(
+                                                fontSize: 15,
+                                                color: Colors.grey[400],
+                                              ),
+                                              prefixIcon: Icon(
+                                                Icons.search,
+                                                color: Colors.grey[400],
+                                                size: 20,
+                                              ),
+                                              suffixIcon: _searchQuery.isNotEmpty
+                                                  ? IconButton(
+                                                      icon: Icon(
+                                                        Icons.clear,
+                                                        color: Colors.grey[400],
+                                                        size: 20,
+                                                      ),
+                                                      onPressed: () {
+                                                        setState(() {
+                                                          _searchController.clear();
+                                                          _searchQuery = '';
+                                                        });
+                                                      },
+                                                    )
+                                                  : null,
+                                              enabledBorder: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(24),
+                                                borderSide: BorderSide(
+                                                  color: Colors.grey[300]!,
+                                                  width: 1,
+                                                ),
+                                              ),
+                                              focusedBorder: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(24),
+                                                borderSide: BorderSide(
+                                                  color: const Color(0xFF4A90E2),
+                                                  width: 2,
+                                                ),
+                                              ),
+                                              border: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(24),
+                                                borderSide: BorderSide(
+                                                  color: Colors.grey[300]!,
+                                                  width: 1,
+                                                ),
+                                              ),
+                                              contentPadding: const EdgeInsets.symmetric(
+                                                horizontal: 20,
+                                                vertical: 12,
+                                              ),
+                                              filled: true,
+                                              fillColor: Colors.transparent,
+                                            ),
+                                          ),
+                                        ),
                                       ],
                                     ),
-
-                                    SizedBox(
-                                      height:
-                                          ResponsiveHelper.getAdaptiveSpacing(
-                                            context,
+                                  ),
+                                  
+                                  // Your Courses Section - MADE 20% MORE COMPACT
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 16), // Reduced from 20
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const SizedBox(height: 12), // Reduced from 16
+                                          Text(
+                                            'Your Courses',
+                                            style: GoogleFonts.inter(
+                                              fontSize: 17, // Reduced from 20
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.black87,
+                                            ),
                                           ),
-                                    ),
-
-                                    // Courses List
-                                    Expanded(
-                                      child:
-                                          courses.isEmpty
-                                            ? _buildEmptyCoursesState(MediaQuery.of(context).size, courses)
-                                              : ListView.builder(
-                                                physics:
-                                                    const AlwaysScrollableScrollPhysics(),
-                                                itemCount: courses.length,
-                                                itemBuilder: (context, index) {
-                                                  return _buildCourseCard(
-                                                    courses[index],
-                                                    context,
-                                                    user.uid,
-                                                  );
-                                                },
-                                              ),
-                                    ),
-
-                                    // Bottom padding for safe area
-                                    SizedBox(
-                                      height:
-                                          ResponsiveHelper.getBottomSafeAreaHeight(
-                                            context,
+                                          const SizedBox(height: 10), // Reduced from 12
+                                          // Courses List
+                                          Expanded(
+                                            child: filteredCourses.isEmpty
+                                                ? _searchQuery.isNotEmpty
+                                                    ? _buildNoSearchResults()
+                                                    : _buildEmptyCoursesState(MediaQuery.of(context).size, courses)
+                                                : ListView.builder(
+                                                    physics: const AlwaysScrollableScrollPhysics(),
+                                                    itemCount: filteredCourses.length,
+                                                    itemBuilder: (context, index) {
+                                                      return _buildModernCourseCard(
+                                                        filteredCourses[index],
+                                                        context,
+                                                        user.uid,
+                                                        index,
+                                                      );
+                                                    },
+                                                  ),
                                           ),
+                                        ],
+                                      ),
                                     ),
-                                  ],
+                                  ),
+                                ],
                                 ),
                               ),
                             );
@@ -1051,15 +1288,6 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                     ),
                   ),
                 ),
-      ),
-      bottomNavigationBar: CustomBottomNavigation(
-        selectedIndex: _selectedIndex,
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-          CustomBottomNavigation.handleNavigation(context, index);
-        },
       ),
     );
   }

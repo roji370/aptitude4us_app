@@ -1,0 +1,117 @@
+# Student App Firebase Functions — Sync Update
+
+**Send this to the student app team along with the updated [firebase-functions/index.js](file:///Users/rojinroy/Projects/briffiniApp/briffiniApp/firebase-functions/index.js).**
+
+---
+
+## What Changed & Why
+
+We audited the admin and student app codebases and found the student app's [firebase-functions/index.js](file:///Users/rojinroy/Projects/briffiniApp/briffiniApp/firebase-functions/index.js) was out of date. Here's a summary of every change made to the file:
+
+### ✅ Kept As-Is (Student App–Specific)
+| Function | Reason |
+|---|---|
+| `validateUserDevice` | Student app uses exact device ID string match — correct for student flow |
+| `registerUserDevice` | Student-specific implementation — correct as-is |
+| `cleanupInvalidTokens` | Unchanged |
+
+---
+
+### 🔴 Critical Fix: Wrong Field Name in `notifyCourseUpdate`
+
+**Before (WRONG):**
+```js
+.where("enrolledCourses", "array-contains", courseId)
+```
+
+**After (CORRECT):**
+```js
+.where("assignedCourseIds", "array-contains", courseId)
+```
+
+The user documents use `assignedCourseIds` — `enrolledCourses` doesn't exist. This meant **no course-update notifications were being triggered**.
+
+---
+
+### 🔴 Critical Fix: `notifyContentUpdate` Now Includes `itemIds`
+
+The student app's badge system ([content_update_service.dart](file:///Users/rojinroy/Projects/briffiniApp/briffiniApp/lib/services/content_update_service.dart)) requires content update docs to include an `itemIds` array inside `contentChanges` so it can track which individual content items a student has seen. Without this, content-type "NEW" badges could never be cleared per individual item.
+
+Each update doc now has:
+```js
+{
+  type: "content_pdfs_updated",
+  contentType: "pdfs",
+  changeType: "added",
+  itemIds: ["<id1>", "<id2>"],        // top-level (for direct access)
+  contentChanges: [{                   // nested (for per-item tracking)
+    type: "pdfs",
+    change: "added",
+    count: 2,
+    itemIds: ["<id1>", "<id2>"]
+  }],
+  ...
+}
+```
+
+---
+
+### 🟡 Updated: `notifyModuleUpdate`
+
+- Fixed to use `assignedCourseIds`
+- Added `courseName` and `moduleName` to update docs (needed for UI)
+- Sends FCM push via the shared [sendFcmToUsers](file:///Users/rojinroy/Projects/briffiniApp/briffiniApp/firebase-functions/index.js#299-334) helper
+
+---
+
+### 🟢 Added: `notifyContentItemUpdate` (NEW)
+
+Tracks item-level changes within a module. Required for granular "NEW" badge tracking in the student app:
+- Item title renamed → recorded (no push)
+- Item description changed → recorded (no push)
+- Item URL/content replaced → push sent
+- Item published/unpublished → push sent
+
+This function was completely missing from the old file.
+
+---
+
+### 🟢 Added: [getUnseenUpdatesCount](file:///Users/rojinroy/Projects/briffiniApp/briffiniApp/lib/services/content_update_service.dart#271-292) (NEW)
+
+Callable function the student app uses to get the total unseen update count for the current user. Was missing from the old file.
+
+---
+
+### 🟢 Improved: `markUpdateAsSeen`
+
+Now uses `HttpsError` consistently for permission errors.
+
+---
+
+### 🟢 Added: [sendFcmToUsers](file:///Users/rojinroy/Projects/briffiniApp/briffiniApp/firebase-functions/index.js#299-334) helper
+
+Shared internal helper. Queries `user_tokens` where `appType == "student"` and `isActive == true`, then sends via `sendEachForMulticast`.
+
+---
+
+## Do NOT Deploy These From This Repo
+
+The admin app deploys these separately — adding them here will cause conflicts:
+
+- `sendChatNotification`, `sendCommunityNotification`, `sendPushNotification`
+- `sendCourseAssignmentNotification`, `triggerConsolidatedCourseAssignmentNotification`
+- `checkExpiringSubscriptions`, `markExpiredSubscriptions`
+- `checkViolationResetStatus`, `recordScreenshotViolation`, `acknowledgeViolationReset`
+- `toggleDeviceRestriction`, `resetUserDevice`, `getDeviceRestrictionStatus`
+- `setCustomClaims`, `createUser`, `deleteUser`
+- `subscribeToTopic`, `unsubscribeFromTopic`
+
+---
+
+## Deployment
+
+```bash
+cd firebase-functions
+npm install
+firebase deploy --only functions
+```

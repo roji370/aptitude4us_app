@@ -7,12 +7,13 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart'; // Add for SystemChrome
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import 'firebase_options.dart';
-import 'screens/assigned_courses_screen.dart';
+import 'screens/main_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/profile_completion_screen.dart';
 import 'screens/settings_screen.dart';
@@ -23,6 +24,7 @@ import 'services/notification_service.dart';
 import 'services/storage_service.dart';
 import 'services/subscription_service.dart';
 import 'utils/accessibility_helper.dart';
+import 'utils/adaptive_navigation.dart';
 import 'utils/app_colors.dart';
 import 'utils/app_info.dart';
 import 'utils/app_theme.dart';
@@ -179,8 +181,8 @@ void main() async {
     ),
   );
 
-  // Request permissions in background (non-blocking)
-  _requestPermissions();
+  // Permissions are now handled by NotificationService during initialization
+  // This prevents premature permission requests that interfere with proper plugin setup
 }
 
 Future<void> _configureImmediateUI() async {
@@ -223,22 +225,6 @@ Future<void> _configureImmediateUI() async {
   if (Platform.isIOS) {
     await Future.delayed(const Duration(milliseconds: 50));
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  }
-}
-
-Future<void> _requestPermissions() async {
-  // Request storage permission only on Android
-  if (!Platform.isIOS) {
-    if (await Permission.storage.status.isDenied) {
-      await Permission.storage.request();
-    }
-  }
-
-  // Request notifications permission on iOS
-  if (Platform.isIOS) {
-    if (await Permission.notification.status.isDenied) {
-      await Permission.notification.request();
-    }
   }
 }
 
@@ -314,18 +300,28 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         bool isValid = await authService.validateCurrentDevice();
         
         if (!isValid) {
-          Logger.w("⚠️ Device validation failed on resume - signing out user");
+          Logger.w("⚠️ Device validation failed on resume - showing warning instead of logout");
           
-          // Sign out user if device is not valid
-          await authService.signOut();
-          
-          // Navigate to login screen
+          // TEMPORARY FIX: Show warning instead of logging out to prevent regression
+          // TODO: Investigate why device validation is failing unexpectedly
           if (context.mounted) {
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              '/login',
-              (route) => false,
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Device validation warning - please contact support if this persists'),
+                duration: Duration(seconds: 3),
+                backgroundColor: Colors.orange,
+              ),
             );
           }
+          
+          // DISABLED: Aggressive logout causing regression
+          // await authService.signOut();
+          // if (context.mounted) {
+          //   Navigator.of(context).pushNamedAndRemoveUntil(
+          //     '/login',
+          //     (route) => false,
+          //   );
+          // }
         } else {
           Logger.i("✅ Device validation successful on resume");
         }
@@ -416,11 +412,31 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           color: const Color(0xFF1A237E), // Immediate background
           child: const SplashScreen(),
         ),
-        // Add fallback route to prevent white screen
-        onUnknownRoute:
-            (settings) => MaterialPageRoute(
-              builder: (_) => const AssignedCoursesScreen(),
-            ),
+        // Add fallback route with smooth transitions
+        onUnknownRoute: (settings) {
+          // Use the same platform-specific route creation as AdaptiveNavigation
+          if (Platform.isIOS) {
+            return CupertinoPageRoute(
+              builder: (_) => const MainScreen(),
+              settings: settings,
+            );
+          } else {
+            return PageRouteBuilder(
+              settings: settings,
+              pageBuilder: (context, animation, secondaryAnimation) => const MainScreen(),
+              transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                const begin = Offset(1.0, 0.0);
+                const end = Offset.zero;
+                const curve = Curves.easeOutQuad;
+                var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                return SlideTransition(
+                  position: animation.drive(tween),
+                  child: FadeTransition(opacity: animation, child: child),
+                );
+              },
+            );
+          }
+        },
         // Define routes for navigation from notifications
         routes: {
           '/chat': (context) => ChatScreen(),

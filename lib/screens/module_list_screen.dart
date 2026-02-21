@@ -14,8 +14,13 @@ import 'content_types_screen.dart';
 
 class ModuleListScreen extends StatefulWidget {
   final CourseModel course;
+  final bool isExamOverviewMode; // True when navigating from first-time login
 
-  const ModuleListScreen({super.key, required this.course});
+  const ModuleListScreen({
+    super.key, 
+    required this.course,
+    this.isExamOverviewMode = false,
+  });
 
   @override
   State<ModuleListScreen> createState() => _ModuleListScreenState();
@@ -126,11 +131,26 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
     CustomBottomNavigation.handleNavigation(context, index);
   }
 
+  // Dynamic font size calculation based on title length
+  double _getTitleFontSize(String title) {
+    final length = title.length;
+    if (length <= 20) return 18.0; // Short titles - normal size
+    if (length <= 40) return 16.0; // Medium titles - slightly smaller
+    return 14.0; // Long titles - smallest
+  }
+
+  // Dynamic card height based on title length
+  double _getCardHeight(String title) {
+    final length = title.length;
+    if (length <= 40) return 130.0; // Normal height for short/medium titles
+    return 145.0; // Taller for long titles
+  }
+
   /// Build module card with update indicators
   Widget _buildModuleCard(ModuleModel module, Size screenSize) {
     if (_currentUserId == null) {
       // If no user ID, show module without updates
-      return _buildModuleCardContent(module, screenSize, false, null, null, 0);
+      return _buildModuleCardContent(module, screenSize, false, null, 0);
     }
 
     return FutureBuilder<List<dynamic>>(
@@ -159,14 +179,12 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
             ),
             builder: (context, infoSnapshot) {
               final updateInfo = infoSnapshot.data;
-              final priority = updateInfo?['priority'] as String?;
               final message = updateInfo?['message'] as String?;
 
               return _buildModuleCardContent(
                 module,
                 screenSize,
                 hasUpdate,
-                priority,
                 message,
                 contentUpdateCount,
               );
@@ -179,7 +197,6 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
           screenSize,
           false,
           null,
-          null,
           contentUpdateCount,
         );
       },
@@ -191,7 +208,6 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
     ModuleModel module,
     Size screenSize,
     bool hasUpdate,
-    String? priority,
     String? message,
     int contentUpdateCount,
   ) {
@@ -210,10 +226,8 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: hasUpdate && priority == 'critical'
-                ? Colors.red
-                : const Color(0xFF656BE9),
-            width: hasUpdate && priority == 'critical' ? 2 : 1,
+            color: const Color(0xFF656BE9),
+            width: 1,
           ),
           boxShadow: [
             BoxShadow(
@@ -226,26 +240,31 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: () async {
-              // Mark module as seen when user opens it
-              if (hasUpdate && _currentUserId != null) {
-                await _updateService.markModuleAsSeen(
-                  widget.course.id,
-                  module.id,
-                  _currentUserId!,
-                );
-                // Refresh the UI
-                setState(() {});
-              }
-
-              // Navigate to content types screen
+            onTap: () {
+              // Navigate immediately for instant response
               AppNavigator.navigateTo(
                 context: context,
                 page: ContentTypesScreen(
                   course: widget.course,
                   module: module,
+                  isExamOverviewMode: widget.isExamOverviewMode,
                 ),
-              );
+              ).then((_) {
+                if (mounted) setState(() {});
+              });
+
+              // Mark module as seen in the background (don't await)
+              if (hasUpdate && _currentUserId != null) {
+                _updateService.markModuleAsSeen(
+                  widget.course.id,
+                  module.id,
+                  _currentUserId!,
+                ).then((_) {
+                  if (mounted) setState(() {});
+                }).catchError((error) {
+                  Logger.w('Failed to mark module as seen: $error');
+                });
+              }
             },
             borderRadius: BorderRadius.circular(10),
             child: Padding(
@@ -272,13 +291,11 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                     const SizedBox(width: 12),
                     UpdateBadge(
                       hasUpdate: true,
-                      priority: priority,
                       size: 14,
                     ),
                     const SizedBox(width: 6),
                     PulsingDot(
                       hasUpdate: true,
-                      priority: priority,
                       size: 10,
                     ),
                   ],
@@ -416,49 +433,50 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
-    final safeAreaTop = MediaQuery.of(context).padding.top;
     final safeAreaBottom = MediaQuery.of(context).padding.bottom;
 
-    // Color Scheme:
-    // - Background: #FFFFFF (White)
-    // - User Profile Card:
-    //   - Background: #323483 (Dark Blue)
-    //   - Border: #C9C8D8 (Light Grayish-Purple)
-    //   - Text: #FFFFFF (White)
-    // - Module Container:
-    //   - Background: #FFFFFF (White)
-    //   - Border: #656BE9 (Bright Blue)
-    //   - Text: #2E2C6A (Dark Purple)
-    //   - Play Button: #171A1F (Dark Gray)
-    // - Bottom Navigation Bar:
-    //   - Background: #FFFFFF (White)
-    //   - Icons:
-    //     - Unselected: #565E6C (Neutral Gray)
-    //     - Selected: #778FF0 (Light Blue)
-
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: Text(
-          widget.course.title,
-          style: const TextStyle(
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
+    return PopScope(
+      // Allow back navigation when not in exam overview mode
+      canPop: !widget.isExamOverviewMode,
+      // Show message when navigation is blocked
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        if (!didPop && widget.isExamOverviewMode) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Please watch the Exam Overview before accessing the app',
+                style: TextStyle(color: Colors.white),
+              ),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.grey[50],
+        appBar: AppBar(
+          backgroundColor: Colors.grey[50],
+          elevation: 0,
+          leading: widget.isExamOverviewMode 
+            ? null // Hide back button during exam overview
+            : IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.black),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+          title: Text(
+            widget.course.title,
+            style: GoogleFonts.inter(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+            ),
           ),
         ),
-        backgroundColor: const Color(0xFF323483),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
       body:
           _isLoading
               ? const Center(child: CircularProgressIndicator())
-              : SafeArea(
-                child: FutureBuilder<List<ModuleModel>>(
+              : FutureBuilder<List<ModuleModel>>(
                   future: _modulesFuture,
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
@@ -469,96 +487,279 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                       return Center(child: Text('Error: ${snapshot.error}'));
                     }
 
-                            final modules = snapshot.data ?? [];
-                            // Sort modules alphabetically by title
-                            modules.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+                    final modules = snapshot.data ?? [];
+                    // Sort modules alphabetically by title
+                    modules.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
 
-                            return Container(
-                              width: screenSize.width,
-                              height: screenSize.height,
-                              color: Colors.white,
-                              child: Column(
-                                children: [
-                                  // User Profile Card
-                                  Padding(
-                                    padding: EdgeInsets.only(
-                                      left: screenSize.width * 0.05,
-                                      right: screenSize.width * 0.05,
-                                      top: 16,
-                                    ),
-                                    child: Container(
-                                      width: double.infinity,
-                                      height: screenSize.height * 0.15,
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF323483),
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(
-                                          color: const Color(0xFFC9C8D8),
-                                          width: 1,
-                                        ),
-                                        boxShadow: const [
-                                          BoxShadow(
-                                            color: Color(0x1F171A1F),
-                                            offset: Offset(0, 0),
-                                            blurRadius: 2,
-                                          ),
-                                          BoxShadow(
-                                            color: Color(0x12171A1F),
-                                            offset: Offset(0, 0),
-                                            blurRadius: 1,
-                                          ),
-                                        ],
-                                      ),
-                                      child: Center(
-                                        child: Text(
-                                          widget.course.title,
-                                          style: GoogleFonts.archivo(
-                                            fontSize: screenSize.width * 0.06,
-                                            fontWeight: FontWeight.w700,
-                                            color: Colors.white,
-                                          ),
-                                          textAlign: TextAlign.center,
-                                        ),
-                                      ),
-                                    ),
+                    return Column(
+                      children: [
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Modules Header
+                                Text(
+                                  'Modules',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black,
                                   ),
-
-                                  SizedBox(height: screenSize.height * 0.04),
-
-                                  // Modules List
-                                  Expanded(
-                                    child:
-                                        modules.isEmpty
-                                            ? _buildEmptyModulesState(screenSize)
-                                            : ListView.builder(
-                                              physics: const AlwaysScrollableScrollPhysics(),
-                                              padding: EdgeInsets.only(
-                                                bottom: safeAreaBottom + 16,
-                                              ),
-                                              itemCount: modules.length,
-                                              itemBuilder: (context, index) {
-                                                return _buildModuleCard(
-                                                  modules[index],
-                                                  screenSize,
-                                                );
-                                              },
-                                            ),
-                                  ),
-                                ],
-                              ),
-                            );
+                                ),
+                                const SizedBox(height: 16),
+                                
+                                // Module Cards
+                                if (modules.isEmpty)
+                                  _buildEmptyModulesState(screenSize)
+                                else
+                                  ...modules.asMap().entries.map((entry) {
+                                    final index = entry.key;
+                                    final module = entry.value;
+                                    return Padding(
+                                      padding: const EdgeInsets.only(bottom: 16),
+                                      child: _buildModernModuleCard(module, index),
+                                    );
+                                  }).toList(),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
                   },
                 ),
-              ),
-      bottomNavigationBar: CustomBottomNavigation(
-        selectedIndex: _selectedIndex,
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-          CustomBottomNavigation.handleNavigation(context, index);
-        },
+      bottomNavigationBar: widget.isExamOverviewMode 
+        ? null // Hide bottom navigation during exam overview
+        : CustomBottomNavigation(
+            selectedIndex: _selectedIndex,
+            onTap: (index) {
+              setState(() {
+                _selectedIndex = index;
+              });
+              CustomBottomNavigation.handleNavigation(context, index);
+            },
+          ),
       ),
+    );
+  }
+
+  /// Build modern module card matching the new design with uniform sizing
+  Widget _buildModernModuleCard(ModuleModel module, int index) {
+    // Alternate between blue and light blue backgrounds
+    final backgroundColor = index % 2 == 0
+        ? const Color(0xFF1565C0)
+        : const Color(0xFF29ACD6);
+
+    return FutureBuilder<List<dynamic>>(
+      future: _currentUserId != null
+          ? Future.wait([
+              _updateService.hasModuleUpdate(
+                widget.course.id,
+                module.id,
+                _currentUserId!,
+              ),
+              _updateService.getContentUpdateCount(
+                widget.course.id,
+                module.id,
+                _currentUserId!,
+              ),
+            ])
+          : Future.value([false, 0]),
+      builder: (context, snapshot) {
+        final hasUpdate = (snapshot.data?[0] as bool?) ?? false;
+        final contentUpdateCount = (snapshot.data?[1] as int?) ?? 0;
+
+        return GestureDetector(
+          onTap: () {
+            // Navigate immediately for instant response
+            AppNavigator.navigateTo(
+              context: context,
+              page: ContentTypesScreen(
+                course: widget.course,
+                module: module,
+                isExamOverviewMode: widget.isExamOverviewMode,
+              ),
+            );
+
+            // Mark module as seen in the background (don't await)
+            if (hasUpdate && _currentUserId != null) {
+              _updateService.markModuleAsSeen(
+                widget.course.id,
+                module.id,
+                _currentUserId!,
+              ).then((_) {
+                if (mounted) setState(() {});
+              }).catchError((error) {
+                Logger.w('Failed to mark module as seen: $error');
+              });
+            }
+          },
+          child: Container(
+            width: double.infinity,
+            height: _getCardHeight(module.title), // Dynamic height based on title length
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: backgroundColor.withOpacity(0.3),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Badge strip — always 28px tall, badge right-aligned when present
+                SizedBox(
+                  height: 28,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 10),
+                      child: hasUpdate || contentUpdateCount > 0
+                          ? IgnorePointer(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7.2, vertical: 3.6),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange,
+                                  borderRadius: BorderRadius.circular(10.8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.circle,
+                                      size: 7.2,
+                                      color: Colors.white,
+                                    ),
+                                    const SizedBox(width: 3.6),
+                                    Text(
+                                      'NEW',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
+                // Main content
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // Left side - Text content
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Module ${index + 1}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Flexible(
+                                child: Text(
+                                  module.title,
+                                  style: GoogleFonts.inter(
+                                    fontSize: _getTitleFontSize(module.title),
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                    height: 1.2,
+                                  ),
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Right side - Grid icon
+                        _buildModuleGridIcon(),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Build the grid icon for module cards
+  Widget _buildModuleGridIcon() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white, width: 2),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Transform.rotate(
+                angle: 0.785398, // 45 degrees in radians
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.transparent),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white, width: 2),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white, width: 2),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

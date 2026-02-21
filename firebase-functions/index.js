@@ -6,26 +6,39 @@ const admin = require("firebase-admin");
 admin.initializeApp();
 
 /**
- * NOTE: This file previously contained a function for sending chat notifications.
- * This functionality has been removed as it's now handled by the admin app team's
- * notification system. We maintain only the token cleanup function below.
+ * NOTE: This file contains functions deployed from the student app repo.
+ * DO NOT deploy the admin app's functions from this repo — the admin app
+ * maintains its own /functions directory which is the source of truth for:
+ *   - sendChatNotification, sendPushNotification, sendCourseAssignmentNotification
+ *   - checkExpiringSubscriptions, markExpiredSubscriptions
+ *   - violations (checkViolationResetStatus, recordScreenshotViolation, etc.)
+ *   - toggleDeviceRestriction, resetUserDevice, getDeviceRestrictionStatus
+ *   - setCustomClaims, createUser, deleteUser
  *
- * The student app still registers tokens in Firestore collections:
- * - user_tokens/{token}
- * - users/{userId}/tokens/{token}
- *
- * These tokens are used by the admin app's notification system.
+ * Functions in THIS file:
+ *   - validateUserDevice         (student-specific: exact device ID match)
+ *   - registerUserDevice         (student-specific)
+ *   - cleanupInvalidTokens       (token hygiene)
+ *   - notifyCourseUpdate         (content update tracking)
+ *   - notifyModuleUpdate         (content update tracking)
+ *   - notifyContentUpdate        (content-type level update tracking)
+ *   - notifyContentItemUpdate    (item-level update tracking)
+ *   - markUpdateAsSeen           (mark update read)
+ *   - getUnseenUpdatesCount      (badge count helper)
  */
 
+// ============================================================================
+// DEVICE RESTRICTION — Student-specific (kept as-is, do not change)
+// ============================================================================
+
 /**
- * Cloud Function to validate user device for device restriction
- * Checks if a user's device is allowed to login
+ * Validate user's device for device restriction.
+ * Student app version uses exact device ID matching.
  */
 exports.validateUserDevice = onCall(async (request) => {
   const context = {auth: request.auth};
   const data = request.data;
   try {
-    // Check if user is authenticated
     if (!context.auth) {
       throw new HttpsError(
         "unauthenticated",
@@ -42,7 +55,6 @@ exports.validateUserDevice = onCall(async (request) => {
       );
     }
 
-    // Check if the requesting user matches the userId (security check)
     if (context.auth.uid !== userId) {
       throw new HttpsError(
         "permission-denied",
@@ -52,14 +64,12 @@ exports.validateUserDevice = onCall(async (request) => {
 
     console.log(`Validating device for user ${userId}, device: ${currentDeviceId}`);
 
-    // Get user document to check device restriction settings
     const userDoc = await admin.firestore()
       .collection("users")
       .doc(userId)
       .get();
 
     if (!userDoc.exists) {
-      // User doesn't exist, allow login without restriction
       return {
         restrictionEnabled: false,
         isValid: true,
@@ -68,18 +78,13 @@ exports.validateUserDevice = onCall(async (request) => {
     }
 
     const userData = userDoc.data();
-
-    // Check if device restriction is enabled for this user
-    // Use the admin app's database schema: deviceRestriction.enabled
     const deviceRestriction = userData.deviceRestriction || {};
     let deviceRestrictionEnabled;
 
     if (deviceRestriction.enabled === undefined) {
-      // New user - enable device restriction by default
       deviceRestrictionEnabled = true;
       console.log(`Device restriction enabled by default for new user ${userId}`);
     } else {
-      // Existing user - use admin setting from deviceRestriction.enabled
       deviceRestrictionEnabled = deviceRestriction.enabled === true;
       const status = deviceRestrictionEnabled ? "enabled" : "disabled";
       console.log(`Device restriction ${status} by admin for user ${userId}`);
@@ -93,11 +98,9 @@ exports.validateUserDevice = onCall(async (request) => {
       };
     }
 
-    // Device restriction is enabled, check registered device
     const registeredDeviceId = deviceRestriction.registeredDeviceId;
 
     if (!registeredDeviceId) {
-      // No device registered yet, require registration
       console.log(`No device registered for user ${userId}, requiring registration`);
       return {
         restrictionEnabled: true,
@@ -106,7 +109,6 @@ exports.validateUserDevice = onCall(async (request) => {
       };
     }
 
-    // Check if current device matches registered device
     const isValid = registeredDeviceId === currentDeviceId;
 
     console.log(`Device validation for user ${userId}: ${isValid ? "VALID" : "INVALID"}`);
@@ -119,26 +121,20 @@ exports.validateUserDevice = onCall(async (request) => {
     };
   } catch (error) {
     console.error("Error in validateUserDevice:", error);
-
-    // Re-throw HttpsError as is
     if (error.code) {
       throw error;
     }
-
-    // Wrap other errors
     throw new Error("Failed to validate device: " + error.message);
   }
 });
 
 /**
- * Cloud Function to register a user's device for device restriction
- * Stores device information for the user
+ * Register user device for device restriction.
  */
 exports.registerUserDevice = onCall(async (request) => {
   const context = {auth: request.auth, rawRequest: request.rawRequest};
   const data = request.data;
   try {
-    // Check if user is authenticated
     if (!context.auth) {
       throw new HttpsError(
         "unauthenticated",
@@ -155,7 +151,6 @@ exports.registerUserDevice = onCall(async (request) => {
       );
     }
 
-    // Check if the requesting user matches the userId (security check)
     if (context.auth.uid !== userId) {
       throw new HttpsError(
         "permission-denied",
@@ -165,7 +160,6 @@ exports.registerUserDevice = onCall(async (request) => {
 
     console.log(`Registering device for user ${userId}: ${deviceId}`);
 
-    // Update user document with device information (match admin app schema)
     const updateData = {
       "deviceRestriction.registeredDeviceId": deviceId,
       "deviceRestriction.registeredAt": admin.firestore.FieldValue.serverTimestamp(),
@@ -182,7 +176,6 @@ exports.registerUserDevice = onCall(async (request) => {
       .doc(userId)
       .update(updateData);
 
-    // Log device registration event
     await admin.firestore()
       .collection("device_logs")
       .add({
@@ -202,20 +195,19 @@ exports.registerUserDevice = onCall(async (request) => {
     };
   } catch (error) {
     console.error("Error in registerUserDevice:", error);
-
-    // Re-throw HttpsError as is
     if (error.code) {
       throw error;
     }
-
-    // Wrap other errors
     throw new Error("Failed to register device: " + error.message);
   }
 });
 
+// ============================================================================
+// TOKEN CLEANUP
+// ============================================================================
+
 /**
- * Cloud Function to clean up invalid tokens
- * Runs on a schedule (once a day) to remove tokens that are no longer valid
+ * Clean up invalid FCM tokens. Runs daily.
  */
 exports.cleanupInvalidTokens = onSchedule("every 24 hours", async (event) => {
   try {
@@ -233,7 +225,6 @@ exports.cleanupInvalidTokens = onSchedule("every 24 hours", async (event) => {
       data: doc.data(),
     }));
 
-    // Check tokens in batches of 500 (FCM limit)
     for (let i = 0; i < tokens.length; i += 500) {
       const batch = tokens.slice(i, i + 500);
       const tokenValues = batch.map((t) => t.token);
@@ -244,7 +235,6 @@ exports.cleanupInvalidTokens = onSchedule("every 24 hours", async (event) => {
           tokens: tokenValues,
         });
 
-        // Process the failed tokens
         if (response.failureCount > 0) {
           const failedTokens = [];
           response.responses.forEach((resp, idx) => {
@@ -253,18 +243,15 @@ exports.cleanupInvalidTokens = onSchedule("every 24 hours", async (event) => {
             }
           });
 
-          // Delete the invalid tokens
           const deletePromises = failedTokens.map(async (token) => {
             const tokenData = batch.find((t) => t.token === token)?.data;
             const userId = tokenData?.userId;
 
-            // Delete from user_tokens collection
             await admin.firestore()
               .collection("user_tokens")
               .doc(token)
               .delete();
 
-            // If we have a userId, also delete from the user's tokens collection
             if (userId) {
               await admin.firestore()
                 .collection("users")
@@ -279,7 +266,7 @@ exports.cleanupInvalidTokens = onSchedule("every 24 hours", async (event) => {
           console.log(`Deleted ${failedTokens.length} invalid tokens`);
         }
       } catch (error) {
-        console.error(`Error checking token batch ${i}-${i+500}:`, error);
+        console.error(`Error checking token batch ${i}-${i + 500}:`, error);
       }
     }
 
@@ -295,98 +282,151 @@ exports.cleanupInvalidTokens = onSchedule("every 24 hours", async (event) => {
 // ============================================================================
 
 /**
- * 📚 Detect course updates and notify enrolled students
- * Triggers when a course document is created, updated, or deleted
+ * Helper: returns the emoji icon for a content type.
+ * @param {string} contentType - e.g. "pdfs", "videos"
+ * @return {string} emoji icon
+ */
+function getContentIcon(contentType) {
+  const icons = {
+    videos: "🎥",
+    notes: "📝",
+    pdfs: "📄",
+    images: "🖼️",
+    ppts: "📊",
+    links: "🔗",
+  };
+  return icons[contentType] || "📦";
+}
+
+/**
+ * Helper: send FCM push notifications to a list of student users.
+ * @param {Array<string>} userIds - list of user IDs to notify
+ * @param {string} title - notification title
+ * @param {string} body - notification body
+ * @param {Object} data - extra FCM data payload
+ * @return {Promise<void>}
+ */
+async function sendFcmToUsers(userIds, title, body, data = {}) {
+  const tokens = [];
+
+  for (const userId of userIds) {
+    const tokensSnapshot = await admin.firestore()
+      .collection("user_tokens")
+      .where("userId", "==", userId)
+      .where("appType", "==", "student")
+      .where("isActive", "==", true)
+      .get();
+
+    tokensSnapshot.docs.forEach((doc) => {
+      const token = doc.data().token || doc.id;
+      if (token) tokens.push(token);
+    });
+  }
+
+  if (tokens.length === 0) return;
+
+  try {
+    const message = {
+      notification: {title, body},
+      data: {...data, click_action: "FLUTTER_NOTIFICATION_CLICK"},
+      tokens,
+    };
+
+    const response = await admin.messaging().sendEachForMulticast(message);
+    console.log(`📱 FCM: ${response.successCount}/${tokens.length} sent`);
+  } catch (error) {
+    console.error("Error sending FCM notifications:", error);
+  }
+}
+
+/**
+ * 📚 Detect course updates and notify enrolled students.
+ * Triggers when a course document is written.
+ * IMPORTANT: uses assignedCourseIds (not enrolledCourses).
  */
 exports.notifyCourseUpdate = onDocumentWritten("courses/{courseId}", async (event) => {
   const courseId = event.params.courseId;
   const beforeData = event.data.before?.data();
   const afterData = event.data.after?.data();
 
-  // Skip if course is being deleted or newly created
-  if (!afterData || !beforeData) {
-    console.log(`Course ${courseId} is being ${!afterData ? "deleted" : "created"} - skipping notification`);
+  if (!afterData) {
+    console.log(`Course ${courseId} deleted — skipping notification`);
+    return null;
+  }
+  if (!beforeData) {
+    console.log(`Course ${courseId} created — skipping notification`);
     return null;
   }
 
   try {
-    let priority = "medium";
     let updateType = "course_general";
     let updateMessage = "Course has been updated";
+    let icon = "📚";
+    let sendNotification = false;
 
-    // 🔴 CRITICAL: Course unpublished
     if (beforeData.published && !afterData.published) {
-      priority = "critical";
       updateType = "course_unpublished";
       updateMessage = "⚠️ Course is no longer available";
-    } else if ((beforeData.modules?.length || 0) > (afterData.modules?.length || 0)) {
-      // 🔴 CRITICAL: Module deleted (if modules stored as array in course)
-      priority = "critical";
-      updateType = "module_deleted";
-      const deleted = (beforeData.modules?.length || 0) - (afterData.modules?.length || 0);
-      updateMessage = `⚠️ ${deleted} module${deleted > 1 ? "s" : ""} removed from course`;
-    } else if ((afterData.modules?.length || 0) > (beforeData.modules?.length || 0)) {
-      // 🟠 IMPORTANT: New module added
-      priority = "important";
-      updateType = "module_added";
-      const added = (afterData.modules?.length || 0) - (beforeData.modules?.length || 0);
-      updateMessage = `🎉 ${added} new module${added > 1 ? "s" : ""} added`;
+      icon = "🔴";
+      sendNotification = true;
+    } else if (beforeData.deleted !== afterData.deleted && afterData.deleted) {
+      updateType = "course_deleted";
+      updateMessage = "⚠️ Course has been removed";
+      icon = "🔴";
+      sendNotification = true;
     } else if (beforeData.title !== afterData.title) {
-      // 🟠 IMPORTANT: Title changed
-      priority = "important";
       updateType = "course_title";
-      updateMessage = `📚 Course renamed to "${afterData.title}"`;
+      updateMessage = `Course renamed to "${afterData.title}"`;
+      icon = "📚";
+      sendNotification = true;
     } else if (beforeData.description !== afterData.description) {
-      // 🟠 IMPORTANT: Description changed
-      priority = "important";
       updateType = "course_description";
-      updateMessage = "📝 Course description updated";
+      updateMessage = "Course description updated";
+      icon = "📝";
+      sendNotification = true;
     } else if (beforeData.thumbnail !== afterData.thumbnail) {
-      // 🟡 MEDIUM: Thumbnail changed
-      priority = "medium";
       updateType = "course_thumbnail";
-      updateMessage = "🖼️ Course image updated";
+      updateMessage = "Course image updated";
+      icon = "🖼️";
+      sendNotification = false;
     } else if (beforeData.category !== afterData.category) {
-      // 🟡 MEDIUM: Category changed
-      priority = "medium";
       updateType = "course_category";
-      updateMessage = `📁 Moved to ${afterData.category || "different"} category`;
-    } else if (JSON.stringify(beforeData.modules) !== JSON.stringify(afterData.modules)) {
-      // 🟡 MEDIUM: Modules reordered or content changed
-      priority = "medium";
-      updateType = "modules_updated";
-      updateMessage = "🔄 Course content updated";
+      updateMessage = `Moved to ${afterData.category} category`;
+      icon = "📁";
+      sendNotification = false;
     } else {
-      // No significant change detected
-      console.log(`No significant changes detected for course ${courseId}`);
-      return null;
+      updateType = "course_modules_updated";
+      updateMessage = "Course modules have been updated";
+      icon = "🔄";
+      sendNotification = true;
     }
 
-    console.log(`Course ${courseId} update detected: ${updateType} (${priority})`);
+    console.log(`Course ${courseId} updated: ${updateType}`);
 
-    // Get all users enrolled in this course
+    // IMPORTANT: field is assignedCourseIds (not enrolledCourses)
     const usersSnapshot = await admin.firestore()
       .collection("users")
-      .where("enrolledCourses", "array-contains", courseId)
+      .where("assignedCourseIds", "array-contains", courseId)
       .get();
 
     if (usersSnapshot.empty) {
-      console.log(`No enrolled users for course ${courseId}`);
+      console.log(`No assigned users for course ${courseId}`);
       return null;
     }
 
-    const enrolledUserIds = usersSnapshot.docs.map((doc) => doc.id);
-    console.log(`Found ${enrolledUserIds.length} enrolled users for course ${courseId}`);
+    const assignedUserIds = usersSnapshot.docs.map((doc) => doc.id);
+    console.log(`Found ${assignedUserIds.length} assigned users for course ${courseId}`);
 
-    // Create update tracking document
     const updateRecord = {
       courseId,
       type: updateType,
-      priority,
       message: updateMessage,
+      icon,
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
-      notifiedUsers: enrolledUserIds,
-      seenBy: [], // Track who has seen this update
+      notifiedUsers: assignedUserIds,
+      seenBy: [],
+      courseName: afterData.title,
+      courseThumb: afterData.thumbnail || "",
     };
 
     const updateRef = await admin.firestore()
@@ -395,79 +435,25 @@ exports.notifyCourseUpdate = onDocumentWritten("courses/{courseId}", async (even
 
     console.log(`Created update record: ${updateRef.id}`);
 
-    // Send notification based on priority (only for critical and important)
-    if (priority === "critical" || priority === "important") {
-      // Create notification document
-      const notificationData = {
-        title: priority === "critical" ? "⚠️ Course Update" : "📚 Course Update",
+    if (sendNotification) {
+      await admin.firestore().collection("notifications").add({
+        title: `${icon} Course Update`,
         body: updateMessage,
         type: "content_update",
         targetApp: "student",
         sender: "system",
-        recipients: enrolledUserIds,
+        recipients: assignedUserIds,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         link: `/course/${courseId}`,
-        metadata: {
-          updateType,
-          priority,
-          courseId,
-          courseName: afterData.title,
-          updateId: updateRef.id,
-        },
-      };
+        metadata: {updateType, courseId, courseName: afterData.title, updateId: updateRef.id, icon},
+      });
 
-      await admin.firestore().collection("notifications").add(notificationData);
-      console.log(`✅ Notification sent to ${enrolledUserIds.length} students for ${priority} update`);
-
-      // For critical/important updates, also send FCM push notifications
-      const tokens = [];
-
-      // Get FCM tokens for all enrolled users
-      for (const userId of enrolledUserIds) {
-        const tokensSnapshot = await admin.firestore()
-          .collection("user_tokens")
-          .where("userId", "==", userId)
-          .where("isActive", "==", true)
-          .get();
-
-        tokensSnapshot.docs.forEach((doc) => {
-          tokens.push(doc.id);
-        });
-      }
-
-      if (tokens.length > 0) {
-        try {
-          const message = {
-            notification: {
-              title: notificationData.title,
-              body: updateMessage,
-            },
-            data: {
-              type: "content_update",
-              courseId,
-              updateType,
-              priority,
-              updateId: updateRef.id,
-            },
-          };
-
-          // Send to tokens in batches of 500 (FCM limit)
-          for (let i = 0; i < tokens.length; i += 500) {
-            const batch = tokens.slice(i, i + 500);
-            await admin.messaging().sendMulticast({
-              ...message,
-              tokens: batch,
-            });
-          }
-
-          console.log(`📱 Push notifications sent to ${tokens.length} tokens`);
-        } catch (error) {
-          console.error("Error sending push notifications:", error);
-        }
-      }
-    } else {
-      // Medium/low priority - just create the update record for UI indicators
-      console.log(`Update record created for ${priority} priority - no push notification sent`);
+      await sendFcmToUsers(
+        assignedUserIds,
+        `${icon} Course Update`,
+        updateMessage,
+        {type: "content_update", courseId, updateType, updateId: updateRef.id},
+      );
     }
 
     return null;
@@ -478,369 +464,488 @@ exports.notifyCourseUpdate = onDocumentWritten("courses/{courseId}", async (even
 });
 
 /**
- * 📖 Detect module updates within a course (if using subcollection structure)
- * Triggers when a module document is created, updated, or deleted
+ * 📖 Detect module updates and notify enrolled students.
+ * Triggers when a module document is written.
  */
-exports.notifyModuleUpdate = onDocumentWritten(
-  "courses/{courseId}/modules/{moduleId}",
-  async (event) => {
-    const courseId = event.params.courseId;
-    const moduleId = event.params.moduleId;
-    const beforeData = event.data.before?.data();
-    const afterData = event.data.after?.data();
+exports.notifyModuleUpdate = onDocumentWritten("modules/{moduleId}", async (event) => {
+  const moduleId = event.params.moduleId;
+  const beforeData = event.data.before?.data();
+  const afterData = event.data.after?.data();
 
-    // Skip if module is being deleted or newly created
-    if (!afterData || !beforeData) {
-      console.log(`Module ${moduleId} in course ${courseId} is being ${!afterData ? "deleted" : "created"}`);
-      return null;
-    }
+  if (!afterData) {
+    console.log(`Module ${moduleId} deleted — skipping`);
+    return null;
+  }
+  if (!beforeData) {
+    console.log(`Module ${moduleId} created — skipping`);
+    return null;
+  }
 
-    try {
-      let priority = "medium";
-      let updateType = "module_general";
-      let updateMessage = "Module has been updated";
+  const courseId = afterData.courseId;
+  if (!courseId) {
+    console.log(`Module ${moduleId} has no courseId — skipping`);
+    return null;
+  }
 
-      // 🔴 CRITICAL: Content removed
-      if ((beforeData.content?.length || 0) > (afterData.content?.length || 0)) {
-        priority = "critical";
-        updateType = "content_removed";
-        const removed = (beforeData.content?.length || 0) - (afterData.content?.length || 0);
-        updateMessage = `⚠️ ${removed} item${removed > 1 ? "s" : ""} removed from module`;
-      } else if ((afterData.content?.length || 0) > (beforeData.content?.length || 0)) {
-        // 🟠 IMPORTANT: New content added
-        priority = "important";
-        updateType = "content_added";
-        const added = (afterData.content?.length || 0) - (beforeData.content?.length || 0);
-        updateMessage = `🎉 ${added} new item${added > 1 ? "s" : ""} added to module`;
-      } else if (beforeData.title !== afterData.title) {
-        // 🟠 IMPORTANT: Module title changed
-        priority = "important";
-        updateType = "module_title";
-        updateMessage = `📖 Module renamed to "${afterData.title}"`;
-      } else if (JSON.stringify(beforeData.content) !== JSON.stringify(afterData.content)) {
-        // 🟡 MEDIUM: Content reordered or updated
-        priority = "medium";
-        updateType = "module_content";
-        updateMessage = "🔄 Module content updated";
-      } else if (beforeData.description !== afterData.description) {
-        // 🟡 MEDIUM: Description changed
-        priority = "medium";
-        updateType = "module_description";
-        updateMessage = "📝 Module description updated";
+  try {
+    let updateType = "module_general";
+    let updateMessage = "Module has been updated";
+    let icon = "📝";
+
+    if (beforeData.title !== afterData.title) {
+      updateType = "module_title";
+      updateMessage = `Module renamed to "${afterData.title}"`;
+      icon = "📝";
+    } else if (beforeData.description !== afterData.description) {
+      updateType = "module_description";
+      updateMessage = `Module "${afterData.title}" description updated`;
+      icon = "📝";
+    } else if (JSON.stringify(beforeData.content) !== JSON.stringify(afterData.content)) {
+      updateType = "module_content";
+      const bc = beforeData.content || {};
+      const ac = afterData.content || {};
+
+      if ((ac.videos?.length || 0) > (bc.videos?.length || 0)) {
+        const count = (ac.videos?.length || 0) - (bc.videos?.length || 0);
+        updateMessage = `🎥 ${count} new video${count > 1 ? "s" : ""} added to "${afterData.title}"`;
+        icon = "🎥";
+      } else if ((ac.pdfs?.length || 0) > (bc.pdfs?.length || 0)) {
+        const count = (ac.pdfs?.length || 0) - (bc.pdfs?.length || 0);
+        updateMessage = `📄 ${count} new PDF${count > 1 ? "s" : ""} added to "${afterData.title}"`;
+        icon = "📄";
+      } else if ((ac.notes?.length || 0) > (bc.notes?.length || 0)) {
+        const count = (ac.notes?.length || 0) - (bc.notes?.length || 0);
+        updateMessage = `📝 ${count} new note${count > 1 ? "s" : ""} added to "${afterData.title}"`;
+        icon = "📝";
+      } else if ((ac.images?.length || 0) > (bc.images?.length || 0)) {
+        const count = (ac.images?.length || 0) - (bc.images?.length || 0);
+        updateMessage = `🖼️ ${count} new image${count > 1 ? "s" : ""} added to "${afterData.title}"`;
+        icon = "🖼️";
+      } else if ((ac.ppts?.length || 0) > (bc.ppts?.length || 0)) {
+        const count = (ac.ppts?.length || 0) - (bc.ppts?.length || 0);
+        updateMessage = `📊 ${count} new presentation${count > 1 ? "s" : ""} added to "${afterData.title}"`;
+        icon = "📊";
+      } else if ((ac.links?.length || 0) > (bc.links?.length || 0)) {
+        const count = (ac.links?.length || 0) - (bc.links?.length || 0);
+        updateMessage = `🔗 ${count} new link${count > 1 ? "s" : ""} added to "${afterData.title}"`;
+        icon = "🔗";
       } else {
-        // No significant change
-        console.log(`No significant changes detected for module ${moduleId}`);
-        return null;
+        updateMessage = `Content updated in "${afterData.title}"`;
+        icon = "🔄";
       }
-
-      console.log(`Module ${moduleId} update detected: ${updateType} (${priority})`);
-
-      // Get course info
-      const courseDoc = await admin.firestore()
-        .collection("courses")
-        .doc(courseId)
-        .get();
-
-      if (!courseDoc.exists) {
-        console.log(`Course ${courseId} not found`);
-        return null;
-      }
-
-      const courseData = courseDoc.data();
-
-      // Get enrolled users
-      const usersSnapshot = await admin.firestore()
-        .collection("users")
-        .where("enrolledCourses", "array-contains", courseId)
-        .get();
-
-      if (usersSnapshot.empty) {
-        console.log(`No enrolled users for course ${courseId}`);
-        return null;
-      }
-
-      const enrolledUserIds = usersSnapshot.docs.map((doc) => doc.id);
-
-      // Create update tracking
-      const updateRecord = {
-        courseId,
-        moduleId,
-        type: updateType,
-        priority,
-        message: updateMessage,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        notifiedUsers: enrolledUserIds,
-        seenBy: [],
-      };
-
-      const updateRef = await admin.firestore()
-        .collection("contentUpdates")
-        .add(updateRecord);
-
-      console.log(`Created module update record: ${updateRef.id}`);
-
-      // Send notification for critical/important updates
-      if (priority === "critical" || priority === "important") {
-        const notificationData = {
-          title: priority === "critical" ? "⚠️ Module Update" : "📖 Module Update",
-          body: `${courseData.title}: ${updateMessage}`,
-          type: "content_update",
-          targetApp: "student",
-          sender: "system",
-          recipients: enrolledUserIds,
-          timestamp: admin.firestore.FieldValue.serverTimestamp(),
-          link: `/course/${courseId}/module/${moduleId}`,
-          metadata: {
-            updateType,
-            priority,
-            courseId,
-            moduleId,
-            courseName: courseData.title,
-            moduleName: afterData.title,
-            updateId: updateRef.id,
-          },
-        };
-
-        await admin.firestore().collection("notifications").add(notificationData);
-        console.log(`✅ Module update notification sent to ${enrolledUserIds.length} students`);
-
-        // Send FCM push notifications for critical/important updates
-        const tokens = [];
-
-        for (const userId of enrolledUserIds) {
-          const tokensSnapshot = await admin.firestore()
-            .collection("user_tokens")
-            .where("userId", "==", userId)
-            .where("isActive", "==", true)
-            .get();
-
-          tokensSnapshot.docs.forEach((doc) => {
-            tokens.push(doc.id);
-          });
-        }
-
-        if (tokens.length > 0) {
-          try {
-            const message = {
-              notification: {
-                title: notificationData.title,
-                body: notificationData.body,
-              },
-              data: {
-                type: "content_update",
-                courseId,
-                moduleId,
-                updateType,
-                priority,
-                updateId: updateRef.id,
-              },
-            };
-
-            for (let i = 0; i < tokens.length; i += 500) {
-              const batch = tokens.slice(i, i + 500);
-              await admin.messaging().sendMulticast({
-                ...message,
-                tokens: batch,
-              });
-            }
-
-            console.log(`📱 Push notifications sent to ${tokens.length} tokens`);
-          } catch (error) {
-            console.error("Error sending push notifications:", error);
-          }
-        }
-      }
-
-      return null;
-    } catch (error) {
-      console.error("Error in notifyModuleUpdate:", error);
+    } else {
+      console.log(`Module ${moduleId} updated but no significant changes detected`);
       return null;
     }
-  });
+
+    console.log(`Module ${moduleId} in course ${courseId} updated: ${updateType}`);
+
+    const courseDoc = await admin.firestore().collection("courses").doc(courseId).get();
+    if (!courseDoc.exists) {
+      console.log(`Course ${courseId} not found`);
+      return null;
+    }
+    const courseData = courseDoc.data();
+
+    const usersSnapshot = await admin.firestore()
+      .collection("users")
+      .where("assignedCourseIds", "array-contains", courseId)
+      .get();
+
+    if (usersSnapshot.empty) {
+      console.log(`No assigned users for course ${courseId}`);
+      return null;
+    }
+
+    const assignedUserIds = usersSnapshot.docs.map((doc) => doc.id);
+
+    const updateRef = await admin.firestore().collection("contentUpdates").add({
+      courseId,
+      moduleId,
+      type: updateType,
+      message: updateMessage,
+      icon,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      notifiedUsers: assignedUserIds,
+      seenBy: [],
+      moduleName: afterData.title,
+      courseName: courseData.title,
+    });
+
+    await admin.firestore().collection("notifications").add({
+      title: `${icon} Module Update`,
+      body: `${courseData.title}: ${updateMessage}`,
+      type: "content_update",
+      targetApp: "student",
+      sender: "system",
+      recipients: assignedUserIds,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      link: `/course/${courseId}/module/${moduleId}`,
+      metadata: {
+        updateType, courseId, moduleId,
+        courseName: courseData.title, moduleName: afterData.title,
+        updateId: updateRef.id, icon,
+      },
+    });
+
+    await sendFcmToUsers(
+      assignedUserIds,
+      `${icon} Module Update`,
+      `${courseData.title}: ${updateMessage}`,
+      {type: "content_update", courseId, moduleId, updateType, updateId: updateRef.id},
+    );
+
+    return null;
+  } catch (error) {
+    console.error("Error in notifyModuleUpdate:", error);
+    return null;
+  }
+});
 
 /**
- * 📄 Detect content changes within modules (PDFs, videos, etc.)
- * Triggers when module content array changes
+ * 📄 Detect content-type changes within modules (PDFs added, videos removed, etc.)
+ * Triggers when a module document is written.
+ * Stores itemIds in each update doc so the student app can track per-item seen status.
  */
-exports.notifyContentUpdate = onDocumentWritten(
-  "courses/{courseId}/modules/{moduleId}",
-  async (event) => {
-    const courseId = event.params.courseId;
-    const moduleId = event.params.moduleId;
-    const beforeData = event.data.before?.data();
-    const afterData = event.data.after?.data();
+exports.notifyContentUpdate = onDocumentWritten("modules/{moduleId}", async (event) => {
+  const moduleId = event.params.moduleId;
+  const beforeData = event.data.before?.data();
+  const afterData = event.data.after?.data();
 
-    // Skip if module is being deleted or newly created
-    if (!afterData || !beforeData) {
-      return null;
-    }
+  if (!afterData || !beforeData) return null;
 
-    // Get content arrays
+  const courseId = afterData.courseId;
+  if (!courseId) {
+    console.log(`Module ${moduleId} has no courseId — skipping`);
+    return null;
+  }
+
+  try {
     const beforeContent = beforeData.content || {};
     const afterContent = afterData.content || {};
+    const contentTypes = ["videos", "notes", "pdfs", "images", "ppts", "links"];
+    const updates = [];
 
-    // Check each content type (videos, pdfs, notes, etc.)
-    const contentTypes = ["videos", "pdfs", "notes", "images", "links"];
-    const changes = [];
+    for (const contentType of contentTypes) {
+      const beforeItems = beforeContent[contentType] || [];
+      const afterItems = afterContent[contentType] || [];
 
-    for (const type of contentTypes) {
-      const beforeItems = beforeContent[type] || [];
-      const afterItems = afterContent[type] || [];
+      // Use stable item key: prefer explicit id, fall back to url/content
+      const itemKey = (item) => item.id || item.url || item.content || "";
+      const beforeIds = new Set(beforeItems.map(itemKey).filter(Boolean));
+      const afterIds = new Set(afterItems.map(itemKey).filter(Boolean));
 
-      if (beforeItems.length !== afterItems.length) {
-        const diff = afterItems.length - beforeItems.length;
-        changes.push({
-          type,
-          change: diff > 0 ? "added" : "deleted",
-          count: Math.abs(diff),
+      const addedIds = [...afterIds].filter((id) => !beforeIds.has(id));
+      const removedIds = [...beforeIds].filter((id) => !afterIds.has(id));
+
+      if (addedIds.length > 0) {
+        const label = contentType.slice(0, -1);
+        updates.push({
+          type: `content_${contentType}_updated`,
+          message: `${addedIds.length} new ${label}${addedIds.length > 1 ? "s" : ""} added`,
+          icon: getContentIcon(contentType),
+          contentType,
+          changeType: "added",
+          count: addedIds.length,
+          itemIds: addedIds, // Required for per-item badge tracking in student app
+        });
+      }
+
+      if (removedIds.length > 0) {
+        const label = contentType.slice(0, -1);
+        updates.push({
+          type: `content_${contentType}_updated`,
+          message: `${removedIds.length} ${label}${removedIds.length > 1 ? "s" : ""} removed`,
+          icon: getContentIcon(contentType),
+          contentType,
+          changeType: "removed",
+          count: removedIds.length,
+          itemIds: removedIds,
         });
       }
     }
 
-    // If no content changes, skip
-    if (changes.length === 0) {
+    if (updates.length === 0) return null;
+
+    console.log(`Content-level updates in module ${moduleId}: ${updates.length} changes`);
+
+    const courseDoc = await admin.firestore().collection("courses").doc(courseId).get();
+    if (!courseDoc.exists) {
+      console.log(`Course ${courseId} not found`);
+      return null;
+    }
+    const courseData = courseDoc.data();
+
+    const usersSnapshot = await admin.firestore()
+      .collection("users")
+      .where("assignedCourseIds", "array-contains", courseId)
+      .get();
+
+    if (usersSnapshot.empty) {
+      console.log(`No assigned users for course ${courseId}`);
       return null;
     }
 
-    try {
-      // Get course info
-      const courseDoc = await admin.firestore()
-        .collection("courses")
-        .doc(courseId)
-        .get();
+    const assignedUserIds = usersSnapshot.docs.map((doc) => doc.id);
 
-      if (!courseDoc.exists) {
-        console.log(`Course ${courseId} not found`);
-        return null;
-      }
-
-      const courseData = courseDoc.data();
-      const courseName = courseData.title || "Unknown Course";
-
-      // Get enrolled users
-      const usersSnapshot = await admin.firestore()
-        .collection("users")
-        .where("assignedCourseIds", "array-contains", courseId)
-        .get();
-
-      if (usersSnapshot.empty) {
-        console.log(`No users enrolled in course ${courseId}`);
-        return null;
-      }
-
-      const enrolledUserIds = usersSnapshot.docs.map((doc) => doc.id);
-
-      // Create detailed message
-      let updateMessage = "";
-      let priority = "medium";
-      const icons = {
-        videos: "🎥",
-        pdfs: "📄",
-        notes: "📝",
-        images: "🖼️",
-        links: "🔗",
-      };
-
-      for (const change of changes) {
-        const icon = icons[change.type] || "📎";
-        const typeName = change.type.charAt(0).toUpperCase() + change.type.slice(1);
-        if (change.change === "added") {
-          updateMessage += `${icon} ${change.count} new ${typeName} added. `;
-          priority = "important"; // New content is important
-        } else {
-          updateMessage += `${icon} ${change.count} ${typeName} removed. `;
-          priority = "critical"; // Deleted content is critical
-        }
-      }
-
-      // Create contentUpdate record
-      const updateData = {
+    for (const update of updates) {
+      const updateRef = await admin.firestore().collection("contentUpdates").add({
         courseId,
-        courseName,
-        moduleId,
-        moduleName: afterData.title || "Unknown Module",
-        type: "content_change",
-        message: updateMessage.trim(),
-        priority,
-        icon: changes[0].change === "added" ? "✨" : "⚠️",
+        moduleid: moduleId, // kept as-is for backward compat
+        moduleId, // canonical camelCase
+        type: update.type,
+        contentType: update.contentType,
+        changeType: update.changeType,
+        count: update.count,
+        itemIds: update.itemIds, // top-level for direct access
+        contentChanges: [{ // nested for student app per-item tracking
+          type: update.contentType,
+          change: update.changeType,
+          count: update.count,
+          itemIds: update.itemIds,
+        }],
+        message: update.message,
+        icon: update.changeType === "added" ? "✨" : "⚠️",
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        notifiedUsers: enrolledUserIds,
+        notifiedUsers: assignedUserIds,
         seenBy: [],
-        contentChanges: changes, // Store detailed changes
-      };
+        moduleName: afterData.title || "Unknown Module",
+        courseName: courseData.title || "Unknown Course",
+      });
 
-      await admin.firestore()
-        .collection("contentUpdates")
-        .add(updateData);
-
-      console.log(`Content update record created for module ${moduleId} in course ${courseId}`);
-
-      // Send push notification for important changes
-      if (priority === "critical" || priority === "important") {
-        try {
-          const tokens = [];
-          for (const userId of enrolledUserIds) {
-            const userTokensSnapshot = await admin.firestore()
-              .collection("user_tokens")
-              .where("userId", "==", userId)
-              .where("appType", "==", "student")
-              .where("isActive", "==", true)
-              .get();
-
-            userTokensSnapshot.docs.forEach((doc) => {
-              tokens.push(doc.data().token);
-            });
-          }
-
-          if (tokens.length > 0) {
-            const message = {
-              notification: {
-                title: priority === "critical" ? "⚠️ Content Removed" : "✨ New Content Available",
-                body: `${courseName}: ${updateMessage}`,
-              },
-              data: {
-                type: "content_update",
-                courseId,
-                moduleId,
-                priority,
-                click_action: "FLUTTER_NOTIFICATION_CLICK",
-              },
-              tokens,
-            };
-
-            const response = await admin.messaging().sendEachForMulticast(message);
-            console.log(`Sent ${response.successCount} content update notifications`);
-          }
-        } catch (error) {
-          console.error("Error sending content update notifications:", error);
-        }
-      }
-
-      return null;
-    } catch (error) {
-      console.error("Error in notifyContentUpdate:", error);
-      return null;
+      console.log(`Created content update doc: ${updateRef.id} (${update.contentType} ${update.changeType})`);
     }
-  });
+
+    // Send a single summarised notification
+    const summaryMessage = updates.map((u) =>
+      u.changeType === "added" ?
+        `${getContentIcon(u.contentType)} ${u.count} new ${u.contentType.slice(0, -1)}${u.count > 1 ? "s" : ""} added` :
+        `${getContentIcon(u.contentType)} ${u.count} ${u.contentType.slice(0, -1)}${u.count > 1 ? "s" : ""} removed`,
+    ).join(". ");
+
+    await sendFcmToUsers(
+      assignedUserIds,
+      "✨ Content Update",
+      `${courseData.title}: ${summaryMessage}`,
+      {type: "content_update", courseId, moduleId},
+    );
+
+    return null;
+  } catch (error) {
+    console.error("Error in notifyContentUpdate:", error);
+    return null;
+  }
+});
 
 /**
- * ✅ Mark content update as seen by user
- * Called from student app when user views the updated content
+ * 🔍 Detect individual content item changes (title, URL, publish status).
+ * Triggers when a module document is written.
+ * More granular than notifyContentUpdate — tracks per-item field changes.
+ */
+exports.notifyContentItemUpdate = onDocumentWritten("modules/{moduleId}", async (event) => {
+  const moduleId = event.params.moduleId;
+  const beforeData = event.data.before?.data();
+  const afterData = event.data.after?.data();
+
+  if (!afterData || !beforeData) return null;
+
+  const courseId = afterData.courseId;
+  if (!courseId) {
+    console.log(`Module ${moduleId} has no courseId — skipping`);
+    return null;
+  }
+
+  try {
+    const beforeContent = beforeData.content || {};
+    const afterContent = afterData.content || {};
+    const contentTypes = ["videos", "notes", "pdfs", "images", "ppts", "links"];
+    const itemUpdates = [];
+
+    for (const contentType of contentTypes) {
+      const beforeItems = beforeContent[contentType] || [];
+      const afterItems = afterContent[contentType] || [];
+
+      const beforeMap = new Map(beforeItems.map((item) => [item.id, item]));
+      const afterMap = new Map(afterItems.map((item) => [item.id, item]));
+
+      for (const [itemId, afterItem] of afterMap.entries()) {
+        const beforeItem = beforeMap.get(itemId);
+        if (!beforeItem) continue; // new item — handled by notifyContentUpdate
+
+        // Title change — record only, no push
+        if (beforeItem.title !== afterItem.title) {
+          itemUpdates.push({
+            type: "content_item_title_changed",
+            message: `"${beforeItem.title}" renamed to "${afterItem.title}"`,
+            icon: "✏️",
+            contentType,
+            itemId,
+            itemTitle: afterItem.title,
+            changeType: "title_changed",
+            oldValue: beforeItem.title,
+            newValue: afterItem.title,
+            sendNotification: false,
+          });
+        }
+
+        // Description change — record only, no push
+        if (beforeItem.description !== afterItem.description) {
+          itemUpdates.push({
+            type: "content_item_description_changed",
+            message: `Description updated for "${afterItem.title}"`,
+            icon: "📝",
+            contentType,
+            itemId,
+            itemTitle: afterItem.title,
+            changeType: "description_changed",
+            sendNotification: false,
+          });
+        }
+
+        // URL/content replaced — send push
+        if (beforeItem.url !== afterItem.url) {
+          itemUpdates.push({
+            type: "content_item_replaced",
+            message: `"${afterItem.title}" has been updated with new content`,
+            icon: "🔄",
+            contentType,
+            itemId,
+            itemTitle: afterItem.title,
+            changeType: "url_changed",
+            sendNotification: true,
+          });
+        }
+
+        // Publish status changed
+        if (beforeItem.isPublished !== afterItem.isPublished) {
+          if (afterItem.isPublished === false) {
+            itemUpdates.push({
+              type: "content_item_unpublished",
+              message: `"${afterItem.title}" is no longer available`,
+              icon: "🔴",
+              contentType,
+              itemId,
+              itemTitle: afterItem.title,
+              changeType: "unpublished",
+              sendNotification: true,
+            });
+          } else {
+            itemUpdates.push({
+              type: "content_item_published",
+              message: `"${afterItem.title}" is now available`,
+              icon: "✅",
+              contentType,
+              itemId,
+              itemTitle: afterItem.title,
+              changeType: "published",
+              sendNotification: true,
+            });
+          }
+        }
+      }
+    }
+
+    if (itemUpdates.length === 0) return null;
+
+    console.log(`Content-item updates in module ${moduleId}: ${itemUpdates.length} changes`);
+
+    const courseDoc = await admin.firestore().collection("courses").doc(courseId).get();
+    if (!courseDoc.exists) {
+      console.log(`Course ${courseId} not found`);
+      return null;
+    }
+    const courseData = courseDoc.data();
+
+    const usersSnapshot = await admin.firestore()
+      .collection("users")
+      .where("assignedCourseIds", "array-contains", courseId)
+      .get();
+
+    if (usersSnapshot.empty) {
+      console.log(`No assigned users for course ${courseId}`);
+      return null;
+    }
+
+    const assignedUserIds = usersSnapshot.docs.map((doc) => doc.id);
+
+    for (const update of itemUpdates) {
+      const updateRef = await admin.firestore().collection("contentUpdates").add({
+        courseId,
+        moduleId,
+        contentItemId: update.itemId,
+        type: update.type,
+        message: update.message,
+        icon: update.icon,
+        contentType: update.contentType,
+        itemTitle: update.itemTitle,
+        changeType: update.changeType,
+        oldValue: update.oldValue,
+        newValue: update.newValue,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        notifiedUsers: assignedUserIds,
+        seenBy: [],
+        moduleName: afterData.title,
+        courseName: courseData.title,
+      });
+
+      if (update.sendNotification) {
+        await admin.firestore().collection("notifications").add({
+          title: `${update.icon} Content Item Update`,
+          body: `${courseData.title} - ${afterData.title}: ${update.message}`,
+          type: "content_item_update",
+          targetApp: "student",
+          sender: "system",
+          recipients: assignedUserIds,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          link: `/course/${courseId}/module/${moduleId}`,
+          metadata: {
+            updateType: update.type,
+            courseId,
+            moduleId,
+            contentItemId: update.itemId,
+            courseName: courseData.title,
+            moduleName: afterData.title,
+            itemTitle: update.itemTitle,
+            updateId: updateRef.id,
+            icon: update.icon,
+            contentType: update.contentType,
+            changeType: update.changeType,
+          },
+        });
+
+        await sendFcmToUsers(
+          assignedUserIds,
+          `${update.icon} Content Item Update`,
+          `${courseData.title} - ${afterData.title}: ${update.message}`,
+          {type: "content_item_update", courseId, moduleId, changeType: update.changeType},
+        );
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error in notifyContentItemUpdate:", error);
+    return null;
+  }
+});
+
+// ============================================================================
+// UPDATE TRACKING HELPERS (called from student app)
+// ============================================================================
+
+/**
+ * ✅ Mark a content update as seen by the current user.
  */
 exports.markUpdateAsSeen = onCall(async (request) => {
-  const context = {auth: request.auth};
-  if (!context.auth) {
-    throw new HttpsError(
-      "unauthenticated",
-      "Authentication required",
-    );
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Authentication required");
   }
 
   const {updateId} = request.data;
-  const userId = context.auth.uid;
+  const userId = request.auth.uid;
 
   if (!updateId) {
-    throw new Error("Update ID is required");
+    throw new HttpsError("invalid-argument", "Update ID is required");
   }
 
   try {
@@ -851,10 +956,10 @@ exports.markUpdateAsSeen = onCall(async (request) => {
       throw new Error("Update not found");
     }
 
-    // Verify user is in notifiedUsers list
     const updateData = updateDoc.data();
-    if (!updateData.notifiedUsers.includes(userId)) {
-      throw new Error("User not authorized to mark this update");
+    const notifiedUsers = updateData.notifiedUsers || [];
+    if (!notifiedUsers.includes(userId)) {
+      throw new HttpsError("permission-denied", "User not authorized to mark this update as seen");
     }
 
     await updateRef.update({
@@ -862,15 +967,41 @@ exports.markUpdateAsSeen = onCall(async (request) => {
     });
 
     console.log(`User ${userId} marked update ${updateId} as seen`);
-
     return {success: true};
   } catch (error) {
     console.error("Error marking update as seen:", error);
-
-    if (error.code) {
-      throw error;
-    }
-
+    if (error.code) throw error;
     throw new Error("Failed to mark update as seen");
+  }
+});
+
+/**
+ * 🔢 Get count of unseen content updates for the current user.
+ */
+exports.getUnseenUpdatesCount = onCall({cors: true}, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Authentication required");
+  }
+
+  const userId = request.auth.uid;
+
+  try {
+    const updatesSnapshot = await admin.firestore()
+      .collection("contentUpdates")
+      .where("notifiedUsers", "array-contains", userId)
+      .get();
+
+    let unseenCount = 0;
+    updatesSnapshot.forEach((doc) => {
+      const seenBy = doc.data().seenBy || [];
+      if (!seenBy.includes(userId)) {
+        unseenCount++;
+      }
+    });
+
+    return {success: true, unseenCount};
+  } catch (error) {
+    console.error("Error getting unseen updates count:", error);
+    throw new Error("Failed to get unseen updates count");
   }
 });

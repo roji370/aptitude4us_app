@@ -5,6 +5,7 @@ import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../utils/logger.dart';
 import 'video_watermark.dart';
+import 'custom_video_progress_bar.dart';
 
 class SimpleVideoPlayer extends StatefulWidget {
   final String videoUrl;
@@ -438,14 +439,16 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
           // Progress bar
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: VideoProgressIndicator(
-              _controller!,
-              allowScrubbing: true,
-              colors: const VideoProgressColors(
-                playedColor: Colors.red,
-                bufferedColor: Colors.grey,
-                backgroundColor: Colors.white30,
-              ),
+            child: CustomVideoProgressBar(
+              controller: _controller!,
+              playedColor: const Color(0xFFFF0000),
+              bufferedColor: const Color(0x80FFFFFF),
+              backgroundColor: const Color(0x33FFFFFF),
+              thumbColor: const Color(0xFFFF0000),
+              barHeight: 3.0,
+              activeBarHeight: 5.0,
+              thumbRadius: 6.0,
+              activeThumbRadius: 8.0,
             ),
           ),
 
@@ -1008,14 +1011,16 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
               // Progress bar
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: VideoProgressIndicator(
-                  _controller,
-                  allowScrubbing: true,
-                  colors: const VideoProgressColors(
-                    playedColor: Colors.red,
-                    bufferedColor: Colors.grey,
-                    backgroundColor: Colors.white30,
-                  ),
+                child: CustomVideoProgressBar(
+                  controller: _controller,
+                  playedColor: const Color(0xFFFF0000),
+                  bufferedColor: const Color(0x80FFFFFF),
+                  backgroundColor: const Color(0x33FFFFFF),
+                  thumbColor: const Color(0xFFFF0000),
+                  barHeight: 3.0,
+                  activeBarHeight: 5.0,
+                  thumbRadius: 6.0,
+                  activeThumbRadius: 8.0,
                 ),
               ),
 

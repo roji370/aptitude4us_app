@@ -3,8 +3,12 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/auth_persistence_service.dart';
+import '../services/first_time_user_service.dart';
+import '../services/firestore_service.dart';
 import '../utils/logger.dart';
-import 'assigned_courses_screen.dart';
+import '../utils/exam_overview_navigator.dart';
+import '../widgets/exam_overview_dialog.dart';
+import 'main_screen.dart';
 import 'profile_completion_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -169,13 +173,25 @@ class _LoginScreenState extends State<LoginScreen> {
 
           if (!mounted) return;
 
+          // Check if user has watched exam overview (first-time user requirement)
+          final firstTimeUserService = FirstTimeUserService();
+          final hasWatchedExamOverview = await firstTimeUserService.hasWatchedExamOverview(userCredential.user!.uid);
+          
+          if (!hasWatchedExamOverview) {
+            Logger.i("First-time user after login - showing exam overview dialog");
+            
+            // Show exam overview dialog
+            _showExamOverviewDialog();
+            return;
+          }
+
           // Use WidgetsBinding.instance.addPostFrameCallback to safely navigate after the current frame
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
               Navigator.of(scaffoldContext).pushReplacement(
                 MaterialPageRoute(
                   builder: (_) => profileComplete 
-                      ? const AssignedCoursesScreen()
+                      ? const MainScreen()
                       : const ProfileCompletionScreen(),
                 ),
               );
@@ -204,6 +220,39 @@ class _LoginScreenState extends State<LoginScreen> {
         });
       }
     }
+  }
+
+  /// Show exam overview dialog to first-time users
+  void _showExamOverviewDialog() {
+    if (!mounted) return;
+
+    final firestoreService = Provider.of<FirestoreService>(context, listen: false);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, // User must click proceed
+      builder: (dialogContext) => ExamOverviewDialog(
+        onProceed: () async {
+          Logger.i('📚 Navigating to Exam Overview from login dialog');
+          
+          // Navigate to exam overview
+          final success = await ExamOverviewNavigator.navigateToExamOverview(
+            context,
+            firestoreService,
+          );
+          
+          if (!success) {
+            Logger.e('Failed to navigate to exam overview');
+            // If navigation fails, navigate to home as fallback
+            if (mounted) {
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const MainScreen()),
+              );
+            }
+          }
+        },
+      ),
+    );
   }
 
   @override

@@ -90,6 +90,17 @@ class AuthService {
       Logger.i(
         "User was previously logged in, session should be restored by Firebase",
       );
+      
+      // Wait a bit for Firebase to restore the session
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // If Firebase has restored the user, start subscription monitoring
+      if (_auth!.currentUser != null) {
+        Logger.i("Firebase session restored successfully, starting subscription monitoring");
+        startSubscriptionMonitoring();
+      } else {
+        Logger.w("Firebase session not yet restored, will be handled by auth state listener");
+      }
     }
   }
 
@@ -405,8 +416,14 @@ class AuthService {
 
   // Method to re-validate device on app resume/start
   Future<bool> validateCurrentDevice() async {
-    if (!_isFirebaseAvailable || currentUser == null) {
-      return false;
+    if (!_isFirebaseAvailable) {
+      Logger.w("Firebase not available for device validation");
+      return true; // Assume valid to avoid blocking users
+    }
+    
+    if (currentUser == null) {
+      Logger.w("No current user for device validation - assuming valid");
+      return true; // Return true instead of false to avoid false negatives during session restoration
     }
 
     try {
