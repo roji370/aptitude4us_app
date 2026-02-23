@@ -108,8 +108,42 @@ class ExamOverviewDialog extends StatelessWidget {
               SizedBox(
                 height: ResponsiveHelper.getAdaptiveSpacing(
                   context,
-                  compact: 24.0,
-                  regular: 28.0,
+                  compact: 12.0,
+                  regular: 16.0,
+                ),
+              ),
+
+              // Red warning text
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    color: const Color(0xFF8B0000),
+                    size: ResponsiveHelper.adaptiveFontSize(context, 16.0),
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      'You cannot enter the app until you watch the entire video.',
+                      style: GoogleFonts.inter(
+                        fontSize: ResponsiveHelper.adaptiveFontSize(context, 13.0),
+                        color: const Color(0xFF8B0000),
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
+              ),
+
+              SizedBox(
+                height: ResponsiveHelper.getAdaptiveSpacing(
+                  context,
+                  compact: 20.0,
+                  regular: 24.0,
                 ),
               ),
               

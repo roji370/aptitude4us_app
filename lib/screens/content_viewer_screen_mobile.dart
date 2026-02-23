@@ -23,9 +23,14 @@ import '../utils/pdf_loader.dart';
 import '../widgets/custom_pdf_viewer.dart';
 import '../services/firestore_service.dart';
 import '../services/first_time_user_service.dart';
+import '../services/screenshot_blocking_service.dart';
 import '../utils/exam_overview_navigator.dart';
 import '../widgets/custom_bottom_navigation.dart';
+import '../widgets/screen_recording_warning_dialog.dart';
 import 'main_screen.dart';
+import 'profile_completion_screen.dart';
+import 'screenshot_warning_screen.dart';
+import 'screenshot_blocked_screen.dart';
 import '../widgets/fullscreen_image_viewer.dart';
 import '../widgets/ppt_viewer.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -375,7 +380,12 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
   String? _pdfPath;
   String? _pdfError;
   bool _isScreenProtectionEnabled = false;
-  
+
+  // Screenshot / screen-recording protection
+  final ScreenshotBlockingService _screenshotService = ScreenshotBlockingService();
+  bool _showingScreenshotWarning = false;
+  bool _showingScreenRecordingWarning = false;
+
   // Exam overview tracking
   bool _hasMarkedExamOverviewAsWatched = false;
 
@@ -406,6 +416,9 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
 
     // Clean up old PDF files
     _cleanupOldPdfFiles();
+
+    // Initialize screenshot / screen-recording protection
+    _initializeScreenshotService();
 
     // Load content
     _loadContent();
@@ -451,6 +464,10 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     _contentStateManager.clearOldContentStates();
 
     _removeScreenshotProtection();
+
+    // Stop screenshot / screen-recording monitoring
+    _screenshotService.removeListener(_onScreenshotServiceChanged);
+    _screenshotService.stopMonitoring();
 
     // iOS-optimized orientation reset with smooth transition
     if (ResponsiveHelper.isIOS()) {
@@ -546,6 +563,144 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     } else if (_isScreenProtectionEnabled) {
       _removeScreenshotProtection();
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Screenshot / screen-recording blocking (mirrors ProtectedCourseContent)
+  // ---------------------------------------------------------------------------
+
+  /// Initialize the screenshot blocking service for this screen
+  Future<void> _initializeScreenshotService() async {
+    if (!ResponsiveHelper.isIOS() && !ResponsiveHelper.isAndroid()) {
+      Logger.i('📱 Screenshot blocking not available on this platform');
+      return;
+    }
+
+    try {
+      await _screenshotService.initialize();
+      _screenshotService.addListener(_onScreenshotServiceChanged);
+
+      // Provide current user context so per-user state is loaded
+      final authService = Provider.of<AuthService>(context, listen: false);
+      await _screenshotService.onUserAuthChanged(authService.currentUser);
+
+      // Check for any admin reset that happened while the user was away
+      if (ResponsiveHelper.isIOS()) {
+        await _screenshotService.checkForAdminReset();
+      }
+
+      // Begin monitoring
+      await _screenshotService.startMonitoring();
+
+      Logger.i('📱 Screenshot blocking service initialized in ContentViewerScreen');
+    } catch (error) {
+      Logger.e('❌ Error initializing screenshot service in ContentViewerScreen: $error');
+    }
+  }
+
+  /// React to screenshot / screen-recording service state changes
+  void _onScreenshotServiceChanged() {
+    if (!mounted) return;
+
+    Logger.i('📱 Screenshot service state changed (ContentViewerScreen)');
+
+    // Access restored by admin
+    if (_screenshotService.shouldShowResetMessage) {
+      _screenshotService.acknowledgeResetMessage();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Your access has been restored by an administrator',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.green[600],
+          duration: const Duration(seconds: 5),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
+    }
+
+    // First screenshot → warning screen
+    if (_screenshotService.shouldShowWarning() && !_showingScreenshotWarning) {
+      _showScreenshotWarningScreen();
+    }
+
+    // Screen recording detected → warning dialog
+    if (_screenshotService.shouldShowScreenRecordingWarning && !_showingScreenRecordingWarning) {
+      Logger.w('📱 Triggering screen recording warning dialog (ContentViewerScreen)');
+      _showScreenRecordingWarningDialog();
+    }
+
+    // Second screenshot → block access
+    if (_screenshotService.shouldBlockAccess()) {
+      _showScreenshotBlockedScreen();
+    }
+  }
+
+  /// Navigate to the screenshot-warning screen (first violation)
+  void _showScreenshotWarningScreen() {
+    if (_showingScreenshotWarning) return;
+    setState(() => _showingScreenshotWarning = true);
+    _screenshotService.markWarningShown();
+    Logger.w('📱 Showing screenshot warning screen (ContentViewerScreen)');
+
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            ScreenshotWarningScreen(
+              onContinue: () {
+                Navigator.of(context).pop();
+                setState(() => _showingScreenshotWarning = false);
+              },
+            ),
+        transitionDuration: const Duration(milliseconds: 150),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+            FadeTransition(opacity: animation, child: child),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
+  /// Replace this screen with the screenshot-blocked screen (second violation)
+  void _showScreenshotBlockedScreen() {
+    Logger.e('📱 Showing screenshot blocked screen (ContentViewerScreen)');
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const ScreenshotBlockedScreen(),
+        transitionDuration: const Duration(milliseconds: 100),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+            FadeTransition(opacity: animation, child: child),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
+  /// Show the screen-recording warning dialog
+  void _showScreenRecordingWarningDialog() {
+    if (_showingScreenRecordingWarning) return;
+    setState(() => _showingScreenRecordingWarning = true);
+    Logger.w('📱 Showing screen recording warning dialog (ContentViewerScreen)');
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) => ScreenRecordingWarningDialog(
+        onDismiss: () {
+          setState(() => _showingScreenRecordingWarning = false);
+          _screenshotService.markScreenRecordingWarningShown();
+        },
+      ),
+    );
   }
 
   Future<List<ContentModel>> _getFilteredContent() async {
@@ -1194,18 +1349,22 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
           _hasMarkedExamOverviewAsWatched = true;
         });
 
+        // Check profile completion to decide where to navigate next
+        final profileComplete = await authService.isProfileComplete();
+
         // Show success message
         if (mounted) {
+          final destination = profileComplete ? 'home screen' : 'profile setup';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Row(
-                children: const [
-                  Icon(Icons.check_circle, color: Colors.white),
-                  SizedBox(width: 12),
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Exam Overview completed! Navigating to home screen...',
-                      style: TextStyle(color: Colors.white),
+                      'Exam Overview completed! Navigating to $destination...',
+                      style: const TextStyle(color: Colors.white),
                     ),
                   ),
                 ],
@@ -1219,7 +1378,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
           // Stop video playback before navigation
           Future.delayed(const Duration(seconds: 3), () async {
             if (mounted) {
-              // Pause and dispose video controller to prevent background playback
+              // Pause video controller to prevent background playback
               try {
                 await controller.pause();
                 Logger.i('🎬 Video paused before navigation');
@@ -1227,13 +1386,15 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                 Logger.w('Failed to pause video: $e');
               }
 
-              // Navigate to AssignedCoursesScreen and clear all previous routes
+              // Navigate based on profile completion status, clearing all previous routes
               if (mounted) {
                 Navigator.of(context).pushAndRemoveUntil(
                   MaterialPageRoute(
-                    builder: (context) => const MainScreen(),
+                    builder: (context) => profileComplete
+                        ? const MainScreen()
+                        : const ProfileCompletionScreen(),
                   ),
-                  (route) => false, // Remove all previous routes
+                  (route) => false,
                 );
               }
             }

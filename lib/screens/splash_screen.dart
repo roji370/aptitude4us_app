@@ -342,6 +342,7 @@ class _SplashScreenState extends State<SplashScreen>
 
         // Check if profile is complete
         bool profileComplete = false;
+        final userId = firebaseUser.uid;
         try {
           profileComplete = await authService.isProfileComplete();
           Logger.i("Profile completion status: $profileComplete");
@@ -353,46 +354,44 @@ class _SplashScreenState extends State<SplashScreen>
 
         if (!mounted) return;
 
-        // If profile is not complete, navigate to profile completion screen
-        if (!profileComplete) {
-          Logger.i("Profile incomplete - navigating to profile completion");
-          _navigateToProfileCompletion();
+        // Profile is complete — go straight to the main screen.
+        // Exam overview is only for users who have NOT yet completed their profile.
+        if (profileComplete) {
+          // Setup user-specific notification handling
+          if (mounted) {
+            final notificationService = Provider.of<NotificationService>(
+              context,
+              listen: false,
+            );
+            notificationService.ensureTopicSubscriptions(userId);
+            notificationService.refreshToken();
+          }
+
+          if (mounted) {
+            _navigateToHome();
+          }
           return;
         }
 
-        // Check if user has watched exam overview (first-time user requirement)
+        // Profile is NOT complete — check if the exam overview has been watched.
+        // The exam overview is a mandatory first-time orientation that users must
+        // complete before filling out their profile.
         final firstTimeUserService = FirstTimeUserService();
-        final userId = firebaseUser.uid;
         final hasWatchedExamOverview = await firstTimeUserService.hasWatchedExamOverview(userId);
-        
+
         if (!hasWatchedExamOverview) {
-          Logger.i("First-time user - showing exam overview dialog");
-          
+          Logger.i("Profile incomplete & exam overview not watched - showing exam overview dialog");
+
           if (!mounted) return;
-          
+
           // Show exam overview dialog
           await _showExamOverviewDialog();
           return;
         }
 
-        // Setup user-specific notification handling
-        if (mounted) {
-          final notificationService = Provider.of<NotificationService>(
-            context,
-            listen: false,
-          );
-
-          // Ensure topic subscriptions and permissions
-          notificationService.ensureTopicSubscriptions(userId);
-
-          // Also refresh token to make sure we have the latest
-          notificationService.refreshToken();
-        }
-
-        // Navigate if still mounted
-        if (mounted) {
-          _navigateToHome();
-        }
+        // Exam overview already watched but profile still incomplete — go to profile completion
+        Logger.i("Exam overview already watched - navigating to profile completion");
+        _navigateToProfileCompletion();
         return;
       }
 

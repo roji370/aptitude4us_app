@@ -173,27 +173,41 @@ class _LoginScreenState extends State<LoginScreen> {
 
           if (!mounted) return;
 
-          // Check if user has watched exam overview (first-time user requirement)
+          // Profile is complete — go straight to the main screen.
+          // Exam overview is only for users who have NOT yet completed their profile.
+          if (profileComplete) {
+            Logger.i("Profile complete - navigating to home");
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                Navigator.of(scaffoldContext).pushReplacement(
+                  MaterialPageRoute(builder: (_) => const MainScreen()),
+                );
+              }
+            });
+            return;
+          }
+
+          // Profile is NOT complete — check if the exam overview has been watched.
+          // The exam overview is a mandatory first-time orientation that users must
+          // go through before filling out their profile.
           final firstTimeUserService = FirstTimeUserService();
-          final hasWatchedExamOverview = await firstTimeUserService.hasWatchedExamOverview(userCredential.user!.uid);
-          
+          final hasWatchedExamOverview = await firstTimeUserService
+              .hasWatchedExamOverview(userCredential.user!.uid);
+
+          if (!mounted) return;
+
           if (!hasWatchedExamOverview) {
-            Logger.i("First-time user after login - showing exam overview dialog");
-            
-            // Show exam overview dialog
+            Logger.i("Profile incomplete & exam overview not watched - showing exam overview dialog");
             _showExamOverviewDialog();
             return;
           }
 
-          // Use WidgetsBinding.instance.addPostFrameCallback to safely navigate after the current frame
+          // Exam overview already watched but profile still incomplete — go to profile completion
+          Logger.i("Exam overview already watched - navigating to profile completion");
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
               Navigator.of(scaffoldContext).pushReplacement(
-                MaterialPageRoute(
-                  builder: (_) => profileComplete 
-                      ? const MainScreen()
-                      : const ProfileCompletionScreen(),
-                ),
+                MaterialPageRoute(builder: (_) => const ProfileCompletionScreen()),
               );
             }
           });

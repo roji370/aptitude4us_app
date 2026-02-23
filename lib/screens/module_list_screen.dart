@@ -27,7 +27,7 @@ class ModuleListScreen extends StatefulWidget {
 }
 
 class _ModuleListScreenState extends State<ModuleListScreen> {
-  late Future<List<ModuleModel>> _modulesFuture;
+  Future<List<ModuleModel>> _modulesFuture = Future.value([]);
   bool _isLoading = true;
   int _selectedIndex = 0; // For bottom navigation
   Map<String, dynamic> _customClaims = {}; // Store user's custom claims
@@ -55,6 +55,18 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
     try {
       // Get current user ID
       _currentUserId = authService.currentUser?.uid;
+
+      // In exam overview mode, new users haven't had their custom claims set up yet.
+      // Skip the claims/permission checks and fetch modules directly from Firestore.
+      if (widget.isExamOverviewMode) {
+        Logger.i('ExamOverviewMode: skipping claims check, fetching modules directly');
+        final courseId = widget.course.id;
+        setState(() {
+          _modulesFuture = firestoreService.getPublishedModules(courseId);
+        });
+        await _modulesFuture;
+        return;
+      }
 
       // Get custom claims to check for module access permissions
       _customClaims = await authService.getCustomClaims();

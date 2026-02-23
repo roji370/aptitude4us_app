@@ -223,6 +223,23 @@ class FirestoreService {
 
   // Get only published modules for a course (for student view)
   Future<List<ModuleModel>> getPublishedModules(String courseId) async {
+    // Ensure Firestore is initialized before querying
+    if (_firestore == null) {
+      try {
+        await FirebaseInitHelper.ensureInitialized();
+        _firestore = FirebaseFirestore.instance;
+        _isFirestoreAvailable = true;
+      } catch (e) {
+        Logger.e("Firestore init failed in getPublishedModules: $e");
+        return [];
+      }
+    }
+
+    if (!_isFirestoreAvailable) {
+      Logger.w("Firestore not available");
+      return [];
+    }
+
     try {
       Logger.i("Fetching published modules for course: $courseId");
 
