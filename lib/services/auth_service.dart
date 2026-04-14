@@ -275,9 +275,14 @@ class AuthService {
       final uid = cred.user!.uid;
       Logger.i("Firebase Auth successful for user: $uid");
 
+      // Validate device using Cloud Functions.
+      // IMPORTANT: Cloud Function failures (network, cold-start, quota) must NOT
+      // lock the user out.  Only an explicit device-restriction denial blocks login.
       try {
-        // Validate device using Cloud Functions
-        final callable = FirebaseFunctions.instance.httpsCallable('validateUserDevice');
+        final callable = FirebaseFunctions.instance
+            .httpsCallable('validateUserDevice',
+                options: HttpsCallableOptions(
+                    timeout: const Duration(seconds: 10)));
         final res = await callable.call({
           'userId': uid, 
           'currentDeviceId': deviceId
@@ -286,53 +291,61 @@ class AuthService {
         final validationResult = Map<String, dynamic>.from(res.data as Map);
         Logger.i("Device validation result: $validationResult");
 
-        // Handle validation response
+        // Restriction not enabled — allow login normally
         if (validationResult['restrictionEnabled'] != true) {
           Logger.i("Device restriction not enabled, proceeding with normal login");
-          // Device restriction not enabled, proceed normally
           await _completeDeviceRestrictedLogin(cred, email);
           return cred;
         }
 
-        // Device restriction is enabled
+        // First login from this device — register it, then allow
         if (validationResult['requiresRegistration'] == true) {
           Logger.i("Device registration required, registering device: $deviceId");
-          // Register the device
-          await FirebaseFunctions.instance
-              .httpsCallable('registerUserDevice')
-              .call({
-            'userId': uid,
-            'deviceId': deviceId,
-            'deviceInfo': deviceInfo,
-          });
-          
-          Logger.i("Device registered successfully");
-          // Complete login process
+          try {
+            await FirebaseFunctions.instance
+                .httpsCallable('registerUserDevice')
+                .call({
+              'userId': uid,
+              'deviceId': deviceId,
+              'deviceInfo': deviceInfo,
+            });
+            Logger.i("Device registered successfully");
+          } catch (regError) {
+            // Registration failure is non-fatal — let the user in anyway
+            Logger.w("Device registration failed (non-fatal): $regError");
+          }
           await _completeDeviceRestrictedLogin(cred, email);
           return cred;
         }
 
+        // Restriction is enabled and device is explicitly NOT valid — block login
         if (validationResult['isValid'] != true) {
-          Logger.w("Device validation failed - device not authorized");
-          // Device not valid, clean up authentication state completely
+          Logger.w("Device validation rejected — device not authorised");
           await _cleanupFailedAuth();
           throw FirebaseAuthException(
             code: 'device-restricted', 
-            message: 'This account is restricted to a specific device. Please contact support if you believe this is an error.'
+            message: 'This account is restricted to a specific device. '
+                'Please contact support if you believe this is an error.'
           );
         }
 
-        // Device is valid, complete login
+        // Device is valid
         Logger.i("Device validation successful, completing login");
         await _completeDeviceRestrictedLogin(cred, email);
         return cred;
-        
+
+      } on FirebaseAuthException {
+        // Re-throw deliberate device-restriction rejections unchanged
+        rethrow;
       } catch (cloudFunctionError) {
-        Logger.e("Cloud Functions error during device validation: $cloudFunctionError");
-        
-        // If Cloud Functions are unavailable, clean up and show appropriate error
-        await _cleanupFailedAuth();
-        throw Exception("Device validation failed. Please check your internet connection and try again, or contact support if the issue persists.");
+        // Cloud Function is unavailable (network, cold-start, quota etc.).
+        // Do NOT sign the user out — just log the error and proceed.
+        Logger.w(
+          "Device validation unavailable (non-fatal), proceeding with login: "
+          "$cloudFunctionError"
+        );
+        await _completeDeviceRestrictedLogin(cred, email);
+        return cred;
       }
       
     } catch (e) {
@@ -343,7 +356,7 @@ class AuthService {
         rethrow;
       }
       
-      // Re-throw other authentication errors
+      // Re-throw other authentication errors (wrong password, user-not-found, etc.)
       rethrow;
     }
   }

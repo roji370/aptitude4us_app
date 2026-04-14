@@ -36,11 +36,28 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
   final _updateService = ContentUpdateService();
   String? _currentUserId;
 
+  /// Set of content-item IDs with unseen updates in this module.
+  /// Fetched once on load; refreshed after returning from a child screen.
+  Set<String> _unseenItemIds = {};
+
   @override
   void initState() {
     super.initState();
     _currentUserId = FirebaseAuth.instance.currentUser?.uid;
     _loadContent();
+
+    // Mark module-level docs (non-content) as seen on entry.
+    if (_currentUserId != null) {
+      _updateService
+          .markModuleLevelDocsSeen(
+            widget.course.id,
+            widget.module.id,
+            _currentUserId!,
+          )
+          .catchError(
+            (e) => Logger.w('Failed to mark module-level docs as seen: $e'),
+          );
+    }
   }
 
   Future<void> _loadContent() async {
@@ -80,8 +97,21 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
         contents.sort((a, b) => a.order.compareTo(b.order));
       });
 
+      // Fetch unseen item IDs for this module — no validItemIds filter
+      // needed here because orphaned IDs are naturally handled at the card
+      // level: if an ID isn't in the content, no card exists, no badge.
+      Set<String> unseen = {};
+      if (_currentUserId != null) {
+        unseen = await _updateService.getUnseenItemIds(
+          widget.course.id,
+          widget.module.id,
+          _currentUserId!,
+        );
+      }
+
       setState(() {
         _contentByType = groupedContent;
+        _unseenItemIds = unseen;
         _isLoading = false;
       });
     } catch (e) {
@@ -91,6 +121,30 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  /// Re-fetch only the unseen item IDs (lighter than full content reload).
+  Future<void> _refreshUnseenIds() async {
+    if (_currentUserId == null) return;
+    try {
+      final unseen = await _updateService.getUnseenItemIds(
+        widget.course.id,
+        widget.module.id,
+        _currentUserId!,
+      );
+      if (mounted) {
+        setState(() => _unseenItemIds = unseen);
+      }
+    } catch (e) {
+      Logger.w('Failed to refresh unseen IDs: $e');
+    }
+  }
+
+  /// Whether a content-type card should show an "UPDATE" badge.
+  /// True if ANY of its child items are unseen (and not optimistically seen).
+  bool _hasUpdateBadgeForType(List<ContentModel> contents) {
+    return contents.any((c) =>
+        _unseenItemIds.contains(c.id) && !_updateService.isItemSeen(c.id));
   }
 
   IconData _getIconForContentType(String type) {
@@ -141,16 +195,16 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
   // Dynamic font size calculation based on title length
   double _getTitleFontSize(String title) {
     final length = title.length;
-    if (length <= 20) return 18.0; // Short titles - normal size
-    if (length <= 40) return 16.0; // Medium titles - slightly smaller
-    return 14.0; // Long titles - smallest
+    if (length <= 20) return 18.0;
+    if (length <= 40) return 16.0;
+    return 14.0;
   }
 
   // Dynamic card height based on title length
   double _getCardHeight(String title) {
     final length = title.length;
-    if (length <= 40) return 130.0; // Normal height for short/medium titles
-    return 145.0; // Taller for long titles
+    if (length <= 40) return 130.0;
+    return 145.0;
   }
 
   @override
@@ -283,7 +337,7 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
                                 ),
                                 const SizedBox(height: 16),
                                 
-                                // Content Type Cards — one per type, with live update badges
+                                // Content Type Cards
                                 ..._contentByType.entries.toList().asMap().entries.map((mapEntry) {
                                   final index = mapEntry.key;
                                   final entry = mapEntry.value;
@@ -303,7 +357,7 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
                                       icon: icon,
                                     ),
                                   );
-                                }).toList(),
+                                }),
                               ],
                             ),
                           ),
@@ -325,24 +379,7 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
     );
   }
 
-  /// Returns the badge label and color for a content-type update record
-  _ContentTypeBadge? _resolveBadge(Map<String, dynamic>? updateInfo) {
-    if (updateInfo == null) return null;
-    final changeType = updateInfo['changeType'] as String? ?? '';
-    switch (changeType) {
-      case 'added':
-        return const _ContentTypeBadge(label: 'NEW', color: Colors.orange);
-      case 'removed':
-        return const _ContentTypeBadge(label: 'REMOVED', color: Colors.orange);
-      case 'reordered':
-        return const _ContentTypeBadge(label: 'REORDERED', color: Colors.orange);
-      default:
-        return const _ContentTypeBadge(label: 'UPDATED', color: Colors.orange);
-    }
-  }
-
-  /// Content-type card wrapped in a FutureBuilder for live update detection.
-  /// Uses dual-check (like module cards): content-type-level update OR item-level count.
+  /// Build a content-type card. Badge is derived from its children.
   Widget _buildContentTypeCard({
     required String type,
     required List<ContentModel> contents,
@@ -350,70 +387,10 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
     required Color color,
     required IconData icon,
   }) {
-    if (_currentUserId == null) {
-      return _buildContentTypeCardContent(
-        type: type,
-        contents: contents,
-        displayName: displayName,
-        color: color,
-        icon: icon,
-        badge: null,
-        updateInfo: null,
-      );
-    }
+    final showBadge = _hasUpdateBadgeForType(contents);
 
-    return FutureBuilder<List<dynamic>>(
-      future: Future.wait([
-        _updateService.getContentTypeUpdateInfo(
-          widget.course.id,
-          widget.module.id,
-          type,
-          _currentUserId!,
-        ),
-        _updateService.getContentItemUpdateCountForType(
-          widget.course.id,
-          widget.module.id,
-          type,
-          _currentUserId!,
-        ),
-      ]),
-      builder: (context, snapshot) {
-        final updateInfo = snapshot.data?[0] as Map<String, dynamic>?;
-        final itemUpdateCount = (snapshot.data?[1] as int?) ?? 0;
-
-        // Content-type badge takes priority; fall back to "UPDATED" when only items changed
-        _ContentTypeBadge? badge = _resolveBadge(updateInfo);
-        if (badge == null && itemUpdateCount > 0) {
-          badge = _ContentTypeBadge(label: 'UPDATED', color: Colors.orange);
-        }
-
-        return _buildContentTypeCardContent(
-          type: type,
-          contents: contents,
-          displayName: displayName,
-          color: color,
-          icon: icon,
-          badge: badge,
-          updateInfo: updateInfo,
-          itemUpdateCount: itemUpdateCount,
-        );
-      },
-    );
-  }
-
-  Widget _buildContentTypeCardContent({
-    required String type,
-    required List<ContentModel> contents,
-    required String displayName,
-    required Color color,
-    required IconData icon,
-    required _ContentTypeBadge? badge,
-    required Map<String, dynamic>? updateInfo,
-    int itemUpdateCount = 0,
-  }) {
     return GestureDetector(
       onTap: () {
-        // Navigate immediately and wait for return
         AppNavigator.navigateTo(
           context: context,
           page: ContentByTypeScreen(
@@ -423,13 +400,10 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
             displayName: displayName,
             isExamOverviewMode: widget.isExamOverviewMode,
           ),
-        ).then((_) {
-          // Rebuild to refresh badges when returning
-          if (mounted) {
-            setState(() {
-              // The setState will trigger the FutureBuilder to re-run _updateService calls
-            });
-          }
+        ).then((_) async {
+          if (!mounted) return;
+          // Refresh unseen IDs — child items may have been visited.
+          await _refreshUnseenIds();
         });
       },
       child: Container(
@@ -449,70 +423,16 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Badge strip — always 28px tall; item count on left, update badge on right
+            // Badge strip — always 28px tall, badge right-aligned when present
             SizedBox(
               height: 28,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    // Left: item count bubble
-                    if (itemUpdateCount > 0)
-                      IgnorePointer(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7.2,
-                            vertical: 3.6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1565C0),
-                            borderRadius: BorderRadius.circular(10.8),
-                          ),
-                          child: Text(
-                            '+$itemUpdateCount',
-                            style: GoogleFonts.inter(
-                              fontSize: 8.1,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      )
-                    else
-                      const SizedBox.shrink(),
-                    // Right: update badge
-                    if (badge != null)
-                      IgnorePointer(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7.2,
-                            vertical: 3.6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: badge.color,
-                            borderRadius: BorderRadius.circular(10.8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.circle, size: 5.4, color: Colors.white),
-                              const SizedBox(width: 3.6),
-                              Text(
-                                badge.label,
-                                style: GoogleFonts.inter(
-                                  fontSize: 8.1,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    else
-                      const SizedBox.shrink(),
-                  ],
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: showBadge
+                      ? _buildUpdateBadgePill()
+                      : const SizedBox.shrink(),
                 ),
               ),
             ),
@@ -564,6 +484,34 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
     );
   }
 
+  /// The standard "UPDATE" badge pill.
+  Widget _buildUpdateBadgePill() {
+    return IgnorePointer(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7.2, vertical: 3.6),
+        decoration: BoxDecoration(
+          color: Colors.orange,
+          borderRadius: BorderRadius.circular(10.8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.circle, size: 5.4, color: Colors.white),
+            const SizedBox(width: 3.6),
+            Text(
+              'UPDATE',
+              style: GoogleFonts.inter(
+                fontSize: 8.1,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Build the icon container for content cards
   Widget _buildContentIcon(IconData icon) {
     return Container(
@@ -580,11 +528,4 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
       ),
     );
   }
-}
-
-/// Simple data holder for a content-type badge label + color
-class _ContentTypeBadge {
-  final String label;
-  final Color color;
-  const _ContentTypeBadge({required this.label, required this.color});
 }

@@ -11,7 +11,7 @@ import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
 import '../utils/route_transitions.dart';
 import '../widgets/protected_course_content.dart';
-import '../widgets/update_badge.dart';
+
 import 'module_list_screen.dart';
 
 class AssignedCoursesScreen extends StatefulWidget {
@@ -26,8 +26,10 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
   late Future<UserModel?> _userFuture;
   bool _isLoading = true;
   bool _hasLoadedData = false;
-  int _totalAssignedCourses = 0; // Track total vs published courses
+  int _totalAssignedCourses = 0;
   final ContentUpdateService _updateService = ContentUpdateService();
+  // Incremented after returning from ModuleListScreen to force re-fetch.
+  int _courseRefreshKey = 0;
   
   // Search functionality
   final TextEditingController _searchController = TextEditingController();
@@ -132,188 +134,7 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
     }
   }
 
-  // Course card with responsive design and update indicators
-  Widget _buildCourseCard(
-    CourseModel course,
-    BuildContext context,
-    String userId,
-  ) {
-    final horizontalPadding = ResponsiveHelper.getScreenHorizontalPadding(
-      context,
-    );
-    final cardSpacing = ResponsiveHelper.getAdaptiveSpacing(
-      context,
-      compact: 12.0,
-      regular: 16.0,
-      pro: 18.0,
-      large: 20.0,
-      extraLarge: 24.0,
-    );
-    final borderRadius = ResponsiveHelper.getAdaptiveBorderRadius(
-      context,
-      compact: 8.0,
-      regular: 10.0,
-      pro: 12.0,
-      large: 12.0,
-      extraLarge: 14.0,
-    );
-
-    return FutureBuilder<List<dynamic>>(
-      future: Future.wait([
-        _updateService.getCourseUpdateInfo(course.id, userId),
-        _updateService.getTotalCourseUpdateCount(course.id, userId),
-      ]),
-      builder: (context, snapshot) {
-        final updateInfo = snapshot.data?[0] as Map<String, dynamic>?;
-        final totalUpdateCount = (snapshot.data?[1] as int?) ?? 0;
-        final hasUpdate = updateInfo != null;
-        final message = updateInfo?['message'] as String?;
-
-        return GestureDetector(
-          onTap: () {
-            // Navigate immediately for instant response
-            AppNavigator.navigateTo(
-              context: context,
-              page: ModuleListScreen(course: course),
-            ).then((_) {
-              if (mounted) setState(() {});
-            });
-            
-            // Mark course as seen in the background (don't await)
-            if (hasUpdate) {
-              _updateService.markCourseAsSeen(
-                course.id,
-                userId,
-              ).then((_) {
-                // Refresh the UI after marking as seen (if still mounted)
-                if (mounted) {
-                  setState(() {});
-                }
-              }).catchError((error) {
-                Logger.w("Failed to mark course as seen: $error");
-              });
-            }
-          },
-          child: Container(
-            width: double.infinity,
-            margin: EdgeInsets.only(bottom: cardSpacing),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: borderRadius,
-              border: Border.all(
-                color: const Color(0xFF656BE9),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
-                  blurRadius: ResponsiveHelper.getAdaptiveElevation(context),
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Main course card - using Row instead of Stack for better tap detection
-                Container(
-                  constraints: ResponsiveHelper.getMinTouchTarget(),
-                  padding: EdgeInsets.only(
-                    left: horizontalPadding.horizontal,
-                    right: hasUpdate ? 8 : horizontalPadding.horizontal,
-                    top: 12,
-                    bottom: 12,
-                  ),
-                  child: Row(
-                    children: [
-                      // Left spacer
-                      const SizedBox(width: 8),
-                      // Course title (centered, takes most space)
-                      Expanded(
-                        child: Text(
-                          course.title,
-                          style: GoogleFonts.inter(
-                            fontSize: ResponsiveHelper.adaptiveFontSize(
-                              context,
-                              16.0,
-                            ),
-                            fontWeight: FontWeight.w600,
-                            color: const Color(0xFF323483),
-                          ),
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      // Update indicators (on the right side)
-                      if (hasUpdate) ...[
-                        const SizedBox(width: 16),
-                        UpdateBadge(
-                          hasUpdate: true,
-                          size: 14,
-                        ),
-                        const SizedBox(width: 8),
-                        PulsingDot(
-                          hasUpdate: true,
-                          size: 10,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                // Update message banner (inside the clickable area)
-                if (hasUpdate && message != null)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.orange[50],
-                      borderRadius: BorderRadius.only(
-                        bottomLeft: borderRadius.bottomLeft,
-                        bottomRight: borderRadius.bottomRight,
-                      ),
-                      border: Border(
-                        top: BorderSide(
-                          color: Colors.orange[200]!,
-                          width: 1,
-                        ),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.info_outline,
-                          size: 16,
-                          color: Colors.orange[600],
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            message,
-                            style: GoogleFonts.inter(
-                              fontSize: 11,
-                              color: Colors.orange[700],
-                              fontWeight: FontWeight.w500,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // New modern course card design matching the UI mockup - MADE 20% MORE COMPACT WITH UNIFORM HEIGHT
+  // Modern course card with bottom-up badge from children
   Widget _buildModernCourseCard(
     CourseModel course,
     BuildContext context,
@@ -328,28 +149,27 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
     // Dynamic font size calculation based on title length
     double getTitleFontSize(String title) {
       final length = title.length;
-      if (length <= 20) return 18.0; // Short titles - normal size
-      if (length <= 40) return 16.0; // Medium titles - slightly smaller
-      return 14.0; // Long titles - smallest
+      if (length <= 20) return 18.0;
+      if (length <= 40) return 16.0;
+      return 14.0;
     }
 
     // Dynamic card height based on title length
     double getCardHeight(String title) {
       final length = title.length;
-      if (length <= 40) return 130.0; // Normal height for short/medium titles
-      return 145.0; // Taller for long titles
+      if (length <= 40) return 130.0;
+      return 145.0;
     }
 
     return FutureBuilder<List<dynamic>>(
+      key: ValueKey('${course.id}_$_courseRefreshKey'),
       future: Future.wait([
-        _updateService.getCourseUpdateInfo(course.id, userId),
-        _updateService.getTotalCourseUpdateCount(course.id, userId),
+        _updateService.hasCourseUpdate(course.id, userId),
         Provider.of<FirestoreService>(context, listen: false).getModules(course.id),
       ]),
       builder: (context, snapshot) {
-        final updateInfo = snapshot.data?[0] as Map<String, dynamic>?;
-        final hasUpdate = updateInfo != null;
-        final modules = snapshot.data?[2] as List?;
+        final hasUpdate = (snapshot.data?[0] as bool?) ?? false;
+        final modules = snapshot.data?[1] as List?;
         final moduleCount = modules?.length ?? 0;
 
         return GestureDetector(
@@ -358,24 +178,13 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
               context: context,
               page: ModuleListScreen(course: course),
             ).then((_) {
-              if (mounted) setState(() {});
+              if (!mounted) return;
+              _courseRefreshKey++;
+              setState(() {});
             });
-            
-            if (hasUpdate) {
-              _updateService.markCourseAsSeen(
-                course.id,
-                userId,
-              ).then((_) {
-                if (mounted) {
-                  setState(() {});
-                }
-              }).catchError((error) {
-                Logger.w("Failed to mark course as seen: $error");
-              });
-            }
           },
           child: Container(
-            height: getCardHeight(course.title), // Dynamic height based on title length
+            height: getCardHeight(course.title),
             margin: const EdgeInsets.only(bottom: 10),
             decoration: BoxDecoration(
               color: backgroundColor,
@@ -401,7 +210,10 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                       child: hasUpdate
                           ? IgnorePointer(
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 5.4, vertical: 2.7),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5.4,
+                                  vertical: 2.7,
+                                ),
                                 decoration: BoxDecoration(
                                   color: Colors.orange,
                                   borderRadius: BorderRadius.circular(9),
@@ -416,7 +228,7 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                                     ),
                                     const SizedBox(width: 2.7),
                                     Text(
-                                      'NEW',
+                                      'UPDATE',
                                       style: GoogleFonts.inter(
                                         fontSize: 8.1,
                                         fontWeight: FontWeight.bold,
@@ -438,7 +250,6 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // Left side - Text content
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -453,7 +264,6 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                                 ),
                               ),
                               const SizedBox(height: 6),
-                              // Title with dynamic font size
                               Flexible(
                                 child: Text(
                                   course.title,
@@ -479,7 +289,6 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                             ],
                           ),
                         ),
-                        // Right side - Book icon
                         Icon(
                           Icons.book_outlined,
                           size: 50,

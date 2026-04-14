@@ -14,6 +14,8 @@ class SimpleVideoPlayer extends StatefulWidget {
   final String? userName;
   final bool showWatermark;
   final VideoPlayerController? existingController;
+  /// Called once when 80% of the video is watched (for one-time-view tracking).
+  final VoidCallback? onViewedCallback;
 
   const SimpleVideoPlayer({
     super.key,
@@ -23,6 +25,7 @@ class SimpleVideoPlayer extends StatefulWidget {
     this.userName,
     this.showWatermark = true,
     this.existingController,
+    this.onViewedCallback,
   });
 
   @override
@@ -41,6 +44,9 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
   Timer? _skipFeedbackTimer;
   late AnimationController _controlsAnimationController;
   late Animation<double> _controlsAnimation;
+
+  // One-time view tracking
+  bool _hasTriggeredViewedCallback = false;
 
   @override
   void initState() {
@@ -183,18 +189,16 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
   }
 
   void _showControlsTemporarily() {
-    // Cancel any existing timer
     _hideControlsTimer?.cancel();
-    
+
     if (!_showControls) {
       _controlsAnimationController.forward();
     }
-    
+
     setState(() {
       _showControls = true;
     });
 
-    // Start new timer
     _hideControlsTimer = Timer(const Duration(seconds: 5), () {
       if (mounted && _controller != null && _controller!.value.isPlaying) {
         _controlsAnimationController.reverse();
@@ -203,6 +207,23 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
         });
       }
     });
+  }
+
+  /// Pause the auto-hide timer while the user is scrubbing.
+  void _pauseControlsTimer() {
+    _hideControlsTimer?.cancel();
+    // Ensure controls stay visible during scrub.
+    if (!_showControls) {
+      _controlsAnimationController.forward();
+      setState(() {
+        _showControls = true;
+      });
+    }
+  }
+
+  /// Resume the auto-hide timer after scrubbing ends.
+  void _resumeControlsTimer() {
+    _showControlsTemporarily();
   }
   
   void _toggleControls() {
@@ -238,6 +259,27 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
     } else {
       _disableWakelock();
     }
+
+    // One-time view tracking: fire once when 80% watched.
+    // Clamp the threshold to a minimum of 1 second so that very short videos
+    // (≤ 1s) don't fire at position=0 the moment the controller initialises.
+    if (!_hasTriggeredViewedCallback && widget.onViewedCallback != null) {
+      final duration = _controller!.value.duration;
+      final position = _controller!.value.position;
+      if (duration.inSeconds > 0) {
+        final thresholdSeconds =
+            (duration.inSeconds * 0.8).toInt().clamp(1, duration.inSeconds);
+        if (position.inSeconds >= thresholdSeconds) {
+          _hasTriggeredViewedCallback = true;
+          Logger.i('🎬 80% progress reached (${position.inSeconds}s / ${duration.inSeconds}s) – triggering one-time view callback');
+          widget.onViewedCallback!();
+        }
+      }
+    }
+
+    // Rebuild so the time display and play/pause icon stay in sync with the
+    // progress bar, even when the video is playing without user interaction.
+    if (mounted) setState(() {});
   }
 
   Future<void> _enableWakelock() async {
@@ -324,21 +366,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
         setState(() {
           _skipFeedback = null;
         });
-      }
-    });
-  }
-
-  void _setVolume(double volume) {
-    if (_controller == null || !_controller!.value.isInitialized) return;
-
-    setState(() {
-      _volume = volume;
-      if (!_isMuted) {
-        _controller!.setVolume(volume);
-      }
-      // If user adjusts volume while muted, unmute
-      if (_isMuted && volume > 0) {
-        _isMuted = false;
       }
     });
   }
@@ -449,6 +476,8 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
               activeBarHeight: 5.0,
               thumbRadius: 6.0,
               activeThumbRadius: 8.0,
+              onDragStart: _pauseControlsTimer,
+              onDragEnd: _resumeControlsTimer,
             ),
           ),
 
@@ -530,8 +559,7 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
       );
     }
 
-    final screenWidth = MediaQuery.of(context).size.width;
-    
+
     return Container(
       color: Colors.black,
       child: Stack(
@@ -767,18 +795,16 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
   }
 
   void _showControlsTemporarily() {
-    // Cancel any existing timer
     _hideControlsTimer?.cancel();
-    
+
     if (!_showControls) {
       _controlsAnimationController.forward();
     }
-    
+
     setState(() {
       _showControls = true;
     });
 
-    // Start new timer
     _hideControlsTimer = Timer(const Duration(seconds: 5), () {
       if (mounted && _controller.value.isPlaying) {
         _controlsAnimationController.reverse();
@@ -787,6 +813,22 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
         });
       }
     });
+  }
+
+  /// Pause the auto-hide timer while scrubbing.
+  void _pauseControlsTimer() {
+    _hideControlsTimer?.cancel();
+    if (!_showControls) {
+      _controlsAnimationController.forward();
+      setState(() {
+        _showControls = true;
+      });
+    }
+  }
+
+  /// Resume the auto-hide timer after scrubbing ends.
+  void _resumeControlsTimer() {
+    _showControlsTemporarily();
   }
   
   void _toggleControls() {
@@ -822,6 +864,9 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
     } else {
       _disableWakelock();
     }
+
+    // Rebuild so the time display and play/pause icon stay live during playback.
+    if (mounted) setState(() {});
   }
 
   Future<void> _enableWakelock() async {
@@ -1021,6 +1066,8 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
                   activeBarHeight: 5.0,
                   thumbRadius: 6.0,
                   activeThumbRadius: 8.0,
+                  onDragStart: _pauseControlsTimer,
+                  onDragEnd: _resumeControlsTimer,
                 ),
               ),
 
@@ -1125,7 +1172,7 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      onPopInvoked: (didPop) {
+      onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
           _handleBackPressed();
         }

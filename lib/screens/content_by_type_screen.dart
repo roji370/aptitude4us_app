@@ -41,43 +41,15 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
   final _updateService = ContentUpdateService();
   String? _currentUserId;
 
-  // Content-type-level update (e.g. "pdfs added"). Loaded once before being
-  // marked as seen so we can badge newly added items in this screen.
-  Map<String, dynamic>? _contentTypeUpdateInfo;
+  /// Set of content-item IDs that have unseen updates in this module.
+  /// Fetched once on load and refreshed after returning from the viewer.
+  Set<String> _unseenItemIds = {};
 
   @override
   void initState() {
     super.initState();
     _currentUserId = FirebaseAuth.instance.currentUser?.uid;
     _loadContent();
-    _loadAndMarkContentTypeUpdate();
-  }
-
-  /// Read the content-type update first, store it, then mark it as seen.
-  /// Order matters: read → setState → mark as seen (fire-and-forget).
-  Future<void> _loadAndMarkContentTypeUpdate() async {
-    if (_currentUserId == null) return;
-    try {
-      final info = await _updateService.getContentTypeUpdateInfo(
-        widget.course.id,
-        widget.module.id,
-        widget.contentType,
-        _currentUserId!,
-      );
-      if (mounted) setState(() => _contentTypeUpdateInfo = info);
-      if (info != null) {
-        _updateService
-            .markContentTypeAsSeen(
-              widget.course.id,
-              widget.module.id,
-              widget.contentType,
-              _currentUserId!,
-            )
-            .catchError((e) => Logger.w('Failed to mark content type as seen: $e'));
-      }
-    } catch (e) {
-      Logger.w('Failed to load content type update info: $e');
-    }
   }
 
   Future<void> _loadContent() async {
@@ -130,8 +102,21 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
         "Filtered to ${filteredContent.length} items of type ${widget.contentType}",
       );
 
+      // Fetch unseen item IDs — no validItemIds filter needed here because
+      // orphaned IDs are naturally handled by the card check: if an ID isn't
+      // in the content list, no card exists for it, so no badge is rendered.
+      Set<String> unseen = {};
+      if (_currentUserId != null) {
+        unseen = await _updateService.getUnseenItemIds(
+          widget.course.id,
+          widget.module.id,
+          _currentUserId!,
+        );
+      }
+
       setState(() {
         _contentList = filteredContent;
+        _unseenItemIds = unseen;
         _isLoading = false;
       });
     } catch (e) {
@@ -140,6 +125,23 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
         _errorMessage = e.toString();
         _isLoading = false;
       });
+    }
+  }
+
+  /// Re-fetch only the unseen item IDs (lighter than full content reload).
+  Future<void> _refreshUnseenIds() async {
+    if (_currentUserId == null) return;
+    try {
+      final unseen = await _updateService.getUnseenItemIds(
+        widget.course.id,
+        widget.module.id,
+        _currentUserId!,
+      );
+      if (mounted) {
+        setState(() => _unseenItemIds = unseen);
+      }
+    } catch (e) {
+      Logger.w('Failed to refresh unseen IDs: $e');
     }
   }
 
@@ -179,20 +181,6 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
     return '';
   }
 
-  Future<bool> _checkIfAllItemsSeen() async {
-    for (var item in _contentList) {
-      final info = await _updateService.getContentItemUpdateInfo(
-        widget.course.id,
-        widget.module.id,
-        item.id,
-        item.contentType,
-        _currentUserId!,
-      );
-      if (info != null) return false;
-    }
-    return true;
-  }
-
   // Dynamic font size calculation based on title length
   double _getTitleFontSize(String title) {
     final length = title.length;
@@ -206,6 +194,13 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
     final length = title.length;
     if (length <= 40) return 130.0; // Normal height for short/medium titles
     return 145.0; // Taller for long titles
+  }
+
+  /// Whether this content item should show an UPDATE badge.
+  bool _hasUpdateBadge(ContentModel content) {
+    // Session-scoped override takes priority (instant clear on tap).
+    if (_updateService.isItemSeen(content.id)) return false;
+    return _unseenItemIds.contains(content.id);
   }
 
   @override
@@ -332,7 +327,7 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
                                 ),
                                 const SizedBox(height: 16),
                                 
-                                // Content Item Cards — with live update badges per item
+                                // Content Item Cards
                                 ..._contentList.asMap().entries.map((entry) {
                                   final index = entry.key;
                                   final content = entry.value;
@@ -345,7 +340,7 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
                                       backgroundColor: backgroundColor,
                                     ),
                                   );
-                                }).toList(),
+                                }),
                               ],
                             ),
                           ),
@@ -367,106 +362,20 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
     );
   }
 
-  /// Maps a content-item changeType to a badge label + color
-  _ContentItemBadge? _resolveItemBadge(Map<String, dynamic>? updateInfo) {
-    if (updateInfo == null) return null;
-    final changeType = updateInfo['changeType'] as String? ?? '';
-    switch (changeType) {
-      case 'added':
-        return const _ContentItemBadge(label: 'NEW', color: Colors.orange);
-      case 'url_changed':
-        return const _ContentItemBadge(label: 'UPDATED', color: Colors.orange);
-      case 'unpublished':
-        return const _ContentItemBadge(label: 'UNAVAILABLE', color: Colors.orange);
-      case 'published':
-        return const _ContentItemBadge(label: 'AVAILABLE', color: Colors.orange);
-      case 'title_changed':
-        return const _ContentItemBadge(label: 'RENAMED', color: Colors.orange);
-      case 'description_changed':
-        return const _ContentItemBadge(label: 'UPDATED', color: Colors.orange);
-      default:
-        return const _ContentItemBadge(label: 'UPDATED', color: Colors.orange);
-    }
-  }
-
-  /// Content item card wrapped in a FutureBuilder for live update detection
+  /// Build a content item card with an optional "UPDATE" badge.
   Widget _buildContentItemCard({
     required ContentModel content,
     required int index,
     required Color backgroundColor,
   }) {
-    if (_currentUserId == null) {
-      return _buildContentItemCardContent(
-        content: content,
-        index: index,
-        backgroundColor: backgroundColor,
-        badge: null,
-        updateInfo: null,
-      );
-    }
+    final showBadge = _hasUpdateBadge(content);
 
-    return FutureBuilder<Map<String, dynamic>?>(
-      future: _updateService.getContentItemUpdateInfo(
-        widget.course.id,
-        widget.module.id,
-        content.id,
-        content.contentType,
-        _currentUserId!,
-      ),
-      builder: (context, snapshot) {
-        final updateInfo = snapshot.data;
-        _ContentItemBadge? badge = _resolveItemBadge(updateInfo);
-
-        // Fallback: if no item-level badge but the content type had items added,
-        // check if this item's createdAt falls within the update window.
-        // notifyContentItemUpdate skips new items, so we infer newness from timestamp.
-        if (badge == null && _contentTypeUpdateInfo?['changeType'] == 'added') {
-          final rawTs = _contentTypeUpdateInfo!['timestamp'];
-          DateTime? updateTime;
-          try {
-            updateTime = (rawTs as dynamic).toDate() as DateTime;
-          } catch (_) {
-            if (rawTs is DateTime) updateTime = rawTs;
-          }
-          if (updateTime != null && content.createdAt != null) {
-            // Item created within 10 minutes before the update record was written
-            if (content.createdAt!.isAfter(
-              updateTime.subtract(const Duration(minutes: 10)),
-            )) {
-              badge = const _ContentItemBadge(label: 'NEW', color: Colors.orange);
-            }
-          }
-        }
-
-        // Optimistic override: if the user already tapped this item this session
-        // (tracked in service-level static set, survives disposal), clear badge instantly.
-        if (_updateService.isOptimisticallySeen(content.id)) badge = null;
-
-        return _buildContentItemCardContent(
-          content: content,
-          index: index,
-          backgroundColor: backgroundColor,
-          badge: badge,
-          updateInfo: updateInfo,
-        );
-      },
-    );
-  }
-
-  Widget _buildContentItemCardContent({
-    required ContentModel content,
-    required int index,
-    required Color backgroundColor,
-    required _ContentItemBadge? badge,
-    required Map<String, dynamic>? updateInfo,
-  }) {
     return GestureDetector(
       onTap: () {
-        // Immediately mark item as "seen" in local state (optimistic update).
-        // This clears the badge right away without waiting for the async service.
-        if (badge != null) {
-          _updateService.markSeenOptimistically(content.id);
-          setState(() {});  // trigger immediate badge removal
+        // Optimistic: mark item as seen instantly in memory.
+        _updateService.markItemSeen(content.id);
+        if (showBadge) {
+          setState(() {}); // rebuild to hide badge
         }
 
         // Navigate to the viewer
@@ -481,19 +390,22 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
             isExamOverviewMode: widget.isExamOverviewMode,
           ),
         ).then((_) async {
-          // Persist the seen state and refresh badges when returning
+          // Persist the seen state in SharedPreferences + Firestore
           if (_currentUserId != null) {
             await _updateService
-                .markContentItemAsSeen(
+                .persistItemSeen(
                   widget.course.id,
                   widget.module.id,
                   content.id,
                   content.contentType,
                   _currentUserId!,
                 )
-                .catchError((e) => Logger.w('Failed to mark item as seen: $e'));
+                .catchError(
+                  (e) => Logger.w('Failed to persist item as seen: $e'),
+                );
           }
-          if (mounted) setState(() {});
+          // Refresh unseen IDs to update all cards
+          await _refreshUnseenIds();
         });
       },
       child: Container(
@@ -520,35 +432,43 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
                 alignment: Alignment.centerRight,
                 child: Padding(
                   padding: const EdgeInsets.only(right: 10),
-                  child: badge != null
-                      ? IgnorePointer(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 7.2,
-                              vertical: 3.6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: badge.color,
-                              borderRadius: BorderRadius.circular(10.8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.circle, size: 5.4, color: Colors.white),
-                                const SizedBox(width: 3.6),
-                                Text(
-                                  badge.label,
-                                  style: GoogleFonts.inter(
-                                    fontSize: 8.1,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ],
-                            ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // One-time view lock badge
+                      if (content.isOneTimeView)
+                        Container(
+                          margin: const EdgeInsets.only(right: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7.2,
+                            vertical: 3.6,
                           ),
-                        )
-                      : const SizedBox.shrink(),
+                          decoration: BoxDecoration(
+                            color: Colors.amber[700],
+                            borderRadius: BorderRadius.circular(10.8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.lock, size: 8, color: Colors.white),
+                              const SizedBox(width: 3),
+                              Text(
+                                'ONE-TIME',
+                                style: GoogleFonts.inter(
+                                  fontSize: 8.1,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      // UPDATE badge
+                      if (showBadge)
+                        _buildUpdateBadgePill(),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -592,6 +512,34 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
                     _buildContentIcon(widget.contentType),
                   ],
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The standard "UPDATE" badge pill used across all card levels.
+  Widget _buildUpdateBadgePill() {
+    return IgnorePointer(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7.2, vertical: 3.6),
+        decoration: BoxDecoration(
+          color: Colors.orange,
+          borderRadius: BorderRadius.circular(10.8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.circle, size: 5.4, color: Colors.white),
+            const SizedBox(width: 3.6),
+            Text(
+              'UPDATE',
+              style: GoogleFonts.inter(
+                fontSize: 8.1,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
               ),
             ),
           ],
@@ -712,11 +660,4 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
       ),
     );
   }
-}
-
-/// Simple data holder for a content-item badge label + color
-class _ContentItemBadge {
-  final String label;
-  final Color color;
-  const _ContentItemBadge({required this.label, required this.color});
 }

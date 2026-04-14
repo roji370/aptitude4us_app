@@ -8,6 +8,7 @@ class ContentModel {
   final int order;
   final String moduleId;
   final bool? isPublished; // Content-level publishing control
+  final bool isOneTimeView; // If true, content can only be viewed once per user
   
   // HLS-specific fields for video content
   final String? hlsUrl;           // HLS master playlist URL (.m3u8)
@@ -25,6 +26,7 @@ class ContentModel {
     required this.order,
     this.moduleId = '',
     this.isPublished,
+    this.isOneTimeView = false,
     this.hlsUrl,
     this.originalUrl,
     this.processingStatus,
@@ -110,6 +112,9 @@ class ContentModel {
     // Parse isPublished field (null if not present for backwards compatibility)
     bool? isPublishedValue = json['isPublished'] as bool?;
 
+    // Parse isOneTimeView field (false if not present for backwards compatibility)
+    bool isOneTimeViewValue = json['isOneTimeView'] as bool? ?? false;
+
     // Parse createdAt — Firestore Timestamp, DateTime, or ISO string
     DateTime? createdAtValue;
     final rawCreatedAt = json['createdAt'];
@@ -162,6 +167,7 @@ class ContentModel {
       order: orderValue,
       moduleId: moduleIdValue,
       isPublished: isPublishedValue,
+      isOneTimeView: isOneTimeViewValue,
       hlsUrl: hlsUrlValue,
       originalUrl: originalUrlValue,
       processingStatus: processingStatusValue,
@@ -181,6 +187,9 @@ class ContentModel {
     
     // Add isPublished if present
     if (isPublished != null) json['isPublished'] = isPublished;
+    
+    // Add isOneTimeView flag
+    json['isOneTimeView'] = isOneTimeView;
     
     // Add HLS fields if they exist (only for video content)
     if (contentType == 'video') {

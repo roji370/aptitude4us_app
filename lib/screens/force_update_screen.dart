@@ -1,23 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'dart:io';
 import '../utils/logger.dart';
-import '../services/apk_download_service.dart';
-import '../services/version_check_service.dart';
 
+/// Force Update Screen — directs users to the Play Store / App Store for updates.
+/// APK self-installation has been removed; app updates are handled exclusively
+/// via the official app stores to comply with Google Play policy.
 class ForceUpdateScreen extends StatefulWidget {
   final String currentVersion;
   final String requiredVersion;
   final String? updateMessage;
-  final String? apkDownloadPath; // Firebase Storage path for APK
 
   const ForceUpdateScreen({
     super.key,
     required this.currentVersion,
     required this.requiredVersion,
     this.updateMessage,
-    this.apkDownloadPath,
   });
 
   @override
@@ -25,132 +23,30 @@ class ForceUpdateScreen extends StatefulWidget {
 }
 
 class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
-  final ApkDownloadService _apkDownloadService = ApkDownloadService();
-  bool _isDownloading = false;
-  double _downloadProgress = 0.0;
-  String _statusMessage = '';
+  bool _isOpening = false;
 
   Future<void> _handleUpdate() async {
-    if (Platform.isAndroid && widget.apkDownloadPath != null && widget.apkDownloadPath!.isNotEmpty) {
-      // Download APK for Android users
-      await _downloadAndInstallApk();
-    } else if (Platform.isIOS) {
-      // Open App Store for iOS users
-      await _openAppStore();
-    } else {
-      // Fallback to Play Store if no APK path provided
-      await _openPlayStore();
+    setState(() => _isOpening = true);
+    try {
+      await _openStore();
+    } finally {
+      if (mounted) setState(() => _isOpening = false);
     }
   }
 
-  Future<void> _downloadAndInstallApk() async {
-    setState(() {
-      _isDownloading = true;
-      _downloadProgress = 0.0;
-      _statusMessage = 'Preparing download...';
-    });
-
+  Future<void> _openStore() async {
+    // Always direct to the Play Store — updates are no longer delivered via APK.
+    final url = 'https://play.google.com/store/apps/details?id=com.briffini.academy';
+    final uri = Uri.parse(url);
     try {
-      final apkPath = widget.apkDownloadPath!;
-      Logger.i('📥 Starting APK download from: $apkPath');
-
-      // Check storage space
-      final hasSpace = await _apkDownloadService.hasEnoughStorage();
-      if (!hasSpace) {
-        setState(() {
-          _statusMessage = 'Not enough storage space';
-          _isDownloading = false;
-        });
-        _showErrorDialog('Insufficient Storage', 
-          'Please free up some space and try again.');
-        return;
-      }
-
-      setState(() {
-        _statusMessage = 'Downloading update...';
-      });
-
-      // Download and install the APK
-      final success = await _apkDownloadService.downloadAndInstall(
-        storagePath: apkPath,
-        onProgress: (progress) {
-          setState(() {
-            _downloadProgress = progress;
-            _statusMessage = 'Downloading ${(progress * 100).toStringAsFixed(0)}%';
-          });
-        },
-      );
-
-      if (success) {
-        setState(() {
-          _statusMessage = 'Installation started...';
-        });
-        Logger.i('✅ APK installation initiated');
-        // Note: The app will be closed when user approves installation
-      } else {
-        setState(() {
-          _statusMessage = 'Download failed';
-          _isDownloading = false;
-        });
-        _showErrorDialog('Download Failed', 
-          'Failed to download or install the update. Please try again.');
-      }
-    } catch (e) {
-      Logger.e('❌ Error during APK download: $e');
-      setState(() {
-        _statusMessage = 'Error occurred';
-        _isDownloading = false;
-      });
-      _showErrorDialog('Update Error', 
-        'An error occurred while updating. Please try again.');
-    }
-  }
-
-  Future<void> _openAppStore() async {
-    try {
-      // Replace with your actual App Store ID
-      final url = 'https://apps.apple.com/app/id1234567890';
-      final uri = Uri.parse(url);
-      
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
-        Logger.e('Could not launch App Store URL: $url');
+        Logger.e('Could not launch store URL: $url');
       }
     } catch (e) {
-      Logger.e('Error opening App Store: $e');
+      Logger.e('Error opening store: $e');
     }
-  }
-
-  Future<void> _openPlayStore() async {
-    try {
-      final url = 'https://play.google.com/store/apps/details?id=com.briffini.academy';
-      final uri = Uri.parse(url);
-      
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        Logger.e('Could not launch Play Store URL: $url');
-      }
-    } catch (e) {
-      Logger.e('Error opening Play Store: $e');
-    }
-  }
-
-  void _showErrorDialog(String title, String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -175,7 +71,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // App logo or update icon
+                // Update icon
                 Container(
                   padding: const EdgeInsets.all(32),
                   decoration: BoxDecoration(
@@ -183,7 +79,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
+                        color: Colors.black.withValues(alpha: 0.2),
                         blurRadius: 20,
                         offset: const Offset(0, 10),
                       ),
@@ -198,7 +94,6 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
 
                 const SizedBox(height: 40),
 
-                // Main heading
                 Text(
                   'Update Required',
                   style: GoogleFonts.inter(
@@ -211,13 +106,12 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
 
                 const SizedBox(height: 16),
 
-                // Description
                 Text(
                   widget.updateMessage ??
-                      'A new version of Briffini Academy is available. Please update to continue using the app.',
+                      'A new version of Xfini Academy is available. Please update to continue.',
                   style: GoogleFonts.inter(
                     fontSize: 16,
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                     height: 1.5,
                   ),
                   textAlign: TextAlign.center,
@@ -229,10 +123,10 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
+                    color: Colors.white.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: Colors.white.withOpacity(0.2),
+                      color: Colors.white.withValues(alpha: 0.2),
                       width: 1,
                     ),
                   ),
@@ -245,7 +139,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
                             'Current Version:',
                             style: GoogleFonts.inter(
                               fontSize: 14,
-                              color: Colors.white.withOpacity(0.8),
+                              color: Colors.white.withValues(alpha: 0.8),
                             ),
                           ),
                           Text(
@@ -266,7 +160,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
                             'Required Version:',
                             style: GoogleFonts.inter(
                               fontSize: 14,
-                              color: Colors.white.withOpacity(0.8),
+                              color: Colors.white.withValues(alpha: 0.8),
                             ),
                           ),
                           Text(
@@ -285,53 +179,18 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
 
                 const SizedBox(height: 40),
 
-                // Download progress indicator (shown when downloading)
-                if (_isDownloading) ...[
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.2),
-                        width: 1,
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        LinearProgressIndicator(
-                          value: _downloadProgress,
-                          backgroundColor: Colors.white.withOpacity(0.2),
-                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                          minHeight: 8,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          _statusMessage,
-                          style: GoogleFonts.inter(
-                            fontSize: 14,
-                            color: Colors.white.withOpacity(0.9),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                ],
-
-                // Update button
+                // Update button → opens Play Store
                 SizedBox(
                   width: double.infinity,
                   height: 56,
                   child: ElevatedButton(
-                    onPressed: _isDownloading ? null : _handleUpdate,
+                    onPressed: _isOpening ? null : _handleUpdate,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: const Color(0xFF323483),
-                      disabledBackgroundColor: Colors.white.withOpacity(0.5),
+                      disabledBackgroundColor: Colors.white.withValues(alpha: 0.5),
                       elevation: 8,
-                      shadowColor: Colors.black.withOpacity(0.3),
+                      shadowColor: Colors.black.withValues(alpha: 0.3),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
                       ),
@@ -339,7 +198,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        if (_isDownloading)
+                        if (_isOpening)
                           const SizedBox(
                             width: 24,
                             height: 24,
@@ -349,13 +208,10 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
                             ),
                           )
                         else
-                          const Icon(
-                            Icons.download_rounded,
-                            size: 24,
-                          ),
+                          const Icon(Icons.open_in_new_rounded, size: 24),
                         const SizedBox(width: 12),
                         Text(
-                          _isDownloading ? 'Downloading...' : 'Update Now',
+                          _isOpening ? 'Opening Store...' : 'Update on Play Store',
                           style: GoogleFonts.inter(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -368,12 +224,11 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
 
                 const SizedBox(height: 24),
 
-                // Info text
                 Text(
                   'This update includes important improvements\nand new features for a better experience.',
                   style: GoogleFonts.inter(
                     fontSize: 13,
-                    color: Colors.white.withOpacity(0.7),
+                    color: Colors.white.withValues(alpha: 0.7),
                     height: 1.5,
                   ),
                   textAlign: TextAlign.center,
@@ -386,4 +241,3 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
     );
   }
 }
-

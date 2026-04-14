@@ -101,6 +101,25 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // User content views for one-time view enforcement
+    // Document ID format: {userId}_{contentId}
+    match /user_content_views/{viewId} {
+      // Allow reading own records.
+      // NOTE: resource is null when the document doesn't exist (first-time check).
+      // We must guard against that to avoid a null-dereference denial.
+      allow read: if isAuthenticated() &&
+        (resource == null || resource.data.userId == request.auth.uid);
+
+      // Users can only create records for themselves.
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.viewed == true; // Must always write viewed=true
+
+      // Users can never delete or reset viewed records — that would allow re-access.
+      // Only admins can modify or delete (e.g. to manually reset for a student).
+      allow update, delete: if isAdmin();
+    }
+
     // Community Chat rules
     match /communityChat/{messageId} {
       allow read: if isAuthenticated();

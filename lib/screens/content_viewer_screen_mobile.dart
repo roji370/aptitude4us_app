@@ -389,6 +389,19 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
   // Exam overview tracking
   bool _hasMarkedExamOverviewAsWatched = false;
 
+  // One-time view: tracks content IDs confirmed/marked in this session
+  final Set<String> _viewedContentIds = {};
+  // One-time view: content blocked because it was already viewed in a PREVIOUS session (or user cancelled).
+  // Controls the locked-UI placeholder display.
+  final Set<String> _blockedOneTimeContentIds = {};
+  // One-time view: dedup guard — tracks IDs whose Firestore write has already been sent THIS session.
+  // Used only to prevent double-writes; does NOT trigger the locked UI.
+  final Set<String> _firestoreWrittenContentIds = {};
+  // One-time view: in-flight guard — content IDs currently being checked against Firestore.
+  // Prevents duplicate concurrent async calls from rapid rebuilds showing stacked dialogs.
+  // Also shows a loading placeholder instead of raw content during the check window.
+  final Set<String> _pendingCheckContentIds = {};
+
   @override
   void initState() {
     super.initState();
@@ -846,6 +859,21 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     try {
       Logger.i("Initializing video controller for: ${content.title}");
 
+      // ── Token refresh ────────────────────────────────────────────────────
+      // Firebase Auth ID tokens expire after 1 hour.  The video player makes
+      // raw HTTP requests that carry the token; if the token has expired the
+      // CDN returns HTTP 412, which surfaces as a play error on iOS/Android.
+      // Force a silent refresh here so the token is always fresh before play.
+      try {
+        final authService = Provider.of<AuthService>(context, listen: false);
+        await authService.forceTokenRefresh();
+        Logger.d('Token refreshed before video load');
+      } catch (tokenErr) {
+        // Non‑fatal — proceed with existing token
+        Logger.w('Could not refresh token before video load (non-fatal): $tokenErr');
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       // Determine the video URL to use
       final videoUrl = content.originalUrl ?? content.content;
       Logger.i('Using video URL: $videoUrl');
@@ -881,13 +909,22 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     } catch (e) {
       Logger.e('Error initializing video controller: $e');
 
+      // Detect HTTP 412 (expired token) and give the user a helpful message
+      final errStr = e.toString();
+      final isTokenExpiry = errStr.contains('412') ||
+          errStr.contains('CoreMediaErrorDomain') ||
+          errStr.contains('Precondition Failed');
+
       if (mounted) {
-        // Show error message
+        final msg = isTokenExpiry
+            ? 'Session token expired. Please go back and try again.'
+            : 'Could not load video: ${e.toString()}';
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Could not load video: ${e.toString()}'),
+            content: Text(msg),
             backgroundColor: Colors.red,
-            duration: const Duration(seconds: 3),
+            duration: const Duration(seconds: 5),
           ),
         );
 
@@ -910,6 +947,19 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
 
     try {
       Logger.i("Loading PDF for: ${content.title}");
+
+      // ── Token refresh ────────────────────────────────────────────────────
+      // Force a silent refresh here so the token is always fresh before fetching
+      // the storage signed URL. Keeps us from hitting 412 or permission errors.
+      try {
+        final authService = Provider.of<AuthService>(context, listen: false);
+        await authService.forceTokenRefresh();
+        Logger.d('Token refreshed before PDF load');
+      } catch (tokenErr) {
+        // Non‑fatal — proceed with existing token
+        Logger.w('Could not refresh token before PDF load (non-fatal): $tokenErr');
+      }
+      // ─────────────────────────────────────────────────────────────────────
 
       // Use the existing PDF loading logic but store result in content state manager
       final pdfPath = await _downloadAndSavePdf(content.content);
@@ -1037,6 +1087,24 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     );
     Logger.d("DEBUG: Content ID: ${content.id}");
 
+    // One-time view gate: show blocked placeholder if already locked
+    if (content.isOneTimeView && _blockedOneTimeContentIds.contains(content.id)) {
+      return _buildOneTimeViewBlockedPlaceholder(content);
+    }
+
+    if (content.isOneTimeView && !_viewedContentIds.contains(content.id)) {
+      // Show a loading placeholder while the Firestore check is in-flight.
+      // This prevents the raw content from being visible (and triggering the
+      // PDF onRender / video 80% callback) before the user has confirmed.
+      if (_pendingCheckContentIds.contains(content.id)) {
+        return _buildOneTimeViewCheckingPlaceholder();
+      }
+
+      // Launch the check — the in-flight guard prevents duplicate calls.
+      Future.microtask(() => _checkAndEnforceOneTimeView(content));
+      return _buildOneTimeViewCheckingPlaceholder();
+    }
+
     // Ensure iOS screen protection is toggled appropriately by content type
     _maybeUpdateProtectionForContentType(content.contentType);
     switch (content.contentType) {
@@ -1077,6 +1145,9 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                 userName: _userName,
                 showWatermark: true,
                 existingController: existingController,
+                onViewedCallback: content.isOneTimeView
+                    ? () => _markOneTimeContentViewed(content)
+                    : null,
               ),
             ),
           );
@@ -1128,7 +1199,13 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                 width: double.infinity,
                 height: double.infinity,
                 color: Colors.white,
-                child: CustomPDFViewer(filePath: pdfPath, userName: _userName),
+                child: CustomPDFViewer(
+                  filePath: pdfPath,
+                  userName: _userName,
+                  onViewedCallback: content.isOneTimeView
+                      ? () => _markOneTimeContentViewed(content)
+                      : null,
+                ),
               ),
 
               // Floating fullscreen button
@@ -1313,7 +1390,285 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // One-Time View helpers
+  // ---------------------------------------------------------------------------
+
+  /// Runs the Firestore check and shows the appropriate dialog.
+  /// Must be called with Future.microtask to avoid setState-during-build.
+  ///
+  /// The [_pendingCheckContentIds] in-flight guard ensures only ONE call runs
+  /// at a time per content ID, preventing stacked dialogs from rapid rebuilds.
+  Future<void> _checkAndEnforceOneTimeView(ContentModel content) async {
+    if (!mounted) return;
+    // Already resolved for this session — nothing to do.
+    if (_viewedContentIds.contains(content.id)) return;
+    if (_blockedOneTimeContentIds.contains(content.id)) return;
+
+    // In-flight guard: if a check is already running for this ID, bail out.
+    if (_pendingCheckContentIds.contains(content.id)) return;
+    setState(() => _pendingCheckContentIds.add(content.id));
+
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final userId = authService.currentUser?.uid;
+      if (userId == null) {
+        // No user — clean up the guard so the spinner doesn't get stuck.
+        if (mounted) setState(() => _pendingCheckContentIds.remove(content.id));
+        return;
+      }
+
+      final firestoreService = Provider.of<FirestoreService>(context, listen: false);
+
+      // Check Firestore
+      final alreadyViewed = await firestoreService.checkIfContentViewed(userId, content.id);
+
+      if (!mounted) {
+        // Widget unmounted during network call — clean up in-memory state.
+        _pendingCheckContentIds.remove(content.id);
+        return;
+      }
+
+      if (alreadyViewed) {
+        // Content was viewed in a previous session — lock it and inform the user.
+        setState(() {
+          _pendingCheckContentIds.remove(content.id);
+          _blockedOneTimeContentIds.add(content.id);
+        });
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(
+              children: [
+                Icon(Icons.lock, color: Color(0xFF323483)),
+                SizedBox(width: 8),
+                Text('Content Expired'),
+              ],
+            ),
+            content: const Text(
+              'You have already viewed this content. One-time view content cannot be accessed again.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('OK', style: TextStyle(color: Color(0xFF323483))),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
+      // Not yet viewed — ask for confirmation before exposing the content.
+      if (!mounted) {
+        _pendingCheckContentIds.remove(content.id);
+        return;
+      }
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.visibility_off, color: Color(0xFF323483)),
+              SizedBox(width: 8),
+              Text('One-Time View'),
+            ],
+          ),
+          content: const Text(
+            'You can only view this content once. Once you proceed, it will be permanently locked. Continue?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF323483),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted) {
+        _pendingCheckContentIds.remove(content.id);
+        return;
+      }
+
+      if (confirmed == true) {
+        // User confirmed — remove from pending and allow content to render.
+        setState(() {
+          _pendingCheckContentIds.remove(content.id);
+          _viewedContentIds.add(content.id);
+        });
+
+        // 🔒 Write to Firestore IMMEDIATELY on confirmation (not deferred to 80%
+        // video progress). This prevents the dialog from re-appearing if the user
+        // goes back before the 80% threshold fires.
+        // userId and firestoreService are already captured above — reuse them
+        // to avoid calling Provider.of(context) across an async gap.
+        if (!_firestoreWrittenContentIds.contains(content.id)) {
+          _firestoreWrittenContentIds.add(content.id);
+          final writeSucceeded = await firestoreService.markContentAsViewed(userId, content.id);
+          if (!writeSucceeded && mounted) {
+            // Another device beat us to it — lock immediately.
+            Logger.w('🔒 Two-device race at confirmation — locking content: ${content.title}');
+            setState(() => _blockedOneTimeContentIds.add(content.id));
+          } else {
+            Logger.i('🔒 One-time view locked at confirmation: ${content.title}');
+          }
+        }
+      } else {
+        // User cancelled — block the content and navigate away.
+        setState(() {
+          _pendingCheckContentIds.remove(content.id);
+          _blockedOneTimeContentIds.add(content.id);
+        });
+        if (_currentContentIndex > 0) {
+          setState(() => _currentContentIndex--);
+        } else {
+          Navigator.of(context).pop();
+        }
+      }
+    } catch (e) {
+      // On any error, remove the pending guard so the user can retry.
+      Logger.e('Error in _checkAndEnforceOneTimeView: $e');
+      if (mounted) setState(() => _pendingCheckContentIds.remove(content.id));
+    }
+  }
+
+  /// Secondary (belt-and-suspenders) Firestore write for video (80% progress)
+  /// and PDF (first render) content types.
+  ///
+  /// The PRIMARY write now happens immediately when the user taps "Continue" in
+  /// [_checkAndEnforceOneTimeView], so in the happy path this callback is a
+  /// no-op (guarded by [_firestoreWrittenContentIds]).
+  ///
+  /// It only does real work if the confirmation-time write was silently swallowed
+  /// by a network error (the service returns true to avoid blocking the user).
+  ///
+  /// NOTE: Does NOT add to [_blockedOneTimeContentIds] on success — content stays
+  /// playable for the rest of this session; blocked on next session when
+  /// [checkIfContentViewed] returns true.
+  ///
+  /// Image / link / ppt / text content types do NOT need this callback because
+  /// the confirmation-time write is sufficient for instantaneous content.
+  void _markOneTimeContentViewed(ContentModel content) async {
+    if (!mounted) return;
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final userId = authService.currentUser?.uid;
+    if (userId == null) return;
+
+    // Prevent duplicate Firestore writes in this session without blocking the UI.
+    if (_firestoreWrittenContentIds.contains(content.id)) return;
+    _firestoreWrittenContentIds.add(content.id);
+
+    final firestoreService = Provider.of<FirestoreService>(context, listen: false);
+    final writeSucceeded = await firestoreService.markContentAsViewed(userId, content.id);
+
+    if (!mounted) return;
+
+    if (!writeSucceeded) {
+      // Another device already consumed this one-time view.
+      // Lock the content on this device immediately.
+      Logger.w('🔒 Two-device race detected — locking content: ${content.title}');
+      setState(() => _blockedOneTimeContentIds.add(content.id));
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.lock, color: Color(0xFF323483)),
+              SizedBox(width: 8),
+              Text('Content Expired'),
+            ],
+          ),
+          content: const Text(
+            'This content was already viewed on another device. One-time view content cannot be accessed again.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('OK', style: TextStyle(color: Color(0xFF323483))),
+            ),
+          ],
+        ),
+      );
+    } else {
+      Logger.i('🔒 One-time content marked as viewed: ${content.title}');
+    }
+  }
+
+  /// Shown while the Firestore check is in flight (spinner + brief message).
+  Widget _buildOneTimeViewCheckingPlaceholder() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(color: Color(0xFF323483)),
+          SizedBox(height: 16),
+          Text(
+            'Verifying access…',
+            style: TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Placeholder widget shown after the content has been confirmed as already viewed.
+  Widget _buildOneTimeViewBlockedPlaceholder(ContentModel content) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFF323483).withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.lock,
+                size: 52,
+                color: Color(0xFF323483),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Content Expired',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF323483),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'You have already viewed this one-time content. It is no longer accessible.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 15, color: Colors.black54),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Check if current content is from Exam Overview course
+
   /// (any module within the course counts)
   bool _isExamOverviewContent() {
     return widget.course.id == ExamOverviewNavigator.examOverviewCourseId;
@@ -1628,232 +1983,6 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
           ),
         ),
       ],
-    );
-  }
-
-  // Removed old portrait layout code - replaced with simpler version above
-  Widget _buildOldPortraitLayout(
-    BuildContext context,
-    Size screenSize,
-    double safeAreaBottom,
-    List<ContentModel> contentList,
-    ContentModel currentContent,
-    bool isTablet,
-  ) {
-    return Container(
-      width: screenSize.width,
-      height: screenSize.height,
-      color: Colors.grey[50],
-      child: Column(
-        children: [
-          // Modern Header Card with content title
-          Container(
-            margin: EdgeInsets.all(screenSize.width * 0.04),
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
-                  blurRadius: 20,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Content type badge
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _getColorForContentType(currentContent.contentType).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _getIconForContentType(currentContent.contentType),
-                        size: 16,
-                        color: _getColorForContentType(currentContent.contentType),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        _getDisplayNameForContentType(currentContent.contentType),
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: _getColorForContentType(currentContent.contentType),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                // Content title
-                Text(
-                  currentContent.title,
-                  style: GoogleFonts.inter(
-                    fontSize: isTablet ? 20 : 18,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF1A1A1A),
-                    height: 1.3,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 8),
-                // Module name subtitle
-                Row(
-                  children: [
-                    Icon(
-                      Icons.folder_outlined,
-                      size: 16,
-                      color: Colors.grey[600],
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        widget.module.title,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[600],
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          // Content Container - Modern card design
-          Expanded(
-            child: Container(
-              margin: EdgeInsets.symmetric(
-                horizontal: screenSize.width * 0.04,
-              ),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
-                    blurRadius: 20,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: _buildContentView(currentContent),
-              ),
-            ),
-          ),
-
-          // Navigation row (prev/next) - modern floating design - only show if multiple content items
-          if (contentList.length > 1)
-            Container(
-              margin: EdgeInsets.fromLTRB(
-                screenSize.width * 0.04,
-                16,
-                screenSize.width * 0.04,
-                16 + safeAreaBottom,
-              ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
-              ),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(30),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 15,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  // Previous button
-                  _buildNavigationButton(
-                    icon: Icons.arrow_back_ios_new_rounded,
-                    enabled: _currentContentIndex > 0,
-                    onTap: _currentContentIndex > 0
-                        ? () {
-                            setState(() {
-                              _currentContentIndex--;
-                            });
-                          }
-                        : null,
-                  ),
-
-                  // Progress indicator with modern design
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF323483).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(
-                          '${_currentContentIndex + 1}',
-                          style: GoogleFonts.inter(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: const Color(0xFF323483),
-                          ),
-                        ),
-                        Text(
-                          ' / ',
-                          style: GoogleFonts.inter(
-                            fontSize: 14,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                        Text(
-                          '${contentList.length}',
-                          style: GoogleFonts.inter(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Next button
-                  _buildNavigationButton(
-                    icon: Icons.arrow_forward_ios_rounded,
-                    enabled: _currentContentIndex < contentList.length - 1,
-                    onTap: _currentContentIndex < contentList.length - 1
-                        ? () {
-                            setState(() {
-                              _currentContentIndex++;
-                            });
-                          }
-                        : null,
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
     );
   }
 

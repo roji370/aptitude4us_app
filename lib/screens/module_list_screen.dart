@@ -9,7 +9,6 @@ import '../services/content_update_service.dart';
 import '../utils/logger.dart';
 import '../utils/route_transitions.dart';
 import '../widgets/custom_bottom_navigation.dart';
-import '../widgets/update_badge.dart';
 import 'content_types_screen.dart';
 
 class ModuleListScreen extends StatefulWidget {
@@ -29,11 +28,13 @@ class ModuleListScreen extends StatefulWidget {
 class _ModuleListScreenState extends State<ModuleListScreen> {
   Future<List<ModuleModel>> _modulesFuture = Future.value([]);
   bool _isLoading = true;
-  int _selectedIndex = 0; // For bottom navigation
-  Map<String, dynamic> _customClaims = {}; // Store user's custom claims
-  int _totalModulesCount = 0; // Track total modules vs published modules
+  int _selectedIndex = 0;
+  Map<String, dynamic> _customClaims = {};
+  int _totalModulesCount = 0;
   final ContentUpdateService _updateService = ContentUpdateService();
   String? _currentUserId;
+  // Incremented after returning from ContentTypesScreen to force re-fetch.
+  int _refreshKey = 0;
 
   @override
   void initState() {
@@ -127,6 +128,15 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
           _modulesFuture = Future.value(filteredModules);
         });
       }
+
+      // Mark course-level docs as seen on entry
+      if (_currentUserId != null) {
+        _updateService
+            .markCourseLevelDocsSeen(widget.course.id, _currentUserId!)
+            .catchError(
+              (e) => Logger.w('Failed to mark course-level docs as seen: $e'),
+            );
+      }
     } catch (e) {
       Logger.e("Error loading custom claims and modules: $e");
     } finally {
@@ -158,196 +168,6 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
     return 145.0; // Taller for long titles
   }
 
-  /// Build module card with update indicators
-  Widget _buildModuleCard(ModuleModel module, Size screenSize) {
-    if (_currentUserId == null) {
-      // If no user ID, show module without updates
-      return _buildModuleCardContent(module, screenSize, false, null, 0);
-    }
-
-    return FutureBuilder<List<dynamic>>(
-      future: Future.wait([
-        _updateService.hasModuleUpdate(
-          widget.course.id,
-          module.id,
-          _currentUserId!,
-        ),
-        _updateService.getContentUpdateCount(
-          widget.course.id,
-          module.id,
-          _currentUserId!,
-        ),
-      ]),
-      builder: (context, snapshot) {
-        final hasUpdate = (snapshot.data?[0] as bool?) ?? false;
-        final contentUpdateCount = (snapshot.data?[1] as int?) ?? 0;
-
-        // If there's an update, get the update info
-        if (hasUpdate) {
-          return FutureBuilder<Map<String, dynamic>?>(
-            future: _updateService.getCourseUpdateInfo(
-              widget.course.id,
-              _currentUserId!,
-            ),
-            builder: (context, infoSnapshot) {
-              final updateInfo = infoSnapshot.data;
-              final message = updateInfo?['message'] as String?;
-
-              return _buildModuleCardContent(
-                module,
-                screenSize,
-                hasUpdate,
-                message,
-                contentUpdateCount,
-              );
-            },
-          );
-        }
-
-        return _buildModuleCardContent(
-          module,
-          screenSize,
-          false,
-          null,
-          contentUpdateCount,
-        );
-      },
-    );
-  }
-
-  /// Build the actual module card content
-  Widget _buildModuleCardContent(
-    ModuleModel module,
-    Size screenSize,
-    bool hasUpdate,
-    String? message,
-    int contentUpdateCount,
-  ) {
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: 16,
-        left: screenSize.width * 0.05,
-        right: screenSize.width * 0.05,
-      ),
-      child: Container(
-        width: double.infinity,
-        constraints: BoxConstraints(
-          minHeight: screenSize.height * 0.085,
-        ),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: const Color(0xFF656BE9),
-            width: 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () {
-              // Navigate immediately for instant response
-              AppNavigator.navigateTo(
-                context: context,
-                page: ContentTypesScreen(
-                  course: widget.course,
-                  module: module,
-                  isExamOverviewMode: widget.isExamOverviewMode,
-                ),
-              ).then((_) {
-                if (mounted) setState(() {});
-              });
-
-              // Mark module as seen in the background (don't await)
-              if (hasUpdate && _currentUserId != null) {
-                _updateService.markModuleAsSeen(
-                  widget.course.id,
-                  module.id,
-                  _currentUserId!,
-                ).then((_) {
-                  if (mounted) setState(() {});
-                }).catchError((error) {
-                  Logger.w('Failed to mark module as seen: $error');
-                });
-              }
-            },
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // Module title (left-aligned, takes most space)
-                  Expanded(
-                    child: Text(
-                      module.title,
-                      style: GoogleFonts.inter(
-                        fontSize: screenSize.width * 0.05,
-                        fontWeight: FontWeight.w500,
-                        color: const Color(0xFF2E2C6A),
-                      ),
-                      textAlign: TextAlign.left,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  // Update indicators (on the right side)
-                  if (hasUpdate) ...[
-                    const SizedBox(width: 12),
-                    UpdateBadge(
-                      hasUpdate: true,
-                      size: 14,
-                    ),
-                    const SizedBox(width: 6),
-                    PulsingDot(
-                      hasUpdate: true,
-                      size: 10,
-                    ),
-                  ],
-                  // Content update count badge (if no module update but has content updates)
-                  if (!hasUpdate && contentUpdateCount > 0) ...[
-                    const SizedBox(width: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.blue,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '+$contentUpdateCount',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                  // Play arrow icon
-                  const SizedBox(width: 12),
-                  const Icon(
-                    Icons.play_arrow,
-                    color: Color(0xFF171A1F),
-                    size: 24,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _buildEmptyModulesState(Size screenSize) {
     // Determine if modules exist but are inactive vs no modules at all
@@ -445,7 +265,6 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
-    final safeAreaBottom = MediaQuery.of(context).padding.bottom;
 
     return PopScope(
       // Allow back navigation when not in exam overview mode
@@ -533,7 +352,7 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                                       padding: const EdgeInsets.only(bottom: 16),
                                       child: _buildModernModuleCard(module, index),
                                     );
-                                  }).toList(),
+                                  }),
                               ],
                             ),
                           ),
@@ -557,35 +376,27 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
     );
   }
 
-  /// Build modern module card matching the new design with uniform sizing
+  /// Build modern module card. Badge is derived from hasModuleUpdate.
   Widget _buildModernModuleCard(ModuleModel module, int index) {
     // Alternate between blue and light blue backgrounds
     final backgroundColor = index % 2 == 0
         ? const Color(0xFF1565C0)
         : const Color(0xFF29ACD6);
 
-    return FutureBuilder<List<dynamic>>(
+    return FutureBuilder<bool>(
+      key: ValueKey('${module.id}_$_refreshKey'),
       future: _currentUserId != null
-          ? Future.wait([
-              _updateService.hasModuleUpdate(
-                widget.course.id,
-                module.id,
-                _currentUserId!,
-              ),
-              _updateService.getContentUpdateCount(
-                widget.course.id,
-                module.id,
-                _currentUserId!,
-              ),
-            ])
-          : Future.value([false, 0]),
+          ? _updateService.hasModuleUpdate(
+              widget.course.id,
+              module.id,
+              _currentUserId!,
+            )
+          : Future.value(false),
       builder: (context, snapshot) {
-        final hasUpdate = (snapshot.data?[0] as bool?) ?? false;
-        final contentUpdateCount = (snapshot.data?[1] as int?) ?? 0;
+        final hasUpdate = snapshot.data ?? false;
 
         return GestureDetector(
           onTap: () {
-            // Navigate immediately for instant response
             AppNavigator.navigateTo(
               context: context,
               page: ContentTypesScreen(
@@ -593,24 +404,16 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                 module: module,
                 isExamOverviewMode: widget.isExamOverviewMode,
               ),
-            );
-
-            // Mark module as seen in the background (don't await)
-            if (hasUpdate && _currentUserId != null) {
-              _updateService.markModuleAsSeen(
-                widget.course.id,
-                module.id,
-                _currentUserId!,
-              ).then((_) {
-                if (mounted) setState(() {});
-              }).catchError((error) {
-                Logger.w('Failed to mark module as seen: $error');
-              });
-            }
+            ).then((_) {
+              if (!mounted) return;
+              // Force re-fetch of badge state for all modules.
+              _refreshKey++;
+              setState(() {});
+            });
           },
           child: Container(
             width: double.infinity,
-            height: _getCardHeight(module.title), // Dynamic height based on title length
+            height: _getCardHeight(module.title),
             decoration: BoxDecoration(
               color: backgroundColor,
               borderRadius: BorderRadius.circular(16),
@@ -632,35 +435,8 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                     alignment: Alignment.centerRight,
                     child: Padding(
                       padding: const EdgeInsets.only(right: 10),
-                      child: hasUpdate || contentUpdateCount > 0
-                          ? IgnorePointer(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 7.2, vertical: 3.6),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange,
-                                  borderRadius: BorderRadius.circular(10.8),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.circle,
-                                      size: 7.2,
-                                      color: Colors.white,
-                                    ),
-                                    const SizedBox(width: 3.6),
-                                    Text(
-                                      'NEW',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
+                      child: hasUpdate
+                          ? _buildUpdateBadgePill()
                           : const SizedBox.shrink(),
                     ),
                   ),
@@ -714,6 +490,38 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
           ),
         );
       },
+    );
+  }
+
+  /// The standard "UPDATE" badge pill.
+  Widget _buildUpdateBadgePill() {
+    return IgnorePointer(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7.2, vertical: 3.6),
+        decoration: BoxDecoration(
+          color: Colors.orange,
+          borderRadius: BorderRadius.circular(10.8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.circle,
+              size: 7.2,
+              color: Colors.white,
+            ),
+            const SizedBox(width: 3.6),
+            Text(
+              'UPDATE',
+              style: GoogleFonts.inter(
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

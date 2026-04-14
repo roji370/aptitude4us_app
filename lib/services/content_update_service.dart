@@ -3,44 +3,374 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/logger.dart';
 
-/// Service to handle content update notifications
-/// Detects and tracks course/module updates from the backend
+/// Simplified content-update badge service.
+///
+/// Design: bottom-up cascade with a single "UPDATE" badge.
+///
+///   Content Item  →  Content Type  →  Module  →  Course
+///
+/// Content items are the source of truth. A parent card shows an "UPDATE"
+/// badge when ANY of its children have unseen items. The badge clears only
+/// when ALL badged children have been visited. Cards without badges never
+/// block parent clearing.
+///
+/// Session-scoped optimistic set: when the user taps an item, the badge
+/// vanishes instantly. Firestore persistence happens in the background.
 class ContentUpdateService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseFunctions _functions = FirebaseFunctions.instance;
 
   // ---------------------------------------------------------------------------
-  // Optimistic seen-item cache (session-scoped, static so it survives
-  // screen disposal / re-creation during navigation).
-  // SharedPreferences provides cross-session persistence underneath.
+  // Session-scoped optimistic seen set (static — survives screen disposal).
+  // Keyed by content-item IDs only. Parents derive their state from children.
   // ---------------------------------------------------------------------------
-  static final _optimisticSeenItems = <String>{};
+  static final _seenItemIds = <String>{};
 
-  /// Immediately mark [contentItemId] as seen in memory.
-  /// Call this on item-card tap so the badge clears instantly.
-  void markSeenOptimistically(String contentItemId) =>
-      _optimisticSeenItems.add(contentItemId);
+  /// Mark a content item as seen in memory (instant badge clear).
+  void markItemSeen(String itemId) => _seenItemIds.add(itemId);
 
-  /// Returns true if the item was already tapped this session.
-  bool isOptimisticallySeen(String contentItemId) =>
-      _optimisticSeenItems.contains(contentItemId);
+  /// Check if a content item has been tapped this session.
+  bool isItemSeen(String itemId) => _seenItemIds.contains(itemId);
 
-  /// Helper to check if an update document is fully seen by this user.
+  // ---------------------------------------------------------------------------
+  // Firestore queries
+  // ---------------------------------------------------------------------------
+
+  /// Fetch all update docs for a module. Public so callers can cache the
+  /// result and pass it to [getUnseenItemIds] to avoid duplicate reads.
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> fetchModuleUpdateDocs(
+    String courseId,
+    String moduleId,
+    String userId,
+  ) async {
+    final snapshot = await _firestore
+        .collection('contentUpdates')
+        .where('courseId', isEqualTo: courseId)
+        .where('moduleId', isEqualTo: moduleId)
+        .where('notifiedUsers', arrayContains: userId)
+        .get();
+    return snapshot.docs;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Core: get the set of unseen content-item IDs for a module
+  // ---------------------------------------------------------------------------
+
+  /// Returns every content-item ID that has an unseen update within
+  /// [moduleId]. This is the single source of truth for the badge cascade.
   ///
-  /// For normal docs: checks Firestore `seenBy` array or local `seen_update_` flag.
-  /// For `content_change` docs with per-item `itemIds`: considers the doc seen
-  /// only when EVERY individual itemId has a `seen_item_<docId>_<itemId>` flag
-  /// set locally. This is what makes the full cascade work:
-  ///   Content Item seen → Content Type badge clears → Module badge clears → Course badge clears
-  Future<bool> _isUpdateSeen(Map<String, dynamic> data, String docId, String userId) async {
+  /// [validItemIds] — optional set of item IDs that actually exist in the
+  /// module. Orphaned IDs (deleted items still referenced in update docs)
+  /// are filtered out so they don't cause permanently stuck badges.
+  ///
+  /// [cachedDocs] — pre-fetched docs from [fetchModuleUpdateDocs] to
+  /// avoid redundant Firestore reads.
+  Future<Set<String>> getUnseenItemIds(
+    String courseId,
+    String moduleId,
+    String userId, {
+    Set<String>? validItemIds,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>>? cachedDocs,
+  }) async {
+    try {
+      final docs = cachedDocs ??
+          await fetchModuleUpdateDocs(courseId, moduleId, userId);
+      final prefs = await SharedPreferences.getInstance();
+      final unseenIds = <String>{};
+
+      for (var doc in docs) {
+        final data = doc.data();
+        final type = data['type'] as String? ?? '';
+
+        // ── Per-item tracking docs (content_* with contentChanges[].itemIds) ──
+        if (type.startsWith('content_') && !type.startsWith('content_item_')) {
+          // If the whole doc is already globally seen, skip all its items.
+          final seenBy = List<String>.from(data['seenBy'] ?? []);
+          if (seenBy.contains(userId)) continue;
+          if (prefs.getBool('seen_update_${doc.id}') ?? false) continue;
+
+          final contentChanges = data['contentChanges'];
+          if (contentChanges is List && contentChanges.isNotEmpty) {
+            for (final change in contentChanges) {
+              if (change is Map) {
+                final itemIds = change['itemIds'];
+                if (itemIds is List) {
+                  for (final itemId in itemIds.whereType<String>()) {
+                    // Skip orphaned IDs
+                    if (validItemIds != null &&
+                        !validItemIds.contains(itemId)) {
+                      continue;
+                    }
+                    // Skip items already seen this session
+                    if (_seenItemIds.contains(itemId)) continue;
+                    // Skip items marked seen in local prefs
+                    final localKey = 'seen_item_${doc.id}_$itemId';
+                    if (prefs.getBool(localKey) ?? false) continue;
+
+                    unseenIds.add(itemId);
+                  }
+                }
+                // contentChanges present but no itemIds → legacy format,
+                // treat as invisible (already seen) to avoid stuck badges.
+              }
+            }
+          }
+          // No contentChanges at all → legacy doc, skip.
+          continue;
+        }
+
+        // ── Single-item docs (content_item_*) ────────────────────────────────
+        if (type.startsWith('content_item_')) {
+          final seenBy = List<String>.from(data['seenBy'] ?? []);
+          if (seenBy.contains(userId)) continue;
+          if (prefs.getBool('seen_update_${doc.id}') ?? false) continue;
+
+          final itemId =
+              (data['contentItemId'] ?? data['itemId']) as String?;
+          if (itemId == null) continue;
+          if (validItemIds != null && !validItemIds.contains(itemId)) {
+            continue;
+          }
+          if (_seenItemIds.contains(itemId)) continue;
+
+          unseenIds.add(itemId);
+          continue;
+        }
+
+        // ── Module-level docs (module_*) and other non-content docs ──────────
+        // These don't carry item IDs — handled separately by
+        // [_hasUnseenModuleLevelDocs] and [markModuleLevelDocsSeen].
+      }
+
+      return unseenIds;
+    } catch (e) {
+      Logger.e('Error getting unseen item IDs: $e');
+      return {};
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Module-level badge check  (for module cards)
+  // ---------------------------------------------------------------------------
+
+  /// Returns true if the module has ANY unseen updates — either per-item
+  /// content updates or module-level docs.
+  ///
+  /// Automatically loads valid item IDs from the module document to filter
+  /// out orphaned IDs (deleted items still referenced in update docs).
+  Future<bool> hasModuleUpdate(
+    String courseId,
+    String moduleId,
+    String userId, {
+    Set<String>? validItemIds,
+  }) async {
+    try {
+      final docs = await fetchModuleUpdateDocs(courseId, moduleId, userId);
+
+      // If caller didn't provide valid IDs, load them from the module doc.
+      // This prevents orphaned item IDs from causing permanently stuck badges.
+      final effectiveValidIds =
+          validItemIds ?? await _loadValidItemIds(moduleId);
+
+      // Check for unseen content items
+      final unseenItems = await getUnseenItemIds(
+        courseId,
+        moduleId,
+        userId,
+        validItemIds: effectiveValidIds,
+        cachedDocs: docs,
+      );
+      if (unseenItems.isNotEmpty) return true;
+
+      // Check for unseen module-level docs (module_* type)
+      return _hasUnseenNonContentDocs(docs, userId);
+    } catch (e) {
+      Logger.e('Error checking module updates: $e');
+      return false;
+    }
+  }
+
+  /// Load all valid content-item IDs from a module document.
+  /// Returns null if IDs can't be determined (skip orphan filtering).
+  /// Returns a non-empty set when IDs are found (filter orphans).
+  Future<Set<String>?> _loadValidItemIds(String moduleId) async {
+    try {
+      final moduleDoc =
+          await _firestore.collection('modules').doc(moduleId).get();
+      if (!moduleDoc.exists) return null;
+
+      final data = moduleDoc.data();
+      if (data == null || !data.containsKey('content')) return null;
+
+      final content = data['content'] as Map<String, dynamic>;
+      final validIds = <String>{};
+
+      // Extract IDs from each content type array (videos, pdfs, notes, etc.)
+      for (final entry in content.entries) {
+        final items = entry.value;
+        if (items is List) {
+          int index = 0;
+          for (final item in items) {
+            if (item is Map) {
+              // Prefer explicit 'id' field; fall back to stable generated ID
+              final id = item['id'] as String? ??
+                  '${moduleId}_${entry.key == 'notes' ? 'text' : entry.key.replaceAll(RegExp(r's$'), '')}_${item['title'] ?? ''}_${item['order'] ?? index}';
+              validIds.add(id);
+            }
+            index++;
+          }
+        }
+      }
+
+      // Return null if no items found (module exists but has empty content)
+      return validIds.isNotEmpty ? validIds : null;
+    } catch (e) {
+      Logger.w('Failed to load valid item IDs for module $moduleId: $e');
+      return null; // null = skip filtering (all IDs considered valid)
+    }
+  }
+
+  /// Returns true if there are unseen docs whose type does NOT start with
+  /// `content_`. These are module-level notifications (e.g. module renamed).
+  Future<bool> _hasUnseenNonContentDocs(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    String userId,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    for (var doc in docs) {
+      final data = doc.data();
+      final type = data['type'] as String? ?? '';
+      if (type.startsWith('content_')) continue; // handled by getUnseenItemIds
+
+      final seenBy = List<String>.from(data['seenBy'] ?? []);
+      if (seenBy.contains(userId)) continue;
+      if (prefs.getBool('seen_update_${doc.id}') ?? false) continue;
+
+      return true; // found an unseen module-level doc
+    }
+    return false;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Course-level badge check  (for course cards)
+  // ---------------------------------------------------------------------------
+
+  /// Returns true if ANY update doc in the course is unseen.
+  ///
+  /// Uses the exact same per-module logic as [hasModuleUpdate] so that
+  /// course and module badge states are always consistent.
+  /// Only checks modules that are published (matching what the user sees).
+  Future<bool> hasCourseUpdate(String courseId, String userId) async {
+    try {
+      // Load the set of published module IDs — only these are visible to users.
+      // Update docs referencing deleted/unpublished modules are ignored.
+      final publishedModulesSnap = await _firestore
+          .collection('modules')
+          .where('courseId', isEqualTo: courseId)
+          .where('isPublished', isEqualTo: true)
+          .get();
+      final publishedModuleIds =
+          publishedModulesSnap.docs.map((d) => d.id).toSet();
+      Logger.i('[hasCourseUpdate] course=$courseId, publishedModules=$publishedModuleIds');
+
+      final updates = await _firestore
+          .collection('contentUpdates')
+          .where('courseId', isEqualTo: courseId)
+          .where('notifiedUsers', arrayContains: userId)
+          .get();
+      Logger.i('[hasCourseUpdate] total update docs: ${updates.docs.length}');
+
+      final prefs = await SharedPreferences.getInstance();
+
+      // Group docs by moduleId.
+      final docsByModule =
+          <String, List<QueryDocumentSnapshot<Map<String, dynamic>>>>{};
+      final docsWithoutModule =
+          <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+      int skippedOrphaned = 0;
+
+      for (var doc in updates.docs) {
+        final moduleId = doc.data()['moduleId'] as String?;
+        if (moduleId != null) {
+          // Skip docs for modules that don't exist or aren't published.
+          if (!publishedModuleIds.contains(moduleId)) {
+            skippedOrphaned++;
+            Logger.i('[hasCourseUpdate] SKIP orphaned doc ${doc.id} (module=$moduleId not published)');
+            continue;
+          }
+          docsByModule.putIfAbsent(moduleId, () => []).add(doc);
+        } else {
+          docsWithoutModule.add(doc);
+        }
+      }
+      Logger.i('[hasCourseUpdate] docsWithoutModule=${docsWithoutModule.length}, '
+          'moduleGroups=${docsByModule.length}, skippedOrphaned=$skippedOrphaned');
+
+      // 1. Check course-level docs (no moduleId).
+      for (var doc in docsWithoutModule) {
+        final data = doc.data();
+        final seenBy = List<String>.from(data['seenBy'] ?? []);
+        if (seenBy.contains(userId)) continue;
+        if (prefs.getBool('seen_update_${doc.id}') ?? false) continue;
+        Logger.i('[hasCourseUpdate] ⚠️ UNSEEN course-level doc: ${doc.id}, type=${data['type']}');
+        return true; // unseen course-level doc
+      }
+
+      // 2. Check each published module — same logic as hasModuleUpdate.
+      for (var entry in docsByModule.entries) {
+        final moduleId = entry.key;
+        final moduleDocs = entry.value;
+
+        final validIds = await _loadValidItemIds(moduleId);
+        Logger.i('[hasCourseUpdate] module=$moduleId, validIds=${validIds?.length ?? "null (no filter)"}, docs=${moduleDocs.length}');
+
+        // Unseen content items?
+        final unseenItems = await getUnseenItemIds(
+          courseId,
+          moduleId,
+          userId,
+          validItemIds: validIds,
+          cachedDocs: moduleDocs,
+        );
+        if (unseenItems.isNotEmpty) {
+          Logger.i('[hasCourseUpdate] ⚠️ UNSEEN items in module $moduleId: $unseenItems');
+          return true;
+        }
+
+        // Unseen module-level docs?
+        if (await _hasUnseenNonContentDocs(moduleDocs, userId)) {
+          Logger.i('[hasCourseUpdate] ⚠️ UNSEEN module-level docs in module $moduleId');
+          return true;
+        }
+      }
+
+      Logger.i('[hasCourseUpdate] ✅ Course $courseId fully seen');
+      return false;
+    } catch (e) {
+      Logger.e('Error checking course updates: $e');
+      return false;
+    }
+  }
+
+  /// Check if a single update document is fully seen.
+  ///
+  /// For per-item tracking docs (contentChanges with itemIds): the doc is
+  /// only considered seen when EVERY non-orphaned itemId has been visited.
+  /// [validItemIds] filters out orphaned IDs (deleted items) so they don't
+  /// cause permanently stuck badges.
+  /// Session-scoped [_seenItemIds] are included in the check.
+  Future<bool> _isDocSeen(
+    Map<String, dynamic> data,
+    String docId,
+    String userId,
+    SharedPreferences prefs, {
+    Set<String>? validItemIds,
+  }) async {
     final seenBy = List<String>.from(data['seenBy'] ?? []);
     if (seenBy.contains(userId)) return true;
-
-    final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool('seen_update_$docId') ?? false) return true;
 
-    // For content_change docs that use per-item itemIds tracking:
-    // only consider the doc seen once EVERY itemId has been individually seen.
+    // Per-item tracking: seen only when ALL non-orphaned items are seen.
     final contentChanges = data['contentChanges'];
     if (contentChanges is List && contentChanges.isNotEmpty) {
       final allItemIds = <String>[];
@@ -52,15 +382,31 @@ class ContentUpdateService {
           }
         }
       }
+
       if (allItemIds.isNotEmpty) {
-        // Has per-item tracking: seen only when ALL items are visited
-        return allItemIds.every(
-          (itemId) => prefs.getBool('seen_item_${docId}_$itemId') ?? false,
-        );
-      } else {
-        // Legacy format: contentChanges present but no itemIds.
-        // We cannot track this per-item, so treat it as invisible (already seen).
-        // This prevents legacy docs from driving badges that can never clear correctly.
+        // Filter orphaned IDs — only check items that still exist.
+        final effectiveIds = validItemIds != null
+            ? allItemIds.where((id) => validItemIds.contains(id)).toList()
+            : allItemIds;
+
+        // All items are orphaned → treat doc as seen (no valid items left).
+        if (effectiveIds.isEmpty) return true;
+
+        return effectiveIds.every((itemId) =>
+            _seenItemIds.contains(itemId) ||
+            (prefs.getBool('seen_item_${docId}_$itemId') ?? false));
+      }
+
+      // contentChanges exists but no itemIds → legacy, treat as seen.
+      return true;
+    }
+
+    // content_item_* docs: check session-scoped seen set via contentItemId/itemId
+    final type = data['type'] as String? ?? '';
+    if (type.startsWith('content_item_')) {
+      final itemId =
+          (data['contentItemId'] ?? data['itemId']) as String?;
+      if (itemId != null && _seenItemIds.contains(itemId)) {
         return true;
       }
     }
@@ -68,250 +414,12 @@ class ContentUpdateService {
     return false;
   }
 
-  /// Check if a course has unseen updates
-  Future<bool> hasCourseUpdate(String courseId, String userId) async {
-    try {
-      final updates = await _firestore
-          .collection('contentUpdates')
-          .where('courseId', isEqualTo: courseId)
-          .where('notifiedUsers', arrayContains: userId)
-          .get();
+  // ---------------------------------------------------------------------------
+  // Persistence: mark a content item as seen in SharedPreferences + Firestore
+  // ---------------------------------------------------------------------------
 
-      // Check if any update hasn't been seen by this user
-      for (var doc in updates.docs) {
-        if (!(await _isUpdateSeen(doc.data(), doc.id, userId))) {
-          return true; // Has unseen update
-        }
-      }
-
-      return false;
-    } catch (e) {
-      Logger.e('Error checking course updates: $e');
-      return false;
-    }
-  }
-
-  /// Check if a module has unseen updates
-  Future<bool> hasModuleUpdate(
-    String courseId,
-    String moduleId,
-    String userId,
-  ) async {
-    try {
-      final updates = await _firestore
-          .collection('contentUpdates')
-          .where('courseId', isEqualTo: courseId)
-          .where('moduleId', isEqualTo: moduleId)
-          .where('notifiedUsers', arrayContains: userId)
-          .get();
-
-      for (var doc in updates.docs) {
-        if (!(await _isUpdateSeen(doc.data(), doc.id, userId))) {
-          return true;
-        }
-      }
-
-      return false;
-    } catch (e) {
-      Logger.e('Error checking module updates: $e');
-      return false;
-    }
-  }
-
-  /// Get the highest priority update for a course
-  Future<Map<String, dynamic>?> getCourseUpdateInfo(
-    String courseId,
-    String userId,
-  ) async {
-    try {
-      final updates = await _firestore
-          .collection('contentUpdates')
-          .where('courseId', isEqualTo: courseId)
-          .where('notifiedUsers', arrayContains: userId)
-          .orderBy('timestamp', descending: true)
-          .limit(10)
-          .get();
-
-      // Filter unseen updates and get highest priority
-      final unseenUpdates = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-      for (var doc in updates.docs) {
-        if (!(await _isUpdateSeen(doc.data(), doc.id, userId))) {
-          unseenUpdates.add(doc);
-        }
-      }
-
-      if (unseenUpdates.isEmpty) return null;
-
-      final highest = unseenUpdates.first.data();
-      highest['id'] = unseenUpdates.first.id;
-      return highest;
-    } catch (e) {
-      Logger.e('Error getting course update info: $e');
-      return null;
-    }
-  }
-
-  /// Mark course update as seen
-  Future<void> markCourseAsSeen(String courseId, String userId) async {
-    try {
-      final updates = await _firestore
-          .collection('contentUpdates')
-          .where('courseId', isEqualTo: courseId)
-          .where('notifiedUsers', arrayContains: userId)
-          .get();
-
-      final batch = _firestore.batch();
-      int markedCount = 0;
-
-      for (var doc in updates.docs) {
-        final type = doc.data()['type'] as String? ?? '';
-        // Skip module, content-type and content-item updates
-        if (type.startsWith('module_') || type.startsWith('content_')) continue;
-
-        final seenBy = List<String>.from(doc.data()['seenBy'] ?? []);
-        if (!seenBy.contains(userId)) {
-          // Immediately mark as seen locally to prevent UI lag
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('seen_update_${doc.id}', true);
-
-          // Call cloud function to mark as seen
-          try {
-            await _functions.httpsCallable('markUpdateAsSeen').call({
-              'updateId': doc.id,
-            });
-            markedCount++;
-          } catch (e) {
-            Logger.e('Error calling markUpdateAsSeen function: $e');
-            // Fallback: Update locally if cloud function fails
-            batch.update(doc.reference, {
-              'seenBy': FieldValue.arrayUnion([userId]),
-            });
-          }
-        }
-      }
-
-      if (markedCount > 0) {
-        Logger.i('Marked $markedCount updates as seen for course $courseId');
-      }
-
-      // Commit batch if there were local updates
-      if (markedCount < updates.docs.length) {
-        await batch.commit();
-      }
-    } catch (e) {
-      Logger.e('Error marking course as seen: $e');
-    }
-  }
-
-  /// Mark module update as seen
-  Future<void> markModuleAsSeen(
-    String courseId,
-    String moduleId,
-    String userId,
-  ) async {
-    try {
-      final updates = await _firestore
-          .collection('contentUpdates')
-          .where('courseId', isEqualTo: courseId)
-          .where('moduleId', isEqualTo: moduleId)
-          .where('notifiedUsers', arrayContains: userId)
-          .get();
-
-      for (var doc in updates.docs) {
-        final type = doc.data()['type'] as String? ?? '';
-        // Skip content-type and content-item updates
-        if (type.startsWith('content_')) continue;
-
-        final seenBy = List<String>.from(doc.data()['seenBy'] ?? []);
-        if (!seenBy.contains(userId)) {
-          // Immediately mark as seen locally to prevent UI lag
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('seen_update_${doc.id}', true);
-
-          try {
-            await _functions.httpsCallable('markUpdateAsSeen').call({
-              'updateId': doc.id,
-            });
-          } catch (e) {
-            Logger.e('Error calling markUpdateAsSeen function: $e');
-          }
-        }
-      }
-
-      Logger.i('Marked module $moduleId as seen');
-    } catch (e) {
-      Logger.e('Error marking module as seen: $e');
-    }
-  }
-
-  /// Get all updates for a user (for a potential updates screen)
-  Stream<List<Map<String, dynamic>>> getUserUpdates(String userId) {
-    return _firestore
-        .collection('contentUpdates')
-        .where('notifiedUsers', arrayContains: userId)
-        .orderBy('timestamp', descending: true)
-        .limit(50)
-        .snapshots()
-        .asyncMap((snapshot) async {
-      final prefs = await SharedPreferences.getInstance();
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id;
-
-        // Check if this user has seen it
-        final seenBy = List<String>.from(data['seenBy'] ?? []);
-        final isSeenLocally = prefs.getBool('seen_update_${doc.id}') ?? false;
-        data['isNew'] = !seenBy.contains(userId) && !isSeenLocally;
-
-        return data;
-      }).toList();
-    });
-  }
-
-  /// Get count of unseen updates for a user
-  Future<int> getUnseenUpdatesCount(String userId) async {
-    try {
-      final updates = await _firestore
-          .collection('contentUpdates')
-          .where('notifiedUsers', arrayContains: userId)
-          .get();
-
-      int unseenCount = 0;
-      for (var doc in updates.docs) {
-        if (!(await _isUpdateSeen(doc.data(), doc.id, userId))) {
-          unseenCount++;
-        }
-      }
-
-      return unseenCount;
-    } catch (e) {
-      Logger.e('Error getting unseen updates count: $e');
-      return 0;
-    }
-  }
-
-  /// Stream of unseen updates count
-  Stream<int> watchUnseenUpdatesCount(String userId) {
-    return _firestore
-        .collection('contentUpdates')
-        .where('notifiedUsers', arrayContains: userId)
-        .snapshots()
-        .asyncMap((snapshot) async {
-      final prefs = await SharedPreferences.getInstance();
-      int count = 0;
-      for (var doc in snapshot.docs) {
-        final seenBy = List<String>.from(doc.data()['seenBy'] ?? []);
-        final isSeenLocally = prefs.getBool('seen_update_${doc.id}') ?? false;
-        if (!seenBy.contains(userId) && !isSeenLocally) {
-          count++;
-        }
-      }
-      return count;
-    });
-  }
-
-  /// Maps our internal contentType string to the plural key used in admin's contentType field
-  /// e.g. 'video' → 'videos', 'pdf' → 'pdfs', 'text' (notes) → 'notes'
+  /// Maps our internal contentType string to the plural key used in admin's
+  /// contentType field.
   String _contentTypeToPluralKey(String contentType) {
     switch (contentType.toLowerCase()) {
       case 'video':
@@ -331,11 +439,17 @@ class ContentUpdateService {
     }
   }
 
-  /// Helper to check if a content type matches the update document
-  bool _matchesContentType(Map<String, dynamic> data, String contentType, String pluralKey) {
+  /// Helper to check if a content type matches the update document.
+  bool _matchesContentType(
+    Map<String, dynamic> data,
+    String contentType,
+    String pluralKey,
+  ) {
     if (data['contentType'] != null) {
       final docContentType = data['contentType'] as String;
-      if (docContentType == pluralKey || docContentType == contentType) return true;
+      if (docContentType == pluralKey || docContentType == contentType) {
+        return true;
+      }
     }
     if (data['contentChanges'] != null && data['contentChanges'] is List) {
       for (var change in data['contentChanges']) {
@@ -345,168 +459,9 @@ class ContentUpdateService {
     return false;
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Content-Type Level  (e.g. content_videos_added)
-  //
-  // NOTE: All queries here intentionally use only courseId + moduleId +
-  // notifiedUsers (no contentType WHERE clause, no orderBy). Adding extra
-  // equality filters or orderBy on top of an arrayContains clause requires
-  // a Firestore composite index that may not exist. All extra filtering is
-  // done in memory after fetching, matching the pattern used by the working
-  // hasModuleUpdate / getContentUpdateCount methods.
-  // ─────────────────────────────────────────────────────────────
-
-  /// Fetch all module-level updates from Firestore (base query, no index needed)
-  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _fetchModuleUpdates(
-    String courseId,
-    String moduleId,
-    String userId,
-  ) async {
-    final snapshot = await _firestore
-        .collection('contentUpdates')
-        .where('courseId', isEqualTo: courseId)
-        .where('moduleId', isEqualTo: moduleId)
-        .where('notifiedUsers', arrayContains: userId)
-        .get();
-    return snapshot.docs;
-  }
-
-  /// Check if a specific content type has unseen updates (added / removed / reordered)
-  Future<bool> hasContentTypeUpdate(
-    String courseId,
-    String moduleId,
-    String contentType,
-    String userId,
-  ) async {
-    try {
-      final pluralKey = _contentTypeToPluralKey(contentType);
-      final docs = await _fetchModuleUpdates(courseId, moduleId, userId);
-
-      for (var doc in docs) {
-        final data = doc.data();
-        final type = data['type'] as String? ?? '';
-        if (!type.startsWith('content_') || type.startsWith('content_item_')) continue;
-        if (!_matchesContentType(data, contentType, pluralKey)) continue;
-        if (!(await _isUpdateSeen(data, doc.id, userId))) return true;
-      }
-      return false;
-    } catch (e) {
-      Logger.e('Error checking content type updates: $e');
-      return false;
-    }
-  }
-
-  /// Get the highest-priority unseen update for a specific content type
-  Future<Map<String, dynamic>?> getContentTypeUpdateInfo(
-    String courseId,
-    String moduleId,
-    String contentType,
-    String userId,
-  ) async {
-    try {
-      final pluralKey = _contentTypeToPluralKey(contentType);
-      final docs = await _fetchModuleUpdates(courseId, moduleId, userId);
-
-      final unseenUpdates = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-      for (var doc in docs) {
-        final data = doc.data();
-        final type = data['type'] as String? ?? '';
-        if (!type.startsWith('content_') || type.startsWith('content_item_')) continue;
-        if (!_matchesContentType(data, contentType, pluralKey)) continue;
-        if (!(await _isUpdateSeen(data, doc.id, userId))) {
-          unseenUpdates.add(doc);
-        }
-      }
-
-      if (unseenUpdates.isEmpty) return null;
-
-      final highest = Map<String, dynamic>.from(unseenUpdates.first.data());
-      highest['id'] = unseenUpdates.first.id;
-      return highest;
-    } catch (e) {
-      Logger.e('Error getting content type update info: $e');
-      return null;
-    }
-  }
-
-  /// Mark all unseen updates for a specific content type as seen
-  Future<void> markContentTypeAsSeen(
-    String courseId,
-    String moduleId,
-    String contentType,
-    String userId,
-  ) async {
-    try {
-      final pluralKey = _contentTypeToPluralKey(contentType);
-      final docs = await _fetchModuleUpdates(courseId, moduleId, userId);
-
-      for (var doc in docs) {
-        final data = doc.data();
-        final type = data['type'] as String? ?? '';
-        if (!type.startsWith('content_') || type.startsWith('content_item_')) continue;
-        if (!_matchesContentType(data, contentType, pluralKey)) continue;
-        final seenBy = List<String>.from(data['seenBy'] ?? []);
-        if (!seenBy.contains(userId)) {
-          // If this doc tracks individual item IDs, do NOT globally mark it as seen here.
-          // Each item's badge is cleared individually by markContentItemAsSeen.
-          final contentChanges = data['contentChanges'];
-          final hasItemIdTracking = contentChanges is List &&
-              contentChanges.any((c) => c is Map && c['itemIds'] is List);
-          if (hasItemIdTracking) continue;
-
-          // Immediately mark as seen locally to prevent UI lag
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('seen_update_${doc.id}', true);
-
-          try {
-            await _functions.httpsCallable('markUpdateAsSeen').call({
-              'updateId': doc.id,
-            });
-          } catch (e) {
-            Logger.e('Error calling markUpdateAsSeen: $e');
-            await doc.reference.update({
-              'seenBy': FieldValue.arrayUnion([userId]),
-            });
-          }
-        }
-      }
-      Logger.i('Marked $contentType updates as seen for module $moduleId');
-    } catch (e) {
-      Logger.e('Error marking content type as seen: $e');
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // Content-Item Level  (e.g. content_item_title_changed)
-  //
-  // Admin docs are inconsistent: the record structure uses 'contentItemId'
-  // but example notifications use 'itemId'. Both field names are checked.
-  // ─────────────────────────────────────────────────────────────
-
-  /// Returns true if a Firestore doc belongs to the given content item,
-  /// checking both 'contentItemId' and 'itemId' field names.
-  bool _docMatchesContentItem(Map<String, dynamic> data, String contentItemId) {
-    final id1 = data['contentItemId'] as String?;
-    final id2 = data['itemId'] as String?;
-    return id1 == contentItemId || id2 == contentItemId;
-  }
-
-  /// Check if a specific content item has unseen updates
-  Future<bool> hasContentItemUpdate(
-    String courseId,
-    String moduleId,
-    String contentItemId,
-    String contentType,
-    String userId,
-  ) async {
-    final info = await getContentItemUpdateInfo(
-      courseId, moduleId, contentItemId, contentType, userId,
-    );
-    return info != null;
-  }
-
-  /// Get the highest-priority unseen update for a specific content item
-  Future<Map<String, dynamic>?> getContentItemUpdateInfo(
+  /// Persist a content item as seen. Sets per-item local pref keys and
+  /// calls the cloud function for content_item_* docs.
+  Future<void> persistItemSeen(
     String courseId,
     String moduleId,
     String contentItemId,
@@ -515,179 +470,88 @@ class ContentUpdateService {
   ) async {
     try {
       final pluralKey = _contentTypeToPluralKey(contentType);
-      final docs = await _fetchModuleUpdates(courseId, moduleId, userId);
+      final docs = await fetchModuleUpdateDocs(courseId, moduleId, userId);
       final prefs = await SharedPreferences.getInstance();
 
-      final unseenUpdates = <Map<String, dynamic>>[];
-
       for (var doc in docs) {
         final data = doc.data();
         final type = data['type'] as String? ?? '';
-        final isGlobalSeen = await _isUpdateSeen(data, doc.id, userId);
 
+        // ── content_item_* docs — single item per doc ──
         if (type.startsWith('content_item_')) {
-          if (_docMatchesContentItem(data, contentItemId) && !isGlobalSeen) {
-             final match = Map<String, dynamic>.from(data);
-             match['id'] = doc.id;
-             unseenUpdates.add(match);
-             continue;
-          }
-        }
-
-        if (type.startsWith('content_') && !type.startsWith('content_item_')) {
-          if (_matchesContentType(data, contentType, pluralKey)) {
-            final contentChanges = data['contentChanges'];
-            if (contentChanges is List) {
-              // This doc uses per-item tracking via itemIds.
-              // DO NOT use isGlobalSeen here — seenBy on the shared doc is
-              // poisoned as soon as any sibling item is viewed. Instead, rely
-              // solely on the per-item local SharedPreferences key.
-              for (final change in contentChanges) {
-                if (change is Map) {
-                  final itemIds = change['itemIds'];
-                  if (itemIds is List && itemIds.contains(contentItemId)) {
-                    final localKey = 'seen_item_${doc.id}_$contentItemId';
-                    final isLocallySeen = prefs.getBool(localKey) ?? false;
-                    if (!isLocallySeen) {
-                      final match = Map<String, dynamic>.from(data);
-                      match['id'] = doc.id;
-                      unseenUpdates.add(match);
-                    }
-                    break;
-                  }
-                }
+          final id1 = data['contentItemId'] as String?;
+          final id2 = data['itemId'] as String?;
+          if (id1 == contentItemId || id2 == contentItemId) {
+            final seenBy = List<String>.from(data['seenBy'] ?? []);
+            if (!seenBy.contains(userId) &&
+                !(prefs.getBool('seen_update_${doc.id}') ?? false)) {
+              await prefs.setBool('seen_update_${doc.id}', true);
+              try {
+                await _functions
+                    .httpsCallable('markUpdateAsSeen')
+                    .call({'updateId': doc.id});
+              } catch (e) {
+                Logger.e('Error calling markUpdateAsSeen: $e');
               }
             }
-            // No itemIds list → skip (legacy doc, can't determine per-item)
-          }
-        }
-      }
-
-      if (unseenUpdates.isEmpty) return null;
-
-      final highest = Map<String, dynamic>.from(unseenUpdates.first);
-      return highest;
-    } catch (e) {
-      Logger.e('Error getting content item update info: $e');
-      return null;
-    }
-  }
-
-  /// Mark all unseen updates for a specific content item as seen
-  Future<void> markContentItemAsSeen(
-    String courseId,
-    String moduleId,
-    String contentItemId,
-    String contentType,
-    String userId,
-  ) async {
-    try {
-      final pluralKey = _contentTypeToPluralKey(contentType);
-      final docs = await _fetchModuleUpdates(courseId, moduleId, userId);
-      final prefs = await SharedPreferences.getInstance();
-
-      for (var doc in docs) {
-        final data = doc.data();
-        final type = data['type'] as String? ?? '';
-        final isGlobalSeen = await _isUpdateSeen(data, doc.id, userId);
-
-        if (type.startsWith('content_item_') && _docMatchesContentItem(data, contentItemId) && !isGlobalSeen) {
-          // Immediately mark as seen locally to prevent UI lag
-          await prefs.setBool('seen_update_${doc.id}', true);
-
-          try {
-            await _functions.httpsCallable('markUpdateAsSeen').call({
-              'updateId': doc.id,
-            });
-          } catch (e) {
-            Logger.e('Error calling markUpdateAsSeen: $e');
-            await doc.reference.update({
-              'seenBy': FieldValue.arrayUnion([userId]),
-            });
           }
         }
 
+        // ── content_* shared docs — per-item key only ──
         if (type.startsWith('content_') && !type.startsWith('content_item_')) {
           if (_matchesContentType(data, contentType, pluralKey)) {
-            // For shared content_change docs, ONLY set the per-item local key.
-            // Never call markUpdateAsSeen here — that would add userId to
-            // seenBy on the shared doc and clear every sibling's badge.
             final localKey = 'seen_item_${doc.id}_$contentItemId';
             await prefs.setBool(localKey, true);
           }
         }
       }
-      Logger.i('Marked content item $contentItemId updates as seen');
+
+      Logger.i('Persisted item $contentItemId as seen');
     } catch (e) {
-      Logger.e('Error marking content item as seen: $e');
+      Logger.e('Error persisting item as seen: $e');
     }
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Legacy / shared helpers (kept for backward compat)
-  // ─────────────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Mark non-content docs as seen (called on screen entry)
+  // ---------------------------------------------------------------------------
 
-  /// Get count of unseen content-type-level updates for a module
-  /// (counts types like content_videos_added but NOT content_item_* updates)
-  Future<int> getContentUpdateCount(
+  /// Mark module-level update docs (type NOT starting with `content_`) as
+  /// seen. Called when the user enters a module's content-types screen.
+  Future<void> markModuleLevelDocsSeen(
     String courseId,
     String moduleId,
     String userId,
   ) async {
     try {
-      final updates = await _firestore
-          .collection('contentUpdates')
-          .where('courseId', isEqualTo: courseId)
-          .where('moduleId', isEqualTo: moduleId)
-          .where('notifiedUsers', arrayContains: userId)
-          .get();
+      final docs = await fetchModuleUpdateDocs(courseId, moduleId, userId);
+      final prefs = await SharedPreferences.getInstance();
 
-      int count = 0;
-      for (var doc in updates.docs) {
-        final data = doc.data();
-        final type = data['type'] as String? ?? '';
-        // Count only content-type-level updates
-        if (!type.startsWith('content_')) continue;
-        if (type.startsWith('content_item_')) continue;
-        if (!(await _isUpdateSeen(data, doc.id, userId))) count++;
-      }
-      return count;
-    } catch (e) {
-      Logger.e('Error getting content update count: $e');
-      return 0;
-    }
-  }
-
-  /// Get count of unseen content-item-level updates for a specific content type
-  /// e.g. how many individual video items have unseen changes within a module
-  Future<int> getContentItemUpdateCountForType(
-    String courseId,
-    String moduleId,
-    String contentType,
-    String userId,
-  ) async {
-    try {
-      final pluralKey = _contentTypeToPluralKey(contentType);
-      final docs = await _fetchModuleUpdates(courseId, moduleId, userId);
-
-      int count = 0;
       for (var doc in docs) {
-        final data = doc.data();
-        final type = data['type'] as String? ?? '';
-        final docContentType = data['contentType'] as String? ?? '';
-        if (!type.startsWith('content_item_')) continue;
-        if (docContentType != pluralKey && docContentType != contentType) continue;
-        if (!(await _isUpdateSeen(data, doc.id, userId))) count++;
+        final type = doc.data()['type'] as String? ?? '';
+        if (type.startsWith('content_')) continue; // skip content docs
+
+        final seenBy = List<String>.from(doc.data()['seenBy'] ?? []);
+        if (seenBy.contains(userId)) continue;
+        if (prefs.getBool('seen_update_${doc.id}') ?? false) continue;
+
+        await prefs.setBool('seen_update_${doc.id}', true);
+        try {
+          await _functions
+              .httpsCallable('markUpdateAsSeen')
+              .call({'updateId': doc.id});
+        } catch (e) {
+          Logger.e('Error calling markUpdateAsSeen: $e');
+        }
       }
-      return count;
     } catch (e) {
-      Logger.e('Error getting content item update count for type: $e');
-      return 0;
+      Logger.e('Error marking module-level docs as seen: $e');
     }
   }
 
-  /// Get count of all unseen updates for a course (including content changes)
-  Future<int> getTotalCourseUpdateCount(
+  /// Mark course-level update docs (type NOT starting with `module_` or
+  /// `content_`) as seen. Called when the user enters a course's module list.
+  Future<void> markCourseLevelDocsSeen(
     String courseId,
     String userId,
   ) async {
@@ -698,58 +562,99 @@ class ContentUpdateService {
           .where('notifiedUsers', arrayContains: userId)
           .get();
 
+      final prefs = await SharedPreferences.getInstance();
+      for (var doc in updates.docs) {
+        final type = doc.data()['type'] as String? ?? '';
+        if (type.startsWith('module_') || type.startsWith('content_')) {
+          continue;
+        }
+
+        final seenBy = List<String>.from(doc.data()['seenBy'] ?? []);
+        if (seenBy.contains(userId)) continue;
+        if (prefs.getBool('seen_update_${doc.id}') ?? false) continue;
+
+        await prefs.setBool('seen_update_${doc.id}', true);
+        try {
+          await _functions
+              .httpsCallable('markUpdateAsSeen')
+              .call({'updateId': doc.id});
+        } catch (e) {
+          Logger.e('Error calling markUpdateAsSeen: $e');
+        }
+      }
+    } catch (e) {
+      Logger.e('Error marking course-level docs as seen: $e');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Streams / counts for other UI surfaces (notification screen, etc.)
+  // ---------------------------------------------------------------------------
+
+  /// Get all updates for a user (for a potential updates screen).
+  Stream<List<Map<String, dynamic>>> getUserUpdates(String userId) {
+    return _firestore
+        .collection('contentUpdates')
+        .where('notifiedUsers', arrayContains: userId)
+        .orderBy('timestamp', descending: true)
+        .limit(50)
+        .snapshots()
+        .asyncMap((snapshot) async {
+      final prefs = await SharedPreferences.getInstance();
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+
+        final seenBy = List<String>.from(data['seenBy'] ?? []);
+        final isSeenLocally =
+            prefs.getBool('seen_update_${doc.id}') ?? false;
+        data['isNew'] = !seenBy.contains(userId) && !isSeenLocally;
+
+        return data;
+      }).toList();
+    });
+  }
+
+  /// Get count of unseen updates for a user.
+  Future<int> getUnseenUpdatesCount(String userId) async {
+    try {
+      final updates = await _firestore
+          .collection('contentUpdates')
+          .where('notifiedUsers', arrayContains: userId)
+          .get();
+
+      final prefs = await SharedPreferences.getInstance();
       int count = 0;
       for (var doc in updates.docs) {
-        if (!(await _isUpdateSeen(doc.data(), doc.id, userId))) {
+        if (!await _isDocSeen(doc.data(), doc.id, userId, prefs)) {
           count++;
         }
       }
       return count;
     } catch (e) {
-      Logger.e('Error getting total course update count: $e');
+      Logger.e('Error getting unseen updates count: $e');
       return 0;
     }
   }
 
-  /// Mark all content-type-level updates as seen for a module
-  Future<void> markContentAsSeen(
-    String courseId,
-    String moduleId,
-    String userId,
-  ) async {
-    try {
-      final updates = await _firestore
-          .collection('contentUpdates')
-          .where('courseId', isEqualTo: courseId)
-          .where('moduleId', isEqualTo: moduleId)
-          .where('notifiedUsers', arrayContains: userId)
-          .get();
-
-      final batch = _firestore.batch();
-
-      for (var doc in updates.docs) {
-        final data = doc.data();
-        final type = data['type'] as String? ?? '';
-        // Only mark content-type-level updates (not item-level)
-        if (!type.startsWith('content_')) continue;
-        if (type.startsWith('content_item_')) continue;
-        final seenBy = List<String>.from(data['seenBy'] ?? []);
-        if (!seenBy.contains(userId)) {
-          // Immediately mark as seen locally to prevent UI lag
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('seen_update_${doc.id}', true);
-
-          batch.update(doc.reference, {
-            'seenBy': FieldValue.arrayUnion([userId]),
-          });
+  /// Stream of unseen updates count.
+  Stream<int> watchUnseenUpdatesCount(String userId) {
+    return _firestore
+        .collection('contentUpdates')
+        .where('notifiedUsers', arrayContains: userId)
+        .snapshots()
+        .asyncMap((snapshot) async {
+      final prefs = await SharedPreferences.getInstance();
+      int count = 0;
+      for (var doc in snapshot.docs) {
+        final seenBy = List<String>.from(doc.data()['seenBy'] ?? []);
+        final isSeenLocally =
+            prefs.getBool('seen_update_${doc.id}') ?? false;
+        if (!seenBy.contains(userId) && !isSeenLocally) {
+          count++;
         }
       }
-
-      await batch.commit();
-      Logger.i('Marked all content type updates as seen for module $moduleId');
-    } catch (e) {
-      Logger.e('Error marking content as seen: $e');
-    }
+      return count;
+    });
   }
 }
-

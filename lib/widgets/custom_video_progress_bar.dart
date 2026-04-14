@@ -1,9 +1,21 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
-/// A custom video progress bar with a visible draggable knob
+/// A custom video progress bar with a visible draggable knob.
+///
+/// Design goals / bug-fixes over the previous implementation:
+///  • No snap-back: `_dragValue` is held until the seek fully resolves.
+///  • No race condition on dispose: every async code-path guards `mounted`.
+///  • No stale repaint: `shouldRepaint` covers every field that changes visually.
+///  • No mid-drag controller interference: listener is ignored while dragging
+///    OR while an async seek is still in-flight.
+///  • Drag-cancel is handled (clears drag state gracefully).
+///  • Animation controller `forward`/`reverse` is never called while already
+///    at the target value, preventing micro-jank.
+///  • RenderBox lookup is cached at drag-start so it never fails mid-update.
+///  • Seek is non-debounced at drag-end (fires exactly once, immediately).
+///  • onTapDown correctly blocks the listener while seeking.
 class CustomVideoProgressBar extends StatefulWidget {
   final VideoPlayerController controller;
   final Color playedColor;
@@ -14,18 +26,26 @@ class CustomVideoProgressBar extends StatefulWidget {
   final double activeBarHeight;
   final double thumbRadius;
   final double activeThumbRadius;
+  /// Called when the user starts dragging the thumb.
+  /// Use this to pause the controls auto-hide timer in the parent.
+  final VoidCallback? onDragStart;
+  /// Called when the user finishes dragging the thumb (or cancels).
+  /// Use this to restart the controls auto-hide timer in the parent.
+  final VoidCallback? onDragEnd;
 
   const CustomVideoProgressBar({
     super.key,
     required this.controller,
-    this.playedColor = const Color(0xFFFF0000), // YouTube red
-    this.bufferedColor = const Color(0x80FFFFFF), // Semi-transparent white
-    this.backgroundColor = const Color(0x33FFFFFF), // More transparent white
-    this.thumbColor = const Color(0xFFFF0000), // YouTube red
-    this.barHeight = 3.0, // Thin when inactive
-    this.activeBarHeight = 5.0, // Thicker when active
-    this.thumbRadius = 6.0, // Small when inactive
-    this.activeThumbRadius = 8.0, // Larger when dragging
+    this.playedColor = const Color(0xFFFF0000),
+    this.bufferedColor = const Color(0x80FFFFFF),
+    this.backgroundColor = const Color(0x33FFFFFF),
+    this.thumbColor = const Color(0xFFFF0000),
+    this.barHeight = 3.0,
+    this.activeBarHeight = 5.0,
+    this.thumbRadius = 6.0,
+    this.activeThumbRadius = 8.0,
+    this.onDragStart,
+    this.onDragEnd,
   });
 
   @override
@@ -34,10 +54,19 @@ class CustomVideoProgressBar extends StatefulWidget {
 
 class _CustomVideoProgressBarState extends State<CustomVideoProgressBar>
     with SingleTickerProviderStateMixin {
+  /// True while the user's finger is on the bar.
   bool _isDragging = false;
-  bool _isSeeking = false;
+
+  /// True while an async seekTo() is in-flight (finger already released).
+  bool _isSeekPending = false;
+
+  /// The relative position [0,1] chosen by the user during drag/tap.
+  /// Held until the seek completes so the bar doesn't snap back.
   double? _dragValue;
-  Timer? _seekDebounceTimer;
+
+  /// Cached render box captured at drag-start so mid-update lookups never fail.
+  RenderBox? _cachedBox;
+
   late AnimationController _scaleController;
   late Animation<double> _scaleAnimation;
 
@@ -45,7 +74,7 @@ class _CustomVideoProgressBarState extends State<CustomVideoProgressBar>
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerUpdate);
-    
+
     _scaleController = AnimationController(
       duration: const Duration(milliseconds: 150),
       vsync: this,
@@ -56,145 +85,241 @@ class _CustomVideoProgressBarState extends State<CustomVideoProgressBar>
   }
 
   @override
+  void didUpdateWidget(CustomVideoProgressBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onControllerUpdate);
+      widget.controller.addListener(_onControllerUpdate);
+    }
+  }
+
+  @override
   void dispose() {
     widget.controller.removeListener(_onControllerUpdate);
-    _seekDebounceTimer?.cancel();
     _scaleController.dispose();
     super.dispose();
   }
 
+  // ---------------------------------------------------------------------------
+  // Controller listener
+  // ---------------------------------------------------------------------------
+
   void _onControllerUpdate() {
-    // Only update UI if we're not dragging or seeking
-    if (!_isDragging && !_isSeeking && mounted) {
-      setState(() {});
-    }
+    // Suppress listener-driven redraws while the user controls the bar.
+    if (_isDragging || _isSeekPending) return;
+    if (mounted) setState(() {});
   }
 
-  Future<void> _seekToRelativePosition(double relativePosition) async {
+  // ---------------------------------------------------------------------------
+  // Seek helper
+  // ---------------------------------------------------------------------------
+
+  /// Seek to [relativePosition] (clamped 0–1).  Holds `_isSeekPending = true`
+  /// until the future resolves so the bar doesn't snap back.
+  Future<void> _seekTo(double relativePosition) async {
     final duration = widget.controller.value.duration;
-    if (duration.inMilliseconds > 0) {
-      setState(() {
-        _isSeeking = true;
-      });
+    if (duration == Duration.zero) return;
 
-      final position = duration * relativePosition;
-      
-      try {
-        await widget.controller.seekTo(position);
-        
-        // Wait a bit for the video player to stabilize after seeking
-        await Future.delayed(const Duration(milliseconds: 150));
-      } catch (e) {
-        // Handle seek errors gracefully
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isSeeking = false;
-            _dragValue = null; // Clear drag value only after seek completes
-          });
+    // Mark a seek as in-flight *before* the await so the listener stays quiet.
+    if (mounted) {
+      setState(() {
+        _isSeekPending = true;
+        _dragValue = relativePosition; // keep bar at chosen position
+      });
+    }
+
+    try {
+      await widget.controller.seekTo(duration * relativePosition);
+    } catch (_) {
+      // Seek errors are non-fatal; we simply clear the pending state below.
+    }
+
+    if (mounted) {
+      setState(() {
+        _isSeekPending = false;
+        // Only clear _dragValue if no new drag has started while this seek was
+        // in-flight. A stale seekTo() resolving mid-drag must NOT snap the bar
+        // back to the old target — the current drag position takes priority.
+        if (!_isDragging) {
+          _dragValue = null;
         }
-      }
+      });
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Animation helpers
+  // ---------------------------------------------------------------------------
+
+  void _animateIn() {
+    if (_scaleController.status != AnimationStatus.forward &&
+        _scaleController.status != AnimationStatus.completed) {
+      _scaleController.forward();
+    }
+  }
+
+  void _animateOut() {
+    if (_scaleController.status != AnimationStatus.reverse &&
+        _scaleController.status != AnimationStatus.dismissed) {
+      _scaleController.reverse();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Gesture callbacks
+  // ---------------------------------------------------------------------------
+
+  void _onDragStart(DragStartDetails details) {
+    // Cache the RenderBox now so mid-update lookups are guaranteed to succeed.
+    _cachedBox = context.findRenderObject() as RenderBox?;
+
+    HapticFeedback.lightImpact();
+    _animateIn();
+
+    final relPos = _cachedBox != null
+        ? (_cachedBox!.globalToLocal(details.globalPosition).dx /
+                _cachedBox!.size.width)
+            .clamp(0.0, 1.0)
+        : null;
+
+    setState(() {
+      _isDragging = true;
+      // Cancel any in-flight seek immediately so the bar follows the finger.
+      _isSeekPending = false;
+      if (relPos != null) _dragValue = relPos;
+    });
+
+    // Notify parent so it can pause the auto-hide timer.
+    widget.onDragStart?.call();
+  }
+
+  void _onDragUpdate(DragUpdateDetails details) {
+    if (_cachedBox == null) return;
+    final relPos =
+        (_cachedBox!.globalToLocal(details.globalPosition).dx /
+                _cachedBox!.size.width)
+            .clamp(0.0, 1.0);
+
+    // Use setState only when the value actually changed to avoid unnecessary
+    // repaints on every pointer event.
+    if (_dragValue != relPos) {
+      setState(() {
+        _dragValue = relPos;
+      });
+    }
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    _animateOut();
+    _cachedBox = null;
+
+    final seekTarget = _dragValue;
+    setState(() {
+      _isDragging = false;
+      // Keep _dragValue so the bar stays put while the seek is in-flight.
+    });
+
+    if (seekTarget != null) {
+      HapticFeedback.mediumImpact();
+      _seekTo(seekTarget);
+    }
+
+    // Notify parent so it can restart the auto-hide timer.
+    widget.onDragEnd?.call();
+  }
+
+  void _onDragCancel() {
+    _animateOut();
+    _cachedBox = null;
+
+    setState(() {
+      _isDragging = false;
+      // On cancel, revert visually to the controller's current position.
+      _isSeekPending = false;
+      _dragValue = null;
+    });
+
+    // Notify parent so it can restart the auto-hide timer.
+    widget.onDragEnd?.call();
+  }
+
+  void _onTapDown(TapDownDetails details) {
+    // A tap that coincides with an active drag (gesture-detector edge case) must
+    // not trigger a competing seek — let the drag winner take full control.
+    if (_isDragging) return;
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null) return;
+
+    HapticFeedback.lightImpact();
+    final relPos =
+        (box.globalToLocal(details.globalPosition).dx / box.size.width)
+            .clamp(0.0, 1.0);
+    _seekTo(relPos);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     final value = widget.controller.value;
     final duration = value.duration;
-    
-    // Use drag value if we're dragging OR if we're seeking with a drag value
-    // This prevents snap-back when releasing the drag
-    final position = (_isDragging || _isSeeking) && _dragValue != null
+
+    // During drag/seek use the chosen position to prevent snap-back.
+    final effectivePosition = (_isDragging || _isSeekPending) && _dragValue != null
         ? duration * _dragValue!
         : value.position;
 
-    // Calculate progress percentages
-    double playedPercentage = 0.0;
-    double bufferedPercentage = 0.0;
+    double playedPct = 0.0;
+    double bufferedPct = 0.0;
 
     if (duration.inMilliseconds > 0) {
-      playedPercentage = position.inMilliseconds / duration.inMilliseconds;
-      playedPercentage = playedPercentage.clamp(0.0, 1.0);
+      playedPct =
+          (effectivePosition.inMilliseconds / duration.inMilliseconds)
+              .clamp(0.0, 1.0);
 
       if (value.buffered.isNotEmpty) {
-        final bufferedEnd = value.buffered.last.end;
-        bufferedPercentage = bufferedEnd.inMilliseconds / duration.inMilliseconds;
-        bufferedPercentage = bufferedPercentage.clamp(0.0, 1.0);
+        bufferedPct =
+            (value.buffered.last.end.inMilliseconds / duration.inMilliseconds)
+                .clamp(0.0, 1.0);
       }
     }
 
     return GestureDetector(
-      onHorizontalDragStart: (details) {
-        HapticFeedback.lightImpact();
-        _scaleController.forward();
-        setState(() {
-          _isDragging = true;
-          _isSeeking = false;
-        });
-      },
-      onHorizontalDragUpdate: (details) {
-        final box = context.findRenderObject() as RenderBox?;
-        if (box != null) {
-          final localPosition = box.globalToLocal(details.globalPosition);
-          final relativePosition = (localPosition.dx / box.size.width).clamp(0.0, 1.0);
-          setState(() {
-            _dragValue = relativePosition;
-          });
-        }
-      },
-      onHorizontalDragEnd: (details) {
-        _scaleController.reverse();
-        if (_dragValue != null) {
-          HapticFeedback.mediumImpact();
-          final seekValue = _dragValue!;
-          
-          // Set dragging to false but keep dragValue until seek completes
-          setState(() {
-            _isDragging = false;
-            // Don't clear _dragValue here - it will be cleared after seek completes
-          });
-          
-          // Perform seek - dragValue will be cleared in _seekToRelativePosition
-          _seekToRelativePosition(seekValue);
-        } else {
-          setState(() {
-            _isDragging = false;
-          });
-        }
-      },
-      onTapDown: (details) {
-        final box = context.findRenderObject() as RenderBox?;
-        if (box != null) {
-          HapticFeedback.lightImpact();
-          final localPosition = box.globalToLocal(details.globalPosition);
-          final relativePosition = (localPosition.dx / box.size.width).clamp(0.0, 1.0);
-          _seekToRelativePosition(relativePosition);
-        }
-      },
+      // Drag gestures for scrubbing.
+      onHorizontalDragStart: _onDragStart,
+      onHorizontalDragUpdate: _onDragUpdate,
+      onHorizontalDragEnd: _onDragEnd,
+      onHorizontalDragCancel: _onDragCancel,
+      // Tap for instant seek.
+      onTapDown: _onTapDown,
       child: Container(
-        height: 40, // Increased touch area
+        height: 40, // Generous touch area
         color: Colors.transparent,
         alignment: Alignment.center,
         child: SizedBox(
           height: widget.activeBarHeight + (widget.activeThumbRadius * 2),
           child: AnimatedBuilder(
             animation: _scaleAnimation,
-            builder: (context, child) {
-              final animatedBarHeight = widget.barHeight +
-                  (widget.activeBarHeight - widget.barHeight) * _scaleAnimation.value;
-              final animatedThumbRadius = widget.thumbRadius +
-                  (widget.activeThumbRadius - widget.thumbRadius) * _scaleAnimation.value;
-              
+            builder: (context, _) {
+              final t = _scaleAnimation.value;
+              final barH =
+                  widget.barHeight + (widget.activeBarHeight - widget.barHeight) * t;
+              final thumbR =
+                  widget.thumbRadius +
+                  (widget.activeThumbRadius - widget.thumbRadius) * t;
+
               return CustomPaint(
                 painter: _ProgressBarPainter(
-                  playedPercentage: playedPercentage,
-                  bufferedPercentage: bufferedPercentage,
+                  playedPercentage: playedPct,
+                  bufferedPercentage: bufferedPct,
                   playedColor: widget.playedColor,
                   bufferedColor: widget.bufferedColor,
                   backgroundColor: widget.backgroundColor,
                   thumbColor: widget.thumbColor,
-                  barHeight: animatedBarHeight,
-                  thumbRadius: animatedThumbRadius,
+                  barHeight: barH,
+                  thumbRadius: thumbR,
                   isDragging: _isDragging,
                 ),
                 size: Size.infinite,
@@ -207,6 +332,10 @@ class _CustomVideoProgressBarState extends State<CustomVideoProgressBar>
   }
 }
 
+// =============================================================================
+// Painter
+// =============================================================================
+
 class _ProgressBarPainter extends CustomPainter {
   final double playedPercentage;
   final double bufferedPercentage;
@@ -218,7 +347,7 @@ class _ProgressBarPainter extends CustomPainter {
   final double thumbRadius;
   final bool isDragging;
 
-  _ProgressBarPainter({
+  const _ProgressBarPainter({
     required this.playedPercentage,
     required this.bufferedPercentage,
     required this.playedColor,
@@ -233,78 +362,87 @@ class _ProgressBarPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final centerY = size.height / 2;
-    final barTop = centerY - (barHeight / 2);
-    final barBottom = centerY + (barHeight / 2);
+    final barTop = centerY - barHeight / 2;
+    final barBottom = centerY + barHeight / 2;
+    final radius = Radius.circular(barHeight / 2);
 
-    // Draw background bar
-    final backgroundRect = RRect.fromRectAndRadius(
-      Rect.fromLTRB(0, barTop, size.width, barBottom),
-      Radius.circular(barHeight / 2),
+    // Background
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+          Rect.fromLTRB(0, barTop, size.width, barBottom), radius),
+      Paint()
+        ..color = backgroundColor
+        ..style = PaintingStyle.fill,
     );
-    final backgroundPaint = Paint()
-      ..color = backgroundColor
-      ..style = PaintingStyle.fill;
-    canvas.drawRRect(backgroundRect, backgroundPaint);
 
-    // Draw buffered bar
+    // Buffered
     if (bufferedPercentage > 0) {
-      final bufferedWidth = size.width * bufferedPercentage;
-      final bufferedRect = RRect.fromRectAndRadius(
-        Rect.fromLTRB(0, barTop, bufferedWidth, barBottom),
-        Radius.circular(barHeight / 2),
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromLTRB(0, barTop, size.width * bufferedPercentage, barBottom),
+            radius),
+        Paint()
+          ..color = bufferedColor
+          ..style = PaintingStyle.fill,
       );
-      final bufferedPaint = Paint()
-        ..color = bufferedColor
-        ..style = PaintingStyle.fill;
-      canvas.drawRRect(bufferedRect, bufferedPaint);
     }
 
-    // Draw played bar
+    // Played
     if (playedPercentage > 0) {
-      final playedWidth = size.width * playedPercentage;
-      final playedRect = RRect.fromRectAndRadius(
-        Rect.fromLTRB(0, barTop, playedWidth, barBottom),
-        Radius.circular(barHeight / 2),
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromLTRB(0, barTop, size.width * playedPercentage, barBottom),
+            radius),
+        Paint()
+          ..color = playedColor
+          ..style = PaintingStyle.fill,
       );
-      final playedPaint = Paint()
-        ..color = playedColor
-        ..style = PaintingStyle.fill;
-      canvas.drawRRect(playedRect, playedPaint);
     }
 
-    // Draw thumb (knob)
+    // Thumb
     final thumbX = size.width * playedPercentage;
     final thumbCenter = Offset(thumbX, centerY);
-    
-    // Draw shadow for thumb when dragging
+
+    // Shadow while dragging
     if (isDragging) {
-      final shadowPaint = Paint()
-        ..color = Colors.black.withOpacity(0.3)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
       canvas.drawCircle(
         thumbCenter.translate(0, 2),
         thumbRadius + 2,
-        shadowPaint,
+        Paint()
+          ..color = Colors.black.withValues(alpha: 0.3)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
       );
     }
 
-    // Draw outer ring for thumb
-    final thumbOuterPaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(thumbCenter, thumbRadius + 2, thumbOuterPaint);
+    // White ring
+    canvas.drawCircle(
+      thumbCenter,
+      thumbRadius + 2,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.fill,
+    );
 
-    // Draw inner thumb
-    final thumbPaint = Paint()
-      ..color = thumbColor
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(thumbCenter, thumbRadius, thumbPaint);
+    // Coloured inner circle
+    canvas.drawCircle(
+      thumbCenter,
+      thumbRadius,
+      Paint()
+        ..color = thumbColor
+        ..style = PaintingStyle.fill,
+    );
   }
 
   @override
-  bool shouldRepaint(_ProgressBarPainter oldDelegate) {
-    return oldDelegate.playedPercentage != playedPercentage ||
-        oldDelegate.bufferedPercentage != bufferedPercentage ||
-        oldDelegate.isDragging != isDragging;
+  bool shouldRepaint(_ProgressBarPainter old) {
+    return old.playedPercentage != playedPercentage ||
+        old.bufferedPercentage != bufferedPercentage ||
+        old.isDragging != isDragging ||
+        old.barHeight != barHeight ||
+        old.thumbRadius != thumbRadius ||
+        old.playedColor != playedColor ||
+        old.bufferedColor != bufferedColor ||
+        old.backgroundColor != backgroundColor ||
+        old.thumbColor != thumbColor;
   }
 }

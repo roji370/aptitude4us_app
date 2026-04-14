@@ -7,12 +7,15 @@ class CustomPDFViewer extends StatefulWidget {
   final String filePath;
   final String userName;
   final bool showWatermark;
+  /// Called once when the PDF renders successfully (for one-time-view tracking).
+  final VoidCallback? onViewedCallback;
 
   const CustomPDFViewer({
     super.key,
     required this.filePath,
     required this.userName,
     this.showWatermark = true,
+    this.onViewedCallback,
   });
 
   @override
@@ -23,6 +26,7 @@ class _CustomPDFViewerState extends State<CustomPDFViewer> {
   String? _errorMessage;
   bool _isLoading = true;
   bool _fileValidated = false;
+  bool _hasCalledViewedCallback = false; // ensure we call it at most once
 
   @override
   void initState() {
@@ -170,6 +174,12 @@ class _CustomPDFViewerState extends State<CustomPDFViewer> {
                         setState(() {
                           _isLoading = false;
                         });
+                        // One-time view: fire callback once on first successful render
+                        if (!_hasCalledViewedCallback && widget.onViewedCallback != null) {
+                          _hasCalledViewedCallback = true;
+                          Logger.i('📄 PDF rendered – triggering one-time view callback');
+                          widget.onViewedCallback!();
+                        }
                       },
                       onError: (error) {
                         Logger.e('Error rendering PDF: $error');

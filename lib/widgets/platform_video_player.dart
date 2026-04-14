@@ -522,6 +522,8 @@ class _iOSVideoPlayerState extends State<_iOSVideoPlayer>
     } else {
       _disableWakelock();
     }
+    // Rebuild so the time display and play/pause icon stay live during playback.
+    if (mounted) setState(() {});
   }
 
   void _showControlsTemporarily() {
@@ -540,6 +542,22 @@ class _iOSVideoPlayerState extends State<_iOSVideoPlayer>
         });
       }
     });
+  }
+
+  /// Pause the auto-hide timer while the user is scrubbing.
+  void _pauseControlsTimer() {
+    _hideControlsTimer?.cancel();
+    if (!_showControls) {
+      _controlsAnimationController.forward();
+      setState(() {
+        _showControls = true;
+      });
+    }
+  }
+
+  /// Resume the auto-hide timer after scrubbing ends.
+  void _resumeControlsTimer() {
+    _showControlsTemporarily();
   }
 
   void _toggleControls() {
@@ -709,6 +727,8 @@ class _iOSVideoPlayerState extends State<_iOSVideoPlayer>
               activeBarHeight: 5.0,
               thumbRadius: 6.0,
               activeThumbRadius: 8.0,
+              onDragStart: _pauseControlsTimer,
+              onDragEnd: _resumeControlsTimer,
             ),
           ),
           Padding(
@@ -992,6 +1012,22 @@ class _iOSFullscreenVideoPlayerState extends State<_iOSFullscreenVideoPlayer>
     });
   }
 
+  /// Pause the auto-hide timer while the user is scrubbing.
+  void _pauseControlsTimer() {
+    _hideControlsTimer?.cancel();
+    if (!_showControls) {
+      _controlsAnimationController.forward();
+      setState(() {
+        _showControls = true;
+      });
+    }
+  }
+
+  /// Resume the auto-hide timer after scrubbing ends.
+  void _resumeControlsTimer() {
+    _showControlsTemporarily();
+  }
+
   void _toggleControls() {
     if (_showControls) {
       _hideControlsTimer?.cancel();
@@ -1022,6 +1058,8 @@ class _iOSFullscreenVideoPlayerState extends State<_iOSFullscreenVideoPlayer>
     } else {
       _disableWakelock();
     }
+    // Rebuild so the time display and play/pause icon stay live during playback.
+    if (mounted) setState(() {});
   }
 
   Future<void> _enableWakelock() async {
@@ -1173,6 +1211,8 @@ class _iOSFullscreenVideoPlayerState extends State<_iOSFullscreenVideoPlayer>
                   activeBarHeight: 5.0,
                   thumbRadius: 6.0,
                   activeThumbRadius: 8.0,
+                  onDragStart: _pauseControlsTimer,
+                  onDragEnd: _resumeControlsTimer,
                 ),
               ),
               Padding(

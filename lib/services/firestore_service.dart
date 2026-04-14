@@ -332,6 +332,11 @@ class FirestoreService {
                 String videoUrl = video['url'] ?? video['content'] ?? '';
                 if (videoUrl.isNotEmpty) {
                   Logger.i("Found video URL: $videoUrl");
+                  // Build a stable ID that does NOT include the URL (Storage URLs
+                  // contain expiring tokens and change between sessions, which
+                  // breaks one-time-view tracking).
+                  final stableVideoId = video['id'] as String? ??
+                      '${moduleId}_video_${video['title'] ?? ''}_${video['order'] ?? allContents.length}';
                   allContents.add(
                     ContentModel.fromJson(
                       {
@@ -340,7 +345,7 @@ class FirestoreService {
                         'contentType': 'video',
                         'content': videoUrl,
                       },
-                      video['id'] ?? videoUrl,
+                      stableVideoId,
                     ),
                   );
                 } else {
@@ -360,6 +365,8 @@ class FirestoreService {
                 String pdfUrl = pdf['url'] ?? pdf['content'] ?? '';
                 if (pdfUrl.isNotEmpty) {
                   Logger.i("Found PDF URL: $pdfUrl");
+                  final stablePdfId = pdf['id'] as String? ??
+                      '${moduleId}_pdf_${pdf['title'] ?? ''}_${pdf['order'] ?? allContents.length}';
                   allContents.add(
                     ContentModel.fromJson(
                       {
@@ -368,7 +375,7 @@ class FirestoreService {
                         'contentType': 'pdf',
                         'content': pdfUrl,
                       },
-                      pdf['id'] ?? pdfUrl,
+                      stablePdfId,
                     ),
                   );
                 } else {
@@ -388,6 +395,8 @@ class FirestoreService {
                   Logger.d("Processing note: $note");
                   String noteContent = note['content'] ?? note['text'] ?? '';
                   if (noteContent.isNotEmpty) {
+                    final stableNoteId = note['id'] as String? ??
+                        '${moduleId}_text_${note['title'] ?? ''}_${note['order'] ?? allContents.length}';
                     allContents.add(
                       ContentModel.fromJson(
                         {
@@ -396,7 +405,7 @@ class FirestoreService {
                           'contentType': 'text',
                           'content': noteContent,
                         },
-                        note['id'] ?? noteContent,
+                        stableNoteId,
                       ),
                     );
                   }
@@ -413,7 +422,7 @@ class FirestoreService {
                     'contentType': 'text',
                     'title': 'Notes',
                     'order': 0,
-                  }, 'notes'),
+                  }, '${moduleId}_text_notes_0'),
                 );
               }
             }
@@ -429,6 +438,8 @@ class FirestoreService {
                 String linkUrl = link['url'] ?? link['content'] ?? '';
                 if (linkUrl.isNotEmpty) {
                   Logger.i("Found link URL: $linkUrl");
+                  final stableLinkId = link['id'] as String? ??
+                      '${moduleId}_link_${link['title'] ?? ''}_${link['order'] ?? allContents.length}';
                   allContents.add(
                     ContentModel.fromJson(
                       {
@@ -437,7 +448,7 @@ class FirestoreService {
                         'contentType': 'link',
                         'content': linkUrl,
                       },
-                      link['id'] ?? linkUrl,
+                      stableLinkId,
                     ),
                   );
                 } else {
@@ -457,6 +468,8 @@ class FirestoreService {
                 String imageUrl = image['url'] ?? image['content'] ?? '';
                 if (imageUrl.isNotEmpty) {
                   Logger.i("Found image URL: $imageUrl");
+                  final stableImageId = image['id'] as String? ??
+                      '${moduleId}_image_${image['title'] ?? ''}_${image['order'] ?? allContents.length}';
                   allContents.add(
                     ContentModel.fromJson(
                       {
@@ -465,7 +478,7 @@ class FirestoreService {
                         'contentType': 'image',
                         'content': imageUrl,
                       },
-                      image['id'] ?? imageUrl,
+                      stableImageId,
                     ),
                   );
                 } else {
@@ -485,6 +498,8 @@ class FirestoreService {
                 String pptUrl = ppt['url'] ?? ppt['content'] ?? '';
                 if (pptUrl.isNotEmpty) {
                   Logger.i("Found PPT URL: $pptUrl");
+                  final stablePptId = ppt['id'] as String? ??
+                      '${moduleId}_ppt_${ppt['title'] ?? ''}_${ppt['order'] ?? allContents.length}';
                   allContents.add(
                     ContentModel.fromJson(
                       {
@@ -493,7 +508,7 @@ class FirestoreService {
                         'contentType': 'ppt',
                         'content': pptUrl,
                       },
-                      ppt['id'] ?? pptUrl,
+                      stablePptId,
                     ),
                   );
                 } else {
@@ -664,6 +679,86 @@ class FirestoreService {
       Logger.e("Error getting module content: $e");
       Logger.d("Stack trace: ${StackTrace.current}");
       rethrow;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // One-Time View tracking
+  // Collection: user_content_views
+  // Document ID pattern: {userId}_{contentId}
+  // ---------------------------------------------------------------------------
+
+  /// Returns true if the user has already fully viewed this one-time content.
+  Future<bool> checkIfContentViewed(String userId, String contentId) async {
+    if (!_isFirestoreAvailable || _firestore == null) {
+      Logger.w('Firestore not available in checkIfContentViewed');
+      return false;
+    }
+    try {
+      final docId = '${userId}_$contentId';
+      final doc = await _firestore!
+          .collection('user_content_views')
+          .doc(docId)
+          .get();
+      if (!doc.exists) return false;
+      return (doc.data()?['viewed'] as bool?) ?? false;
+    } catch (e) {
+      Logger.e('Error checking content view status: $e');
+      return false; // Safe default — let user proceed on network failure
+    }
+  }
+
+  /// Atomically marks content as viewed using a Firestore transaction.
+  ///
+  /// Returns `true`  if this call successfully recorded the view.
+  /// Returns `false` if the content was ALREADY marked as viewed by another
+  /// device/session before this transaction ran (two-device race condition).
+  ///
+  /// Using a transaction guarantees that the check-then-write is atomic:
+  /// even if two devices call this simultaneously, only one wins.
+  Future<bool> markContentAsViewed(String userId, String contentId) async {
+    if (!_isFirestoreAvailable || _firestore == null) {
+      Logger.w('Firestore not available in markContentAsViewed');
+      // Treat as success so the user isn't blocked by infra issues.
+      return true;
+    }
+    try {
+      final docId = '${userId}_$contentId';
+      final docRef = _firestore!
+          .collection('user_content_views')
+          .doc(docId);
+
+      bool alreadyViewed = false;
+
+      await _firestore!.runTransaction((transaction) async {
+        final snapshot = await transaction.get(docRef);
+
+        if (snapshot.exists && (snapshot.data()?['viewed'] as bool?) == true) {
+          // Another device beat us to it.
+          alreadyViewed = true;
+          return; // Abort write — doc already committed by another device.
+        }
+
+        transaction.set(docRef, {
+          'userId': userId,
+          'contentId': contentId,
+          'viewed': true,
+          'viewedAt': FieldValue.serverTimestamp(),
+        }); // No merge — this is always a create (doc verified non-existent above)
+      });
+
+      if (alreadyViewed) {
+        Logger.w('⚠️ One-time view already recorded by another session: $docId');
+        return false; // Caller should treat as "already viewed".
+      }
+
+      Logger.i('✅ One-time view recorded: $docId');
+      return true;
+    } catch (e) {
+      Logger.e('Error marking content as viewed: $e');
+      // Do NOT rethrow — a tracking failure must never block the user.
+      // Return true so the caller doesn't incorrectly block the content.
+      return true;
     }
   }
 }
