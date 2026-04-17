@@ -60,12 +60,25 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     body = message.data['body'] ?? '';
   }
 
-  // Create chat notification
+  // Determine the correct notification channel based on message type
+  String channelKey = 'general_channel'; // default
+  String? messageType = message.data['type'];
+  if (messageType == 'chat' || messageType == 'direct_chat') {
+    channelKey = 'chat_channel';
+  } else if (messageType == 'community_chat') {
+    channelKey = 'community_channel';
+  } else if (messageType == 'past_questions') {
+    channelKey = 'past_questions_channel';
+  } else if (messageType == 'content_update' || messageType == 'content_item_update' || messageType == 'course_assignment' || messageType == 'consolidated_course_assignment') {
+    channelKey = 'general_channel';
+  }
+
+  // Create notification with correct channel
   try {
     await AwesomeNotifications().createNotification(
       content: NotificationContent(
         id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-        channelKey: 'chat_channel',
+        channelKey: channelKey,
         title: title,
         body: body,
         notificationLayout: NotificationLayout.Default,

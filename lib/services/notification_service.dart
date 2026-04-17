@@ -68,6 +68,42 @@ class NotificationService {
           soundSource: 'resource://raw/notification_sound',
           playSound: true,
         ),
+        NotificationChannel(
+          channelKey: 'general_channel',
+          channelName: 'General Notifications',
+          channelDescription: 'General and content update notifications',
+          defaultColor: Colors.deepPurple,
+          ledColor: Colors.deepPurple,
+          importance: NotificationImportance.High,
+          channelShowBadge: true,
+          enableVibration: true,
+          enableLights: true,
+          playSound: true,
+        ),
+        NotificationChannel(
+          channelKey: 'community_channel',
+          channelName: 'Community Notifications',
+          channelDescription: 'Notifications for community chat messages',
+          defaultColor: Colors.green,
+          ledColor: Colors.green,
+          importance: NotificationImportance.High,
+          channelShowBadge: true,
+          enableVibration: true,
+          enableLights: true,
+          playSound: true,
+        ),
+        NotificationChannel(
+          channelKey: 'past_questions_channel',
+          channelName: 'Past Questions Notifications',
+          channelDescription: 'Notifications for past questions discussions',
+          defaultColor: Colors.orange,
+          ledColor: Colors.orange,
+          importance: NotificationImportance.High,
+          channelShowBadge: true,
+          enableVibration: true,
+          enableLights: true,
+          playSound: true,
+        ),
       ],
     );
 
@@ -1128,12 +1164,25 @@ class NotificationService {
       body = message.data['body'] ?? '';
     }
 
+    // Determine the correct notification channel based on message type
+    String channelKey = 'general_channel'; // default
+    String? messageType = message.data['type'];
+    if (messageType == 'chat' || messageType == 'direct_chat') {
+      channelKey = 'chat_channel';
+    } else if (messageType == 'community_chat') {
+      channelKey = 'community_channel';
+    } else if (messageType == 'past_questions') {
+      channelKey = 'past_questions_channel';
+    } else if (messageType == 'content_update' || messageType == 'content_item_update' || messageType == 'course_assignment' || messageType == 'consolidated_course_assignment') {
+      channelKey = 'general_channel';
+    }
+
     // Create a local notification using Awesome Notifications
     try {
       await AwesomeNotifications().createNotification(
         content: NotificationContent(
           id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-          channelKey: 'chat_channel',
+          channelKey: channelKey,
           title: title,
           body: body,
           notificationLayout: NotificationLayout.Default,
@@ -1399,12 +1448,22 @@ class NotificationService {
         return;
       }
 
-      // Get current token
+      // Force a fresh token by deleting the cached one first
+      // This ensures we don't keep reusing a stale/invalid token
+      try {
+        await _firebaseMessaging!.deleteToken();
+        Logger.i('Deleted old FCM token to force refresh');
+      } catch (e) {
+        Logger.e('Error deleting old token (continuing anyway): $e');
+      }
+      
+      // Get a fresh token from FCM/APNS
       String? currentToken = await _firebaseMessaging?.getToken();
       if (currentToken == null) {
         Logger.i("No current token available, skipping cleanup");
         return;
       }
+      Logger.i('Got fresh FCM token: ${currentToken.substring(0, 20)}...');
 
       Logger.i("Current token: $currentToken for user: $userId");
 
@@ -1608,12 +1667,22 @@ class NotificationService {
         return;
       }
 
-      // Get current token
+      // Force a fresh token by deleting the cached one first
+      // This ensures we don't keep reusing a stale/invalid token
+      try {
+        await _firebaseMessaging!.deleteToken();
+        Logger.i('Deleted old FCM token to force refresh');
+      } catch (e) {
+        Logger.e('Error deleting old token (continuing anyway): $e');
+      }
+      
+      // Get a fresh token from FCM/APNS
       String? currentToken = await _firebaseMessaging?.getToken();
       if (currentToken == null) {
         Logger.i("No current token available, skipping cleanup");
         return;
       }
+      Logger.i('Got fresh FCM token: ${currentToken.substring(0, 20)}...');
 
       Logger.i("Current token: $currentToken for user: $userId");
 
