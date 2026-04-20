@@ -163,14 +163,8 @@ class FileHandlerService {
   /// Request file operation permissions
   static Future<bool> requestFilePermissions() async {
     if (Platform.isAndroid) {
-      final results =
-          await [
-            Permission.storage,
-            Permission.manageExternalStorage,
-          ].request();
-
-      return results[Permission.storage] == PermissionStatus.granted ||
-          results[Permission.manageExternalStorage] == PermissionStatus.granted;
+      final status = await Permission.storage.request();
+      return status == PermissionStatus.granted;
     }
     return true;
   }
