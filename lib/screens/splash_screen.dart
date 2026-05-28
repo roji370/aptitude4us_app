@@ -304,22 +304,26 @@ class _SplashScreenState extends State<SplashScreen>
       bool hasPersistentLogin = await AuthPersistenceService.isLoggedIn();
       Logger.i("Persistent login status: $hasPersistentLogin");
 
-      // Wait for Firebase Auth to confirm the session state
-      // Use a timeout to prevent infinite waiting
+      // Wait for Firebase Auth to confirm the session state.
+      // IMPORTANT: AuthService is provided lazily, so its async _initializeServices()
+      // may not have completed by the time we read authStateChanges. Read from
+      // FirebaseAuth.instance directly — it's guaranteed initialized at this point
+      // (splash STEP 1 awaited FirebaseInitHelper.ensureInitialized()) and bypasses
+      // any AuthService availability-flag race.
       User? firebaseUser;
       try {
         Logger.i("Waiting for Firebase Auth state confirmation...");
-        firebaseUser = await authService.authStateChanges.first.timeout(
+        firebaseUser = await FirebaseAuth.instance.authStateChanges().first.timeout(
           const Duration(seconds: 5),
           onTimeout: () {
             Logger.w("Firebase Auth state timeout - using current state");
-            return authService.currentUser;
+            return FirebaseAuth.instance.currentUser;
           },
         );
         Logger.i("Firebase Auth state confirmed: ${firebaseUser?.uid ?? 'null'}");
       } catch (e) {
         Logger.e("Error waiting for auth state: $e");
-        firebaseUser = authService.currentUser;
+        firebaseUser = FirebaseAuth.instance.currentUser;
       }
 
       if (!mounted) return;
@@ -396,29 +400,23 @@ class _SplashScreenState extends State<SplashScreen>
       // Firebase says no user, but we have persistent login data
       if (hasPersistentLogin) {
         Logger.w(
-          "⚠️ Persistent login exists but Firebase Auth returned null - likely slow network or offline",
+          "⚠️ Persistent login exists but Firebase Auth returned null",
         );
-        Logger.i("Trusting persistent login and proceeding to app (offline-first approach)");
         
-        // DO NOT clear persistent data - Firebase Auth will sync in background
-        // This allows the app to work offline or with slow connections
-        
-        if (!mounted) return;
-        
-        // Try to get cached user data
-        try {
-          final userData = await AuthPersistenceService.getUserData();
-          if (userData != null) {
-            Logger.i("Cached user data available: ${userData.displayName}");
-          }
-        } catch (e) {
-          Logger.e("Error loading cached user data: $e");
-        }
+        // This typically happens when the user uninstalled the old app while
+        // logged in and installed a new APK.  Android auto-backup may restore
+        // SharedPreferences (containing the old auth_token) but Firebase Auth
+        // does NOT restore its session from backup.  Trusting the stale token
+        // would send the user to the home screen where every screen shows
+        // "Please log in" with no way to actually log in.
+        //
+        // Fix: clear the orphaned persistent data and send the user to login.
+        Logger.w("Clearing stale persistent login data and redirecting to login");
+        await AuthPersistenceService.clearAll();
         
         if (!mounted) return;
         
-        // Navigate to home screen - auth will sync in background
-        _navigateToHome();
+        _navigateToLogin();
       } else {
         // No login detected anywhere, go to login screen
         Logger.i("No authentication detected - navigating to login");
@@ -514,7 +512,6 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _showExamOverviewDialog() async {
     if (!mounted) return;
 
-    final authService = Provider.of<AuthService>(context, listen: false);
     final firestoreService = Provider.of<FirestoreService>(context, listen: false);
 
     await showDialog(

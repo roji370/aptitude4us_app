@@ -41,13 +41,25 @@ class SubscriptionService {
 
       for (final doc in querySnapshot.docs) {
         final data = doc.data();
+        final endDate = (data['endDate'] as Timestamp?)?.toDate() ?? DateTime.now();
+        final examDate = (data['examDate'] as Timestamp?)?.toDate();
+        // Prefer the admin-written denormalized effectiveEndDate (which uses
+        // end-of-day for examDate). Fall back to local compute for legacy docs
+        // that have not been backfilled yet.
+        final adminEffective = (data['effectiveEndDate'] as Timestamp?)?.toDate();
+        final effectiveEndDate = adminEffective ??
+            ((examDate != null && examDate.isBefore(endDate))
+                ? DateTime(examDate.year, examDate.month, examDate.day, 23, 59, 59, 999)
+                : endDate);
+        
         subscriptions.add({
           'id': doc.id,
           ...data,
           'startDate':
               (data['startDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
-          'endDate':
-              (data['endDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          'endDate': endDate,
+          'examDate': examDate,
+          'effectiveEndDate': effectiveEndDate,
         });
       }
 
@@ -85,11 +97,12 @@ class SubscriptionService {
       // Check if user has at least one active subscription
       final hasActiveSubscription = subscriptions.any((subscription) {
         final status = subscription['status'] as String?;
-        final endDate = subscription['endDate'] as DateTime?;
+        // Use effectiveEndDate which already accounts for exam date
+        final effectiveEndDate = subscription['effectiveEndDate'] as DateTime?;
 
         return status == 'active' &&
-            endDate != null &&
-            endDate.isAfter(DateTime.now());
+            effectiveEndDate != null &&
+            effectiveEndDate.isAfter(DateTime.now());
       });
 
       Logger.i(
@@ -186,20 +199,24 @@ class SubscriptionService {
       final activeSubscriptions =
           subscriptions.where((sub) {
             final status = sub['status'] as String?;
-            final endDate = sub['endDate'] as DateTime?;
+            // Use effectiveEndDate which accounts for exam date
+            final effectiveEndDate = sub['effectiveEndDate'] as DateTime?;
             return status == 'active' &&
-                endDate != null &&
-                endDate.isAfter(DateTime.now());
+                effectiveEndDate != null &&
+                effectiveEndDate.isAfter(DateTime.now());
           }).toList();
 
       if (activeSubscriptions.isNotEmpty) {
         final latestSub = activeSubscriptions.first;
+        final effectiveEndDate = latestSub['effectiveEndDate'] as DateTime;
         return {
           'hasSubscription': true,
           'isActive': true,
           'endDate': latestSub['endDate'],
+          'examDate': latestSub['examDate'],
+          'effectiveEndDate': effectiveEndDate,
           'daysRemaining':
-              (latestSub['endDate'] as DateTime)
+              effectiveEndDate
                   .difference(DateTime.now())
                   .inDays,
           'subscription': latestSub,
@@ -209,8 +226,8 @@ class SubscriptionService {
       // Check for expired subscriptions
       final expiredSubs =
           subscriptions.where((sub) {
-            final endDate = sub['endDate'] as DateTime?;
-            return endDate != null && endDate.isBefore(DateTime.now());
+            final effectiveEndDate = sub['effectiveEndDate'] as DateTime?;
+            return effectiveEndDate != null && effectiveEndDate.isBefore(DateTime.now());
           }).toList();
 
       if (expiredSubs.isNotEmpty) {
@@ -265,12 +282,13 @@ class SubscriptionService {
 
       for (final subscription in subscriptions) {
         final status = subscription['status'] as String?;
-        final endDate = subscription['endDate'] as DateTime?;
+        // Use effectiveEndDate which accounts for exam date
+        final effectiveEndDate = subscription['effectiveEndDate'] as DateTime?;
 
-        if (status == 'active' && endDate != null) {
-          final daysUntilExpiry = endDate.difference(DateTime.now()).inDays;
+        if (status == 'active' && effectiveEndDate != null) {
+          final daysUntilExpiry = effectiveEndDate.difference(DateTime.now()).inDays;
           if (daysUntilExpiry <= daysThreshold && daysUntilExpiry > 0) {
-            Logger.i('⚠️ Subscription expiring in $daysUntilExpiry days');
+            Logger.i('⚠️ Subscription expiring in $daysUntilExpiry days (effective end date)');
             return true;
           }
         }
@@ -292,6 +310,75 @@ class SubscriptionService {
       _subscriptionCache.clear();
       Logger.i('🧹 Cleared all subscription cache');
     }
+  }
+
+  /// Fast, offline-capable local check using cached subscription data.
+  ///
+  /// Compares the cached `endDate` against the user's current local time.
+  /// Returns:
+  /// - `true`  — subscription endDate is in the future (still valid)
+  /// - `false` — subscription endDate is in the past (expired)
+  /// - `null`  — no cached data available (need a server call)
+  ///
+  /// This does NOT hit the server and is safe to call frequently.
+  bool? isSubscriptionLocallyValid(String userId) {
+    final cachedData = _subscriptionCache[userId];
+    if (cachedData == null || cachedData.subscriptions.isEmpty) {
+      Logger.i('📌 No cached subscription data for local validation (user: $userId)');
+      return null; // Unknown — need a server call
+    }
+
+    final now = DateTime.now();
+
+    // Check if any cached subscription is still active based on local time
+    final hasLocallyValid = cachedData.subscriptions.any((subscription) {
+      final status = subscription['status'] as String?;
+      // Use effectiveEndDate which accounts for exam date
+      final effectiveEndDate = subscription['effectiveEndDate'] as DateTime?;
+
+      if (status != 'active' || effectiveEndDate == null) return false;
+
+      final isValid = effectiveEndDate.isAfter(now);
+      if (isValid) {
+        final remaining = effectiveEndDate.difference(now);
+        Logger.i(
+          '⏰ Subscription locally valid — '
+          '${remaining.inDays}d ${remaining.inHours % 24}h remaining '
+          '(effective end: ${effectiveEndDate.toLocal()})',
+        );
+      }
+      return isValid;
+    });
+
+    Logger.i(
+      '📌 Local subscription validation for $userId: '
+      '${hasLocallyValid ? "VALID" : "EXPIRED"} (checked at ${now.toLocal()})',
+    );
+    return hasLocallyValid;
+  }
+
+  /// Get the latest active subscription effective end date from cached data.
+  /// Uses effectiveEndDate (which accounts for exam date).
+  /// Returns null if no cached active subscription exists.
+  DateTime? getActiveSubscriptionEndDate(String userId) {
+    final cachedData = _subscriptionCache[userId];
+    if (cachedData == null) return null;
+
+    DateTime? latestEndDate;
+
+    for (final subscription in cachedData.subscriptions) {
+      final status = subscription['status'] as String?;
+      // Use effectiveEndDate which accounts for exam date
+      final effectiveEndDate = subscription['effectiveEndDate'] as DateTime?;
+
+      if (status == 'active' && effectiveEndDate != null) {
+        if (latestEndDate == null || effectiveEndDate.isAfter(latestEndDate)) {
+          latestEndDate = effectiveEndDate;
+        }
+      }
+    }
+
+    return latestEndDate;
   }
 }
 

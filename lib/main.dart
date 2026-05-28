@@ -366,27 +366,18 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // NOTE: AuthService, FirestoreService, StorageService and NotificationService
+    // are already provided as singletons by the outer MultiProvider in `main()`.
+    // Only SubscriptionService is added here. Using `update: (_, previous) => previous!`
+    // ensures the same instance is preserved across rebuilds (ProxyProvider0 fires
+    // `update` on every rebuild, which would otherwise discard the existing instance
+    // and break in-flight listeners / static-cache references).
     return MultiProvider(
       providers: [
-        ProxyProvider0<AuthService>(
-          lazy: true,
-          create: (_) => AuthService(),
-          update: (_, previous) => AuthService(),
-        ),
-        ProxyProvider0<FirestoreService>(
-          lazy: true,
-          create: (_) => FirestoreService(),
-          update: (_, previous) => FirestoreService(),
-        ),
-        ProxyProvider0<StorageService>(
-          lazy: true,
-          create: (_) => StorageService(),
-          update: (_, previous) => StorageService(),
-        ),
         ProxyProvider0<SubscriptionService>(
           lazy: true,
           create: (_) => SubscriptionService(),
-          update: (_, previous) => SubscriptionService(),
+          update: (_, previous) => previous ?? SubscriptionService(),
         ),
       ],
       child: MaterialApp(

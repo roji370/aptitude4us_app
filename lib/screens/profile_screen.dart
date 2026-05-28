@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import '../services/auth_persistence_service.dart';
 import '../utils/logger.dart';
 import '../models/user_model.dart';
 import '../utils/adaptive_navigation.dart';
@@ -179,9 +180,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final currentUserId = authService.currentUser?.uid;
 
     if (currentUserId == null) {
-      return const Scaffold(
+      return Scaffold(
         body: Center(
-          child: Text('Please log in to view your profile'),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text('Please log in to view your profile'),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () async {
+                  await AuthPersistenceService.clearAll();
+                  if (!mounted) return;
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(
+                      builder: (context) => const LoginScreen(),
+                    ),
+                    (route) => false,
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1565C0),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32,
+                    vertical: 16,
+                  ),
+                ),
+                child: const Text('Go to Login'),
+              ),
+            ],
+          ),
         ),
       );
     }

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backup rules for Android Auto Backup.
+  Exclude SharedPreferences that store auth tokens to prevent stale
+  sessions after app reinstall (Firebase Auth state is NOT backed up,
+  so restoring only the token creates a broken half-logged-in state).
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="FlutterSharedPreferences.xml" />
+</full-backup-content>

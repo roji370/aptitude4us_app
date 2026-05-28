@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../services/subscription_service.dart';
 import '../utils/app_colors.dart';
@@ -400,66 +401,88 @@ class _SubscriptionExpiredScreenState extends State<SubscriptionExpiredScreen> {
     );
   }
 
-  void _handleRefreshStatus() {
+  Future<void> _handleRefreshStatus() async {
     Logger.i('🔄 Refreshing subscription status');
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
 
-    // First reload the subscription status for display (force refresh from server)
-    _loadSubscriptionStatus(forceRefresh: true).then((_) {
-      // After loading status, check if access should now be granted
-      _checkAndNavigateIfAccessGranted();
-    });
-  }
-
-  /// Check if user now has access and navigate back if they do
-  Future<void> _checkAndNavigateIfAccessGranted() async {
+    // Single source of truth: use the *same* predicate the parent
+    // `ProtectedCourseContent` uses. This prevents the bounce-back loop where
+    // we'd pop with `subscriptionActivated: true` based on subscription alone,
+    // only for the parent to immediately re-fail on the course-assignment
+    // check and shove the user right back onto this screen — which previously
+    // forced users to tap "Refresh Status" two or three times before the
+    // assignment write had propagated.
     try {
-      final hasActiveSubscription = await _subscriptionService
-          .getCurrentUserSubscriptionStatus(forceRefresh: true);
-
-      if (hasActiveSubscription != null &&
-          hasActiveSubscription['hasSubscription'] == true &&
-          hasActiveSubscription['isActive'] == true) {
-        Logger.i('✅ Subscription is now active - navigating back to content');
-
-        if (mounted) {
-          // Navigate back with success result to trigger re-validation in ProtectedCourseContent
-          Navigator.of(context).pop({'subscriptionActivated': true});
-
-          // Show success message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Subscription activated! Access granted.'),
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          );
-        }
-      } else {
-        Logger.i('❌ Subscription still not active');
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Subscription status updated'),
-              backgroundColor: AppColors.primary,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          );
-        }
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        Logger.w('⚠️ No authenticated user during refresh');
+        await _loadSubscriptionStatus(forceRefresh: true);
+        return;
       }
-    } catch (error) {
-      Logger.e('❌ Error checking subscription access: $error');
 
+      // Kick off both checks in parallel so the refresh is no slower than the
+      // old single-subscription fetch was.
+      final statusFuture = _subscriptionService.getCurrentUserSubscriptionStatus(
+        forceRefresh: true,
+      );
+      final accessFuture = widget.courseId == null
+          ? _subscriptionService.checkUserActiveSubscription(
+              currentUser.uid,
+              forceRefresh: true,
+            )
+          : _subscriptionService.hasAccessToCourse(
+              currentUser.uid,
+              widget.courseId!,
+              forceRefresh: true,
+            );
+
+      final results = await Future.wait([statusFuture, accessFuture]);
+      final status = results[0] as Map<String, dynamic>?;
+      final hasAccess = results[1] as bool;
+
+      if (!mounted) return;
+
+      setState(() {
+        _subscriptionStatus = status;
+        _isLoading = false;
+      });
+
+      if (hasAccess) {
+        Logger.i('✅ Access restored — popping back to content');
+        Navigator.of(context).pop({'subscriptionActivated': true});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Subscription activated! Access granted.'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        );
+        return;
+      }
+
+      Logger.i('❌ Access still not granted after refresh');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Subscription status updated'),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      );
+    } catch (error) {
+      Logger.e('❌ Error refreshing subscription access: $error');
       if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Error checking subscription access'),

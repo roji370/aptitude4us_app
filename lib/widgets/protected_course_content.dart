@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
@@ -10,6 +12,8 @@ import './screen_recording_warning_dialog.dart';
 import '../utils/logger.dart';
 import '../utils/app_colors.dart';
 import '../utils/responsive_helper.dart';
+import '../services/auth_persistence_service.dart';
+import '../screens/login_screen.dart';
 
 /// Widget that protects course content behind subscription validation
 ///
@@ -47,6 +51,12 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
   bool _isNavigatingToSubscription = false;
   bool _showingScreenshotWarning = false;
   bool _showingScreenRecordingWarning = false;
+  bool _hasInitialCheckCompleted = false; // Track whether initial check is done
+  int _backgroundRetryCount = 0; // Tracks consecutive background check failures
+  static const int _maxBackgroundRetries = 3; // Show refresh prompt after this many failures
+  bool _showRefreshPrompt = false; // Show a non-intrusive banner asking user to refresh
+  bool _isManualRefreshing = false; // True while user-triggered refresh is in progress
+  Timer? _retryTimer; // Cancellable handle for scheduled background retries
 
   @override
   void initState() {
@@ -58,6 +68,8 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
 
   @override
   void dispose() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
     WidgetsBinding.instance.removeObserver(this);
     _screenshotService.removeListener(_onScreenshotServiceChanged);
     _screenshotService.stopMonitoring();
@@ -86,8 +98,19 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
   @override
   void didUpdateWidget(ProtectedCourseContent oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Re-check access if courseId changes
+    // Re-check access if courseId changes. Reset all per-course state so the
+    // new course performs a fresh initial check (with loading UI) instead of
+    // a background refresh that could leak the previous course's access state.
     if (oldWidget.courseId != widget.courseId) {
+      _retryTimer?.cancel();
+      _retryTimer = null;
+      _hasAccess = null;
+      _hasInitialCheckCompleted = false;
+      _backgroundRetryCount = 0;
+      _showRefreshPrompt = false;
+      _isManualRefreshing = false;
+      _isNavigatingToSubscription = false;
+      _errorMessage = null;
       _checkAccess();
     }
   }
@@ -156,10 +179,25 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
   Future<void> _checkAccess({bool forceRefresh = false}) async {
     if (!mounted) return;
 
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+    // Cancel any previously-scheduled background retry — this call supersedes it.
+    _retryTimer?.cancel();
+    _retryTimer = null;
+
+    // CRITICAL UX FIX: If we already completed an initial check and the user
+    // had access, do the re-check silently in the background without resetting
+    // the UI. This prevents the "Verifying access..." flash when navigating
+    // back to the home screen or when the app resumes.
+    final bool isBackgroundRefresh = _hasInitialCheckCompleted && _hasAccess == true;
+
+    if (!isBackgroundRefresh) {
+      // Only show loading UI on the initial check or when access was previously denied
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    } else {
+      Logger.i('🔄 Background subscription re-check (no UI disruption)');
+    }
 
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
@@ -176,18 +214,57 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
           setState(() {
             _hasAccess = false;
             _isLoading = false;
+            _hasInitialCheckCompleted = true;
             _errorMessage = 'Please log in to access content';
           });
         }
         return;
       }
 
-      // Add timeout to prevent hanging
+      // LOCAL-FIRST VALIDATION: For background refreshes, check the cached
+      // endDate against the user's current local time before hitting the server.
+      // This makes rechecks instant when the subscription clearly hasn't expired.
+      if (isBackgroundRefresh && !forceRefresh) {
+        final localValidity = _subscriptionService.isSubscriptionLocallyValid(
+          currentUser.uid,
+        );
+
+        if (localValidity == true) {
+          // Subscription endDate is still in the future — skip the server call
+          final endDate = _subscriptionService.getActiveSubscriptionEndDate(
+            currentUser.uid,
+          );
+          Logger.i(
+            '⚡ Local validation passed — subscription valid until '
+            '${endDate?.toLocal()} — skipping server call',
+          );
+          _backgroundRetryCount = 0;
+
+          if (mounted && _showRefreshPrompt) {
+            setState(() {
+              _showRefreshPrompt = false;
+              _isManualRefreshing = false;
+            });
+          }
+          return; // No server call needed
+        } else if (localValidity == false) {
+          // Cached endDate is in the past — subscription likely expired
+          Logger.w(
+            '⏰ Local validation: subscription endDate has passed — '
+            'verifying with server',
+          );
+          // Fall through to server check with forceRefresh
+          forceRefresh = true;
+        }
+        // localValidity == null: no cache, fall through to normal server check
+      }
+
+      // Server-side validation
       late Future<bool> accessCheckFuture;
 
       if (widget.courseId == null) {
         Logger.i(
-          '🔍 Checking general subscription access for user ${currentUser.uid} (forceRefresh: $forceRefresh)',
+          '🔍 Checking general subscription access for user ${currentUser.uid} (forceRefresh: $forceRefresh, background: $isBackgroundRefresh)',
         );
         accessCheckFuture = _subscriptionService.checkUserActiveSubscription(
           currentUser.uid,
@@ -195,7 +272,7 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
         );
       } else {
         Logger.i(
-          '🔐 Checking course access for ${widget.courseId} (forceRefresh: $forceRefresh)',
+          '🔐 Checking course access for ${widget.courseId} (forceRefresh: $forceRefresh, background: $isBackgroundRefresh)',
         );
         accessCheckFuture = _subscriptionService.hasAccessToCourse(
           currentUser.uid,
@@ -204,31 +281,232 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
         );
       }
 
-      // Apply timeout to prevent hanging
+      // Apply timeout — throw on timeout so it enters the retry path
       final hasAccess = await accessCheckFuture.timeout(
         const Duration(seconds: 10),
-        onTimeout: () {
+      );
+
+      // Success — reset the retry counter and clear any refresh prompt
+      _backgroundRetryCount = 0;
+
+      if (mounted && (_showRefreshPrompt || _isManualRefreshing)) {
+        setState(() {
+          _showRefreshPrompt = false;
+          _isManualRefreshing = false;
+        });
+      }
+
+      if (mounted) {
+        // Only update UI if the result actually changed, or if this is the initial check
+        if (!isBackgroundRefresh || hasAccess != _hasAccess) {
+          setState(() {
+            _hasAccess = hasAccess;
+            _isLoading = false;
+            _hasInitialCheckCompleted = true;
+          });
+
+          // If access was revoked during a background check, log it clearly
+          if (isBackgroundRefresh && !hasAccess) {
+            Logger.w('⚠️ Subscription access revoked during background check');
+          }
+        } else {
+          // Background check confirmed access is still valid — no UI update needed
+          Logger.i('✅ Background subscription check confirmed: access still valid');
+        }
+      }
+    } catch (error) {
+      Logger.e('❌ Error checking content access: $error');
+
+      if (isBackgroundRefresh) {
+        _backgroundRetryCount++;
+        Logger.w(
+          '⚠️ Background subscription check failed '
+          '(attempt $_backgroundRetryCount/$_maxBackgroundRetries): $error',
+        );
+
+        if (_backgroundRetryCount >= _maxBackgroundRetries) {
+          // All silent retries exhausted — show a non-intrusive prompt asking
+          // the user to manually verify. Content stays visible.
           Logger.w(
-            '🕒 Subscription check timed out - allowing access for better UX',
+            '⚠️ Max background retries reached — prompting user to refresh manually',
           );
-          return true; // Allow access on timeout for better user experience
-        },
+          _backgroundRetryCount = 0;
+
+          if (mounted) {
+            setState(() {
+              _showRefreshPrompt = true;
+            });
+          }
+        } else {
+          // Schedule a silent retry with exponential backoff (2s, 4s, 8s)
+          final retryDelay = Duration(seconds: 2 * _backgroundRetryCount);
+          Logger.i('🔁 Scheduling background retry in ${retryDelay.inSeconds}s');
+
+          _retryTimer?.cancel();
+          _retryTimer = Timer(retryDelay, () {
+            _retryTimer = null;
+            if (mounted) {
+              _checkAccess(forceRefresh: true);
+            }
+          });
+        }
+      } else {
+        // On initial check, show the error
+        if (mounted) {
+          setState(() {
+            _hasAccess = false;
+            _isLoading = false;
+            _hasInitialCheckCompleted = true;
+            _errorMessage = 'Unable to verify access. Please try again.';
+          });
+        }
+      }
+    }
+  }
+
+  /// Handle the user tapping "Verify Now" on the refresh prompt banner.
+  /// If this manual refresh also fails, revoke access.
+  Future<void> _handleManualRefresh() async {
+    if (!mounted || _isManualRefreshing) return;
+
+    setState(() {
+      _isManualRefreshing = true;
+    });
+
+    Logger.i('🔄 User-triggered manual subscription refresh');
+
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final currentUser = authService.currentUser;
+
+      if (currentUser == null) {
+        // No user — revoke access
+        if (mounted) {
+          setState(() {
+            _hasAccess = false;
+            _isLoading = false;
+            _showRefreshPrompt = false;
+            _isManualRefreshing = false;
+            _errorMessage = 'Please log in to access content';
+          });
+        }
+        return;
+      }
+
+      late Future<bool> accessCheckFuture;
+      if (widget.courseId == null) {
+        accessCheckFuture = _subscriptionService.checkUserActiveSubscription(
+          currentUser.uid,
+          forceRefresh: true,
+        );
+      } else {
+        accessCheckFuture = _subscriptionService.hasAccessToCourse(
+          currentUser.uid,
+          widget.courseId!,
+          forceRefresh: true,
+        );
+      }
+
+      final hasAccess = await accessCheckFuture.timeout(
+        const Duration(seconds: 15), // Slightly longer timeout for manual retry
       );
 
       if (mounted) {
         setState(() {
           _hasAccess = hasAccess;
           _isLoading = false;
+          _showRefreshPrompt = false;
+          _isManualRefreshing = false;
+          _backgroundRetryCount = 0;
         });
+
+        if (hasAccess) {
+          Logger.i('✅ Manual refresh confirmed: subscription is active');
+        } else {
+          Logger.w('⚠️ Manual refresh confirmed: subscription is NOT active');
+        }
       }
     } catch (error) {
-      Logger.e('❌ Error checking content access: $error');
-      setState(() {
-        _hasAccess = false;
-        _isLoading = false;
-        _errorMessage = 'Unable to verify access. Please try again.';
-      });
+      Logger.e('❌ Manual subscription refresh failed: $error');
+
+      // User-triggered refresh failed — now revoke access for safety
+      if (mounted) {
+        setState(() {
+          _hasAccess = false;
+          _isLoading = false;
+          _showRefreshPrompt = false;
+          _isManualRefreshing = false;
+          _errorMessage = 'Unable to verify subscription. Please check your connection and try again.';
+        });
+      }
     }
+  }
+
+  /// Build a non-intrusive banner prompting the user to verify their subscription
+  Widget _buildRefreshPromptBanner() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.orange[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange[300]!, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.wifi_off_rounded,
+            color: Colors.orange[700],
+            size: 20,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Subscription status could not be verified',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.orange[900],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _isManualRefreshing
+              ? SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange[700]!),
+                  ),
+                )
+              : TextButton(
+                  onPressed: _handleManualRefresh,
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.orange[800],
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: BorderSide(color: Colors.orange[400]!),
+                    ),
+                  ),
+                  child: const Text(
+                    'Verify Now',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+        ],
+      ),
+    );
   }
 
   /// Initialize the screenshot blocking service
@@ -412,6 +690,25 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     // Show content if access granted
     if (_hasAccess == true) {
       Logger.i('✅ Content access granted');
+
+      // If background checks failed, show a non-intrusive refresh banner
+      // over the content (content stays fully visible and usable)
+      if (_showRefreshPrompt) {
+        return Stack(
+          children: [
+            widget.child,
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                child: _buildRefreshPromptBanner(),
+              ),
+            ),
+          ],
+        );
+      }
+
       return widget.child;
     }
 
@@ -498,6 +795,9 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
   }
 
   Widget _buildErrorState() {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final bool isAuthMissing = authService.currentUser == null;
+
     return Container(
       padding: const EdgeInsets.all(40),
       child: Center(
@@ -521,18 +821,42 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _checkAccess,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 16,
+            if (isAuthMissing)
+              ElevatedButton(
+                onPressed: () async {
+                  // Clear any stale persistent data before redirecting
+                  await AuthPersistenceService.clearAll();
+                  if (!mounted) return;
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(
+                      builder: (context) => const LoginScreen(),
+                    ),
+                    (route) => false,
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32,
+                    vertical: 16,
+                  ),
                 ),
+                child: const Text('Go to Login'),
+              )
+            else
+              ElevatedButton(
+                onPressed: _checkAccess,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32,
+                    vertical: 16,
+                  ),
+                ),
+                child: const Text('Try Again'),
               ),
-              child: const Text('Try Again'),
-            ),
           ],
         ),
       ),

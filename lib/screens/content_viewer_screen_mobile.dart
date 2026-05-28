@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import '../widgets/simple_video_player.dart';
+import '../widgets/learner_presence_video_wrapper.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -1137,17 +1138,22 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
             width: double.infinity,
             height: double.infinity,
             color: Colors.black,
-            child: Center(
-              child: SimpleVideoPlayer(
-                key: ValueKey("video_${content.id}_persistent"),
-                videoUrl: existingController?.dataSource ?? content.originalUrl ?? content.content,
-                autoPlay: false,
-                userName: _userName,
-                showWatermark: true,
-                existingController: existingController,
-                onViewedCallback: content.isOneTimeView
-                    ? () => _markOneTimeContentViewed(content)
-                    : null,
+            // Wrap the video with the learner-presence overlay so the student
+            // sees a small front-camera self-preview while the lecture plays.
+            child: LearnerPresenceVideoWrapper(
+              contentKey: content.id,
+              child: Center(
+                child: SimpleVideoPlayer(
+                  key: ValueKey("video_${content.id}_persistent"),
+                  videoUrl: existingController?.dataSource ?? content.originalUrl ?? content.content,
+                  autoPlay: false,
+                  userName: _userName,
+                  showWatermark: true,
+                  existingController: existingController,
+                  onViewedCallback: content.isOneTimeView
+                      ? () => _markOneTimeContentViewed(content)
+                      : null,
+                ),
               ),
             ),
           );
