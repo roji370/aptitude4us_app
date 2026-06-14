@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
+import 'package:open_file/open_file.dart';
 import '../utils/logger.dart';
 
 class CustomPDFViewer extends StatefulWidget {
@@ -27,6 +29,11 @@ class _CustomPDFViewerState extends State<CustomPDFViewer> {
   bool _isLoading = true;
   bool _fileValidated = false;
   bool _hasCalledViewedCallback = false; // ensure we call it at most once
+  int _retryCount = 0;
+  static const int _maxRetries = 2;
+  // Unique key to force PDFView rebuild on retry (works around iOS 26
+  // platform-view lifecycle race where the native view isn't ready yet).
+  Key _pdfViewKey = UniqueKey();
 
   @override
   void initState() {
@@ -98,6 +105,46 @@ class _CustomPDFViewerState extends State<CustomPDFViewer> {
     }
   }
 
+  /// Retry rendering the PDF after a short delay.
+  /// iOS 26 has a race condition where the native platform view isn't ready
+  /// on the first attempt; a brief delay + fresh key usually resolves it.
+  void _retryRender() {
+    if (_retryCount >= _maxRetries) {
+      Logger.w("CustomPDFViewer: Max retries reached, not retrying");
+      return;
+    }
+
+    _retryCount++;
+    Logger.i("CustomPDFViewer: Retrying PDF render (attempt $_retryCount/$_maxRetries)");
+
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = null;
+        _isLoading = true;
+        _pdfViewKey = UniqueKey();
+      });
+    });
+  }
+
+  /// Open the PDF in the system viewer as a last-resort fallback.
+  /// This ensures the user can always access the content even when the
+  /// in-app PDFView widget fails on iOS 26.
+  void _openInSystemViewer() {
+    Logger.i("CustomPDFViewer: Opening PDF in system viewer as fallback");
+    try {
+      OpenFile.open(widget.filePath);
+      // Fire viewed callback since the user is viewing the document
+      if (!_hasCalledViewedCallback && widget.onViewedCallback != null) {
+        _hasCalledViewedCallback = true;
+        Logger.i('📄 PDF opened in system viewer – triggering one-time view callback');
+        widget.onViewedCallback!();
+      }
+    } catch (e) {
+      Logger.e("CustomPDFViewer: Failed to open in system viewer: $e");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -135,11 +182,21 @@ class _CustomPDFViewerState extends State<CustomPDFViewer> {
                                 _errorMessage = null;
                                 _isLoading = true;
                                 _fileValidated = false;
+                                _pdfViewKey = UniqueKey();
                               });
                               _validateFile();
                             },
                             child: const Text('Try Again'),
                           ),
+                          // Fallback: open in system viewer (especially useful on iOS 26)
+                          if (Platform.isIOS) ...[
+                            const SizedBox(height: 8),
+                            TextButton.icon(
+                              onPressed: _openInSystemViewer,
+                              icon: const Icon(Icons.open_in_new, size: 18),
+                              label: const Text('Open in System Viewer'),
+                            ),
+                          ],
                         ],
                       ),
                     );
@@ -158,67 +215,83 @@ class _CustomPDFViewerState extends State<CustomPDFViewer> {
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  return SizedBox.expand(
-                    child: PDFView(
-                      filePath: widget.filePath,
-                      enableSwipe: true,
-                      swipeHorizontal: true,
-                      autoSpacing: false,
-                      pageFling: true,
-                      pageSnap: true,
-                      defaultPage: 0,
-                      fitPolicy: FitPolicy.WIDTH,
-                      preventLinkNavigation: true,
-                      onRender: (pages) {
-                        Logger.i("PDF rendered successfully with $pages pages");
-                        setState(() {
-                          _isLoading = false;
-                        });
-                        // One-time view: fire callback once on first successful render
-                        if (!_hasCalledViewedCallback && widget.onViewedCallback != null) {
-                          _hasCalledViewedCallback = true;
-                          Logger.i('📄 PDF rendered – triggering one-time view callback');
-                          widget.onViewedCallback!();
-                        }
-                      },
-                      onError: (error) {
-                        Logger.e('Error rendering PDF: $error');
-                        Logger.e('Stack trace: ${StackTrace.current}');
+                  // RepaintBoundary isolates the native platform view from
+                  // Flutter's rendering pipeline, reducing the likelihood of
+                  // iOS 26 gesture-recognizer and layout conflicts.
+                  return RepaintBoundary(
+                    child: SizedBox.expand(
+                      child: PDFView(
+                        key: _pdfViewKey,
+                        filePath: widget.filePath,
+                        enableSwipe: true,
+                        swipeHorizontal: true,
+                        autoSpacing: false,
+                        pageFling: true,
+                        pageSnap: true,
+                        defaultPage: 0,
+                        fitPolicy: FitPolicy.WIDTH,
+                        preventLinkNavigation: true,
+                        onRender: (pages) {
+                          Logger.i("PDF rendered successfully with $pages pages");
+                          setState(() {
+                            _isLoading = false;
+                          });
+                          // Reset retry count on success
+                          _retryCount = 0;
+                          // One-time view: fire callback once on first successful render
+                          if (!_hasCalledViewedCallback && widget.onViewedCallback != null) {
+                            _hasCalledViewedCallback = true;
+                            Logger.i('📄 PDF rendered – triggering one-time view callback');
+                            widget.onViewedCallback!();
+                          }
+                        },
+                        onError: (error) {
+                          Logger.e('Error rendering PDF: $error');
+                          Logger.e('Stack trace: ${StackTrace.current}');
 
-                        setState(() {
-                          _isLoading = false;
-                          _errorMessage = error.toString();
-                        });
-                      },
-                      onPageError: (page, error) {
-                        Logger.e('Error on page $page: $error');
-                        Logger.e('Stack trace: ${StackTrace.current}');
+                          // On iOS 26, platform view errors are often transient.
+                          // Retry automatically before showing the error UI.
+                          if (Platform.isIOS && _retryCount < _maxRetries) {
+                            Logger.i("CustomPDFViewer: iOS error detected, auto-retrying...");
+                            _retryRender();
+                            return;
+                          }
 
-                        setState(() {
-                          _isLoading = false;
-                          _errorMessage = "Error on page $page: $error";
-                        });
-                      },
+                          setState(() {
+                            _isLoading = false;
+                            _errorMessage = error.toString();
+                          });
+                        },
+                        onPageError: (page, error) {
+                          Logger.e('Error on page $page: $error');
+                          Logger.e('Stack trace: ${StackTrace.current}');
+
+                          setState(() {
+                            _isLoading = false;
+                            _errorMessage = "Error on page $page: $error";
+                          });
+                        },
+                      ),
                     ),
+                  );
+                } on PlatformException catch (e) {
+                  // Catch iOS platform view exceptions (common on iOS 26
+                  // due to PDFKit lifecycle conflicts).
+                  Logger.e('PlatformException in PDFView: ${e.code} – ${e.message}');
+
+                  if (Platform.isIOS && _retryCount < _maxRetries) {
+                    _retryRender();
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  return _buildFallbackErrorWidget(
+                    'Platform error displaying PDF: ${e.message}',
                   );
                 } catch (e) {
                   Logger.e('Exception in PDFView creation: $e');
                   Logger.e('Stack trace: ${StackTrace.current}');
 
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.error_outline, size: 48, color: Colors.red),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Error displaying PDF: $e',
-                          style: TextStyle(color: Colors.red),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  );
+                  return _buildFallbackErrorWidget('Error displaying PDF: $e');
                 }
               },
             ),
@@ -250,6 +323,32 @@ class _CustomPDFViewerState extends State<CustomPDFViewer> {
           ],
         );
       },
+    );
+  }
+
+  /// Shared error widget with system-viewer fallback for iOS.
+  Widget _buildFallbackErrorWidget(String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.error_outline, size: 48, color: Colors.red),
+          const SizedBox(height: 16),
+          Text(
+            message,
+            style: TextStyle(color: Colors.red),
+            textAlign: TextAlign.center,
+          ),
+          if (Platform.isIOS) ...[
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: _openInSystemViewer,
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Open in System Viewer'),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
