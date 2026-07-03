@@ -48,6 +48,10 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
   // One-time view tracking
   bool _hasTriggeredViewedCallback = false;
 
+  // Throttle tracking: only rebuild when play state or position (in seconds) changes
+  bool? _lastPlayingState;
+  int _lastPositionSeconds = -1;
+
   @override
   void initState() {
     super.initState();
@@ -254,7 +258,9 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
   void _handlePlaybackStateChange() {
     if (_controller == null || !_controller!.value.isInitialized) return;
     
-    if (_controller!.value.isPlaying) {
+    final isPlaying = _controller!.value.isPlaying;
+    
+    if (isPlaying) {
       _enableWakelock();
     } else {
       _disableWakelock();
@@ -277,9 +283,18 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
       }
     }
 
-    // Rebuild so the time display and play/pause icon stay in sync with the
-    // progress bar, even when the video is playing without user interaction.
-    if (mounted) setState(() {});
+    // Throttled rebuild: only call setState when the play/pause state changes
+    // or when the position advances by ≥1 second. This reduces rebuilds from
+    // ~30/sec (every frame tick) to ~1/sec while playing.
+    final posSeconds = _controller!.value.position.inSeconds;
+    final stateChanged = isPlaying != _lastPlayingState;
+    final positionAdvanced = posSeconds != _lastPositionSeconds;
+    
+    if (stateChanged || positionAdvanced) {
+      _lastPlayingState = isPlaying;
+      _lastPositionSeconds = posSeconds;
+      if (mounted) setState(() {});
+    }
   }
 
   Future<void> _enableWakelock() async {
@@ -855,18 +870,33 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
     });
   }
 
+  // Throttle tracking for fullscreen playback rebuilds
+  bool? _lastPlayingState;
+  int _lastPositionSeconds = -1;
+
   // Wake lock management methods for fullscreen mode
   void _handlePlaybackStateChange() {
     if (!_controller.value.isInitialized) return;
     
-    if (_controller.value.isPlaying) {
+    final isPlaying = _controller.value.isPlaying;
+    
+    if (isPlaying) {
       _enableWakelock();
     } else {
       _disableWakelock();
     }
 
-    // Rebuild so the time display and play/pause icon stay live during playback.
-    if (mounted) setState(() {});
+    // Throttled rebuild: only call setState when the play/pause state changes
+    // or when the position advances by ≥1 second.
+    final posSeconds = _controller.value.position.inSeconds;
+    final stateChanged = isPlaying != _lastPlayingState;
+    final positionAdvanced = posSeconds != _lastPositionSeconds;
+    
+    if (stateChanged || positionAdvanced) {
+      _lastPlayingState = isPlaying;
+      _lastPositionSeconds = posSeconds;
+      if (mounted) setState(() {});
+    }
   }
 
   Future<void> _enableWakelock() async {
