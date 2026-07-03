@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../services/auth_service.dart';
 import '../services/auth_persistence_service.dart';
 import '../utils/logger.dart';
@@ -22,12 +23,27 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   Future<UserModel?>? _userDataFuture;
+  String _appVersion = '';
 
   @override
   void initState() {
     super.initState();
     // Cache the future to prevent re-firing on rebuild
     _userDataFuture = Provider.of<AuthService>(context, listen: false).getUserData();
+    _loadAppVersion();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          _appVersion = 'v${info.version}';
+        });
+      }
+    } catch (e) {
+      Logger.e('Could not load app version: $e');
+    }
   }
 
   Future<void> _logout() async {
@@ -325,6 +341,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 children: [
                                   const SizedBox(height: 16),
                                   _buildLogoutButton(context),
+                                  const SizedBox(height: 6),
+                                  if (_appVersion.isNotEmpty)
+                                    Text(
+                                      _appVersion,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey[500],
+                                        fontWeight: FontWeight.w400,
+                                      ),
+                                    ),
                                   const SizedBox(height: 10),
                                 ],
                               ),
