@@ -251,6 +251,11 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   StreamSubscription<User?>? _tokenChangesSubscription;
 
+  /// Monotonic stopwatch for debouncing device validation on resume.
+  /// Using Stopwatch instead of DateTime.now() to avoid system clock manipulation.
+  final Stopwatch _validationDebounceWatch = Stopwatch();
+  static const Duration _validationDebounceInterval = Duration(seconds: 60);
+
   @override
   void initState() {
     super.initState();
@@ -294,15 +299,24 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             statusBarIconBrightness: statusBarIconBrightness,
           );
 
-          // Validate device when app resumes (optional security check)
+          // Validate device when app resumes (debounced security check)
           _validateDeviceOnResume(context);
         }
       });
     }
   }
 
-  // Optional device validation when app resumes
+  // Debounced device validation on app resume.
+  // Skips validation if the last successful validation was < 60 seconds ago
+  // to prevent repeated Cloud Function calls during rapid app switching.
   void _validateDeviceOnResume(BuildContext context) async {
+    // Debounce: skip if last validation was recent
+    if (_validationDebounceWatch.isRunning &&
+        _validationDebounceWatch.elapsed < _validationDebounceInterval) {
+      Logger.d("🔒 Skipping device validation — debounced (${_validationDebounceWatch.elapsed.inSeconds}s since last)");
+      return;
+    }
+
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
       
@@ -312,29 +326,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         
         bool isValid = await authService.validateCurrentDevice();
         
+        // Reset debounce timer after validation completes (success or not)
+        _validationDebounceWatch.reset();
+        _validationDebounceWatch.start();
+        
         if (!isValid) {
-          Logger.w("⚠️ Device validation failed on resume - showing warning instead of logout");
-          
-          // TEMPORARY FIX: Show warning instead of logging out to prevent regression
-          // TODO: Investigate why device validation is failing unexpectedly
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Device validation warning - please contact support if this persists'),
-                duration: Duration(seconds: 3),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-          
-          // DISABLED: Aggressive logout causing regression
-          // await authService.signOut();
-          // if (context.mounted) {
-          //   Navigator.of(context).pushNamedAndRemoveUntil(
-          //     '/login',
-          //     (route) => false,
-          //   );
-          // }
+          Logger.w("⚠️ Device validation failed on resume — device not authorised");
+          // Log but don't show UI or sign out — the Cloud Function
+          // rejection is already logged and the admin can investigate.
+          // Aggressive logout was previously disabled due to regression.
         } else {
           Logger.i("✅ Device validation successful on resume");
         }

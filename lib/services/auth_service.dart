@@ -427,7 +427,7 @@ class AuthService {
     }
   }
 
-  // Method to re-validate device on app resume/start
+  // Method to re-validate device on app resume/start (with retry logic)
   Future<bool> validateCurrentDevice() async {
     if (!_isFirebaseAvailable) {
       Logger.w("Firebase not available for device validation");
@@ -439,33 +439,72 @@ class AuthService {
       return true; // Return true instead of false to avoid false negatives during session restoration
     }
 
-    try {
-      final deviceId = await getDeviceId();
-      final uid = currentUser!.uid;
-      
-      Logger.i("Validating current device: $deviceId for user: $uid");
+    // Attempt validation with retry
+    for (int attempt = 1; attempt <= 2; attempt++) {
+      try {
+        final deviceId = await getDeviceId();
+        final uid = currentUser!.uid;
+        
+        Logger.i("Validating current device (attempt $attempt): $deviceId for user: $uid");
 
-      final callable = FirebaseFunctions.instance.httpsCallable('validateUserDevice');
-      final res = await callable.call({
-        'userId': uid, 
-        'currentDeviceId': deviceId
-      });
-      
-      final validationResult = Map<String, dynamic>.from(res.data as Map);
-      
-      // If restriction is not enabled, device is valid
-      if (validationResult['restrictionEnabled'] != true) {
+        final callable = FirebaseFunctions.instance.httpsCallable(
+          'validateUserDevice',
+          options: HttpsCallableOptions(
+            timeout: const Duration(seconds: 10),
+          ),
+        );
+        final res = await callable.call({
+          'userId': uid, 
+          'currentDeviceId': deviceId
+        });
+        
+        final validationResult = Map<String, dynamic>.from(res.data as Map);
+        Logger.i("Device validation result (attempt $attempt): $validationResult");
+        
+        // If restriction is not enabled, device is valid
+        if (validationResult['restrictionEnabled'] != true) {
+          return true;
+        }
+        
+        // If restriction is enabled and device is explicitly NOT valid — this is a
+        // genuine rejection, not a transient error. Return false immediately.
+        if (validationResult['isValid'] == true) {
+          return true;
+        }
+        
+        // Explicit rejection: isValid != true with restriction enabled
+        Logger.w("Device validation rejected on attempt $attempt — device not authorised");
+        
+        // On first attempt failure, retry after re-reading device ID
+        // (handles case where device ID was regenerated during migration)
+        if (attempt == 1) {
+          Logger.i("Retrying device validation after 1s delay...");
+          await Future.delayed(const Duration(seconds: 1));
+          continue; // getDeviceId() will re-read from secure storage on next call
+        }
+        
+        // Both attempts got explicit rejection
+        return false;
+        
+      } catch (e) {
+        Logger.e("Error validating current device (attempt $attempt): $e");
+        
+        // On first attempt error (timeout, network, cold start), retry
+        if (attempt == 1) {
+          Logger.i("Retrying device validation after 1s delay due to error...");
+          await Future.delayed(const Duration(seconds: 1));
+          continue;
+        }
+        
+        // Both attempts failed with errors — assume valid to avoid blocking
+        // legitimate users. Only explicit server rejection (above) blocks access.
+        Logger.w("Device validation failed after 2 attempts — assuming valid (non-fatal)");
         return true;
       }
-      
-      // If restriction is enabled, check if device is valid
-      return validationResult['isValid'] == true;
-      
-    } catch (e) {
-      Logger.e("Error validating current device: $e");
-      // In case of error, assume device is valid to avoid blocking legitimate users
-      return true;
     }
+    
+    // Should not reach here, but return true as safety fallback
+    return true;
   }
 
   // Log login events to Firestore
