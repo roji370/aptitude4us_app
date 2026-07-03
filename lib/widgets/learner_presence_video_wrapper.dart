@@ -76,6 +76,16 @@ class _LearnerPresenceVideoWrapperState
   }
 
   @override
+  void deactivate() {
+    // Stop camera and remove overlay when navigating away.
+    // Must happen here (not dispose) because Overlay.of(context)
+    // may not be available in dispose().
+    _removeOverlay();
+    _controller.stop();
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
     _removeOverlay();
     _controller.removeListener(_onControllerChanged);

@@ -37,6 +37,8 @@ class LearnerPresenceOverlay extends StatefulWidget {
 class _LearnerPresenceOverlayState extends State<LearnerPresenceOverlay> {
   Offset? _offset; // null = use default top-right anchor.
   Size? _lastParentSize;
+  // Only rebuild when the controller state actually changes.
+  LearnerPresenceState? _lastState;
 
   @override
   void initState() {
@@ -51,7 +53,11 @@ class _LearnerPresenceOverlayState extends State<LearnerPresenceOverlay> {
   }
 
   void _onControllerChanged() {
-    if (mounted) setState(() {});
+    final newState = widget.controller.state;
+    if (newState != _lastState) {
+      _lastState = newState;
+      if (mounted) setState(() {});
+    }
   }
 
   Offset _defaultOffset(Size parent) {
@@ -166,16 +172,18 @@ class _OverlayCard extends StatelessWidget {
           return const _StatusBody(label: 'Starting…', spinner: true);
         }
         // Mirror the front camera (selfie convention).
-        return Transform(
-          alignment: Alignment.center,
-          transform: Matrix4.identity()..scale(-1.0, 1.0, 1.0),
-          child: FittedBox(
-            fit: BoxFit.cover,
-            clipBehavior: Clip.hardEdge,
-            child: SizedBox(
-              width: cam.value.previewSize?.height ?? 1,
-              height: cam.value.previewSize?.width ?? 1,
-              child: CameraPreview(cam),
+        return RepaintBoundary(
+          child: Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.identity()..scale(-1.0, 1.0, 1.0),
+            child: FittedBox(
+              fit: BoxFit.cover,
+              clipBehavior: Clip.hardEdge,
+              child: SizedBox(
+                width: cam.value.previewSize?.height ?? 1,
+                height: cam.value.previewSize?.width ?? 1,
+                child: CameraPreview(cam),
+              ),
             ),
           ),
         );

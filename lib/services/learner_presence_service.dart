@@ -357,10 +357,12 @@ class LearnerPresenceController extends ChangeNotifier
 
       // ResolutionPreset.low is intentional: the preview is tiny (~96 px
       // wide), so anything higher just wastes battery and memory bandwidth.
+      // Target FPS is limited to 15 to optimize battery drain.
       built = CameraController(
         _frontCamera!,
         ResolutionPreset.low,
         enableAudio: false,
+        fps: 15,
         imageFormatGroup: Platform.isAndroid
             ? ImageFormatGroup.yuv420
             : ImageFormatGroup.bgra8888,
