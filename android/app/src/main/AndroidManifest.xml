@@ -15,8 +15,7 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
-    <!-- Required for in-app APK installation (Android 8+ / API 26+) -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+
 
     <application
         android:label="Xfini Academy"
@@ -143,13 +142,6 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="http"/>
         </intent>
-        <!-- Allow querying the system package installer for APK installation -->
-        <intent>
-            <action android:name="android.intent.action.VIEW"/>
-            <data android:mimeType="application/vnd.android.package-archive"/>
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.INSTALL_PACKAGE"/>
-        </intent>
+
     </queries>
 </manifest>

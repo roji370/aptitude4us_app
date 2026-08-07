@@ -100,8 +100,12 @@ class _SplashScreenState extends State<SplashScreen>
   /// Start all async initialization work AFTER the first frame is rendered
   Future<void> _startAsyncInitialization() async {
     // Ultimate failsafe - force navigation after maximum time
+    // CRITICAL: Check _hasNavigated (not _isNavigating) because _isNavigating
+    // is set true early inside _checkAuthAndNavigate(), before the Firestore
+    // calls that can actually hang. Using _isNavigating would make this
+    // failsafe completely ineffective.
     Timer? timeoutTimer = Timer(const Duration(seconds: 15), () {
-      if (mounted && !_isNavigating) {
+      if (mounted && !_hasNavigated) {
         Logger.w(
           "🚨 Ultimate failsafe triggered - forcing navigation to login",
         );
@@ -130,7 +134,7 @@ class _SplashScreenState extends State<SplashScreen>
         firebaseReady = false;
       }
 
-      if (!mounted || _isNavigating) return;
+      if (!mounted || _hasNavigated) return;
 
       if (!firebaseReady) {
         Logger.w("Firebase initialization failed - navigating to login screen");
@@ -140,8 +144,10 @@ class _SplashScreenState extends State<SplashScreen>
           });
         }
         await Future.delayed(const Duration(milliseconds: 800));
-        if (mounted) {
-          _navigateToLogin();
+        if (mounted && !_hasNavigated) {
+          // Use _forceNavigateToLogin because _isNavigating is still false
+          // at this point — _navigateToLogin() would silently bail out.
+          _forceNavigateToLogin();
         }
         return;
       }
@@ -160,9 +166,17 @@ class _SplashScreenState extends State<SplashScreen>
         FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
         Logger.i('📱 Background message handler registered');
         
-        // Initialize notification service
+        // Initialize notification service WITH timeout.
+        // AwesomeNotifications().initialize(), requestPermission(), and
+        // cleanupTokens() can all hang on certain devices (e.g. custom
+        // ROMs, aggressive battery managers, corrupted notification DB).
         final notificationService = Provider.of<NotificationService>(context, listen: false);
-        await notificationService.initialize();
+        await notificationService.initialize().timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            Logger.w('⏰ Notification service initialization timed out — continuing without full setup');
+          },
+        );
         Logger.i('✅ NotificationService initialized - push notifications ready');
         
         // Store globally for app-wide access
@@ -172,7 +186,7 @@ class _SplashScreenState extends State<SplashScreen>
         // Continue even if notifications fail
       }
 
-      if (!mounted || _isNavigating) return;
+      if (!mounted || _hasNavigated) return;
 
       await Future.delayed(const Duration(milliseconds: 400));
 
@@ -185,7 +199,7 @@ class _SplashScreenState extends State<SplashScreen>
 
       await Future.delayed(const Duration(milliseconds: 400));
 
-      if (!mounted || _isNavigating) return;
+      if (!mounted || _hasNavigated) return;
 
       // Check if app update is required
       final versionCheckService = VersionCheckService();
@@ -201,7 +215,7 @@ class _SplashScreenState extends State<SplashScreen>
         updateRequired = false;
       }
 
-      if (!mounted || _isNavigating) return;
+      if (!mounted || _hasNavigated) return;
 
       if (updateRequired) {
         // Navigate to force update screen
@@ -219,7 +233,7 @@ class _SplashScreenState extends State<SplashScreen>
 
       await Future.delayed(const Duration(milliseconds: 400));
 
-      if (!mounted || _isNavigating) return;
+      if (!mounted || _hasNavigated) return;
 
       // Check auth and navigate
       await _checkAuthAndNavigate();
@@ -228,10 +242,13 @@ class _SplashScreenState extends State<SplashScreen>
     }
   }
 
-  /// Force navigation to login screen for failsafe scenarios
+  /// Force navigation to login screen for failsafe scenarios.
+  /// This is the "nuclear option" — bypasses all checks and navigates
+  /// immediately. Only _hasNavigated is checked to prevent double-push.
   void _forceNavigateToLogin() {
-    if (!mounted || _isNavigating) return;
+    if (!mounted || _hasNavigated) return;
 
+    _hasNavigated = true;
     setState(() {
       _isNavigating = true;
     });
@@ -254,16 +271,37 @@ class _SplashScreenState extends State<SplashScreen>
 
     Logger.i("🔄 Navigating to force update screen...");
 
-    // Get version information
-    final versionCheckService = VersionCheckService();
-    final currentVersion = await versionCheckService.getCurrentVersion();
-    final versionInfo = await versionCheckService.getVersionInfo();
-    final requiredVersion = versionInfo['minimumVersion'] as String? ?? 'Unknown';
-    final updateMessage = versionInfo['updateMessage'] as String?;
-    final apkDownloadPath = versionInfo['apkDownloadPath'] as String?;
+    // Get version information — with timeouts since _hasNavigated is
+    // already true and no failsafe can save us if these hang.
+    String currentVersion = '0.0.0';
+    String requiredVersion = 'Unknown';
+    String? updateMessage;
+    String? apkDownloadPath;
+
+    try {
+      final versionCheckService = VersionCheckService();
+      currentVersion = await versionCheckService.getCurrentVersion().timeout(
+        const Duration(seconds: 3),
+      );
+      final versionInfo = await versionCheckService.getVersionInfo().timeout(
+        const Duration(seconds: 5),
+      );
+      requiredVersion = versionInfo['minimumVersion'] as String? ?? 'Unknown';
+      updateMessage = versionInfo['updateMessage'] as String?;
+      apkDownloadPath = versionInfo['apkDownloadPath'] as String?;
+    } catch (e) {
+      Logger.e("Error fetching version details (non-fatal): $e");
+      // Continue with defaults — the update screen will still show
+    }
 
     // Fade out before navigation
-    await _fadeController.reverse();
+    if (mounted) {
+      try {
+        await _fadeController.reverse();
+      } catch (_) {
+        // AnimationController may already be disposed
+      }
+    }
 
     if (!mounted) return;
 
@@ -293,6 +331,17 @@ class _SplashScreenState extends State<SplashScreen>
 
     setState(() {
       _isNavigating = true;
+    });
+
+    // Inner failsafe: if _checkAuthAndNavigate itself takes too long
+    // (e.g. a Firestore .get() hangs), force-navigate to login.
+    // The outer 15-second timer may have already fired, but this is
+    // belt-and-suspenders — both check _hasNavigated.
+    Timer? innerTimeout = Timer(const Duration(seconds: 10), () {
+      if (mounted && !_hasNavigated) {
+        Logger.w("🚨 Auth-check inner timeout — forcing navigation to login");
+        _forceNavigateToLogin();
+      }
     });
 
     try {
@@ -328,50 +377,73 @@ class _SplashScreenState extends State<SplashScreen>
         firebaseUser = FirebaseAuth.instance.currentUser;
       }
 
-      if (!mounted) return;
+      if (!mounted || _hasNavigated) { innerTimeout.cancel(); return; }
 
       // Handle the authentication state
       if (firebaseUser != null) {
         // User is authenticated via Firebase
         Logger.i("User authenticated via Firebase Auth: ${firebaseUser.uid}");
 
-        // Ensure persistent storage is in sync
+        // Ensure persistent storage is in sync (with timeout)
         if (!hasPersistentLogin) {
           Logger.i("Syncing persistent storage with Firebase Auth state");
-          String? token = await firebaseUser.getIdToken();
-          if (token != null) {
-            await AuthPersistenceService.saveAuthToken(token);
+          try {
+            String? token = await firebaseUser.getIdToken().timeout(
+              const Duration(seconds: 5),
+            );
+            if (token != null) {
+              await AuthPersistenceService.saveAuthToken(token);
+            }
+          } catch (e) {
+            Logger.e("Error syncing persistent storage (non-fatal): $e");
+            // Continue — token sync failure shouldn't block navigation
           }
         }
 
-        // Check if profile is complete
+        if (!mounted || _hasNavigated) { innerTimeout.cancel(); return; }
+
+        // Check if profile is complete (with timeout to prevent hang
+        // on devices where Firestore .get() stalls, e.g. OPPO/Realme
+        // with aggressive battery management)
         bool profileComplete = false;
         final userId = firebaseUser.uid;
         try {
-          profileComplete = await authService.isProfileComplete();
+          profileComplete = await authService.isProfileComplete().timeout(
+            const Duration(seconds: 5),
+            onTimeout: () {
+              Logger.w("isProfileComplete timeout — assuming complete to avoid blocking");
+              return true; // Assume complete so user can get into the app
+            },
+          );
           Logger.i("Profile completion status: $profileComplete");
         } catch (e) {
           Logger.e("Error checking profile completion: $e");
-          // If error, assume profile is incomplete and let user fill it
-          profileComplete = false;
+          // If error, assume profile is complete to let user into the app
+          // rather than blocking them on an error screen
+          profileComplete = true;
         }
 
-        if (!mounted) return;
+        if (!mounted || _hasNavigated) { innerTimeout.cancel(); return; }
 
         // Profile is complete — go straight to the main screen.
         // Exam overview is only for users who have NOT yet completed their profile.
         if (profileComplete) {
           // Setup user-specific notification handling
           if (mounted) {
-            final notificationService = Provider.of<NotificationService>(
-              context,
-              listen: false,
-            );
-            notificationService.ensureTopicSubscriptions(userId);
-            notificationService.refreshToken();
+            try {
+              final notificationService = Provider.of<NotificationService>(
+                context,
+                listen: false,
+              );
+              notificationService.ensureTopicSubscriptions(userId);
+              notificationService.refreshToken();
+            } catch (e) {
+              Logger.e("Error setting up notifications (non-fatal): $e");
+            }
           }
 
-          if (mounted) {
+          if (mounted && !_hasNavigated) {
+            innerTimeout.cancel();
             _navigateToHome();
           }
           return;
@@ -381,20 +453,33 @@ class _SplashScreenState extends State<SplashScreen>
         // The exam overview is a mandatory first-time orientation that users must
         // complete before filling out their profile.
         final firstTimeUserService = FirstTimeUserService();
-        final hasWatchedExamOverview = await firstTimeUserService.hasWatchedExamOverview(userId);
+        bool hasWatchedExamOverview = false;
+        try {
+          hasWatchedExamOverview = await firstTimeUserService
+              .hasWatchedExamOverview(userId)
+              .timeout(const Duration(seconds: 3));
+        } catch (e) {
+          Logger.e("Error checking exam overview status: $e");
+          // Default to true on error so user isn't stuck
+          hasWatchedExamOverview = true;
+        }
+
+        if (!mounted || _hasNavigated) { innerTimeout.cancel(); return; }
 
         if (!hasWatchedExamOverview) {
           Logger.i("Profile incomplete & exam overview not watched - showing exam overview dialog");
 
-          if (!mounted) return;
+          if (!mounted) { innerTimeout.cancel(); return; }
 
           // Show exam overview dialog
+          innerTimeout.cancel();
           await _showExamOverviewDialog();
           return;
         }
 
         // Exam overview already watched but profile still incomplete — go to profile completion
         Logger.i("Exam overview already watched - navigating to profile completion");
+        innerTimeout.cancel();
         _navigateToProfileCompletion();
         return;
       }
@@ -416,17 +501,20 @@ class _SplashScreenState extends State<SplashScreen>
         Logger.w("Clearing stale persistent login data and redirecting to login");
         await AuthPersistenceService.clearAll();
         
-        if (!mounted) return;
+        if (!mounted || _hasNavigated) { innerTimeout.cancel(); return; }
         
+        innerTimeout.cancel();
         _navigateToLogin();
       } else {
         // No login detected anywhere, go to login screen
         Logger.i("No authentication detected - navigating to login");
+        innerTimeout.cancel();
         _navigateToLogin();
       }
     } catch (e) {
       Logger.e("Error during auth check: $e");
-      if (mounted) {
+      innerTimeout.cancel();
+      if (mounted && !_hasNavigated) {
         // On error, default to login screen
         _navigateToLogin();
       }
@@ -443,7 +531,11 @@ class _SplashScreenState extends State<SplashScreen>
     Logger.i("📝 Navigating to profile completion screen...");
 
     // Fade out before navigation
-    await _fadeController.reverse();
+    try {
+      await _fadeController.reverse();
+    } catch (_) {
+      // AnimationController may already be disposed if failsafe fired
+    }
 
     if (!mounted) return;
 
@@ -486,7 +578,11 @@ class _SplashScreenState extends State<SplashScreen>
     }
 
     // Fade out before navigation
-    await _fadeController.reverse();
+    try {
+      await _fadeController.reverse();
+    } catch (_) {
+      // AnimationController may already be disposed if failsafe fired
+    }
 
     if (!mounted) return;
 
@@ -523,16 +619,29 @@ class _SplashScreenState extends State<SplashScreen>
         onProceed: () async {
           Logger.i('📚 Navigating to Exam Overview from dialog');
           
-          // Navigate to exam overview
-          final success = await ExamOverviewNavigator.navigateToExamOverview(
-            context,
-            firestoreService,
-          );
+          // Navigate to exam overview with timeout protection.
+          // ExamOverviewNavigator calls firestoreService.getCourses()
+          // which is an unbounded Firestore call — if it hangs, user
+          // is stuck in a non-dismissible dialog with no escape.
+          bool success = false;
+          try {
+            success = await ExamOverviewNavigator.navigateToExamOverview(
+              context,
+              firestoreService,
+            ).timeout(
+              const Duration(seconds: 10),
+              onTimeout: () {
+                Logger.w('⏰ Exam overview navigation timed out');
+                return false;
+              },
+            );
+          } catch (e) {
+            Logger.e('Error navigating to exam overview: $e');
+            success = false;
+          }
           
           if (!success) {
-            Logger.e('Failed to navigate to exam overview');
-            // If navigation fails, for now we'll just go to home
-            // In production, you might want to retry or show an error
+            Logger.e('Failed to navigate to exam overview — going to home');
             if (mounted) {
               _navigateToHome();
             }
@@ -551,14 +660,27 @@ class _SplashScreenState extends State<SplashScreen>
     Logger.i("🔐 Navigating to login/onboarding screen...");
 
     // Fade out before navigation
-    await _fadeController.reverse();
+    try {
+      await _fadeController.reverse();
+    } catch (_) {
+      // AnimationController may already be disposed if failsafe fired
+    }
 
     if (!mounted) return;
 
-    // Check if onboarding has been completed
-    final prefs = await SharedPreferences.getInstance();
-    final bool onboardingComplete =
-        prefs.getBool('onboarding_complete') ?? false;
+    // Check if onboarding has been completed (with timeout — SharedPrefs
+    // can hang if Android's storage is in a bad state after a force-kill).
+    bool onboardingComplete = false;
+    try {
+      final prefs = await SharedPreferences.getInstance().timeout(
+        const Duration(seconds: 3),
+      );
+      onboardingComplete = prefs.getBool('onboarding_complete') ?? false;
+    } catch (e) {
+      Logger.e('Error reading onboarding status (non-fatal): $e');
+      // Default to true (skip onboarding) to avoid blocking the user
+      onboardingComplete = true;
+    }
 
     if (!mounted) return;
 
