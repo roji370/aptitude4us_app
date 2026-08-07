@@ -430,8 +430,8 @@ class ContentUpdateService {
         return 'notes';
       case 'image':
         return 'images';
-      case 'ppt':
-        return 'ppts';
+      case 'audio':
+        return 'audios';
       case 'link':
         return 'links';
       default:

@@ -153,8 +153,8 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
         return Icons.play_circle_outline;
       case 'pdf':
         return Icons.picture_as_pdf;
-      case 'ppt':
-        return Icons.slideshow;
+      case 'audio':
+        return Icons.headphones;
       case 'image':
         return Icons.image;
       case 'link':
@@ -179,8 +179,8 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
         return 'Videos';
       case 'pdf':
         return 'PDFs';
-      case 'ppt':
-        return 'Presentations';
+      case 'audio':
+        return 'Audio';
       case 'image':
         return 'Images';
       case 'link':

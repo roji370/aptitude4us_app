@@ -151,8 +151,8 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
         return Icons.play_circle_filled;
       case 'pdf':
         return Icons.picture_as_pdf;
-      case 'ppt':
-        return Icons.slideshow;
+      case 'audio':
+        return Icons.headphones;
       case 'image':
         return Icons.image;
       case 'link':

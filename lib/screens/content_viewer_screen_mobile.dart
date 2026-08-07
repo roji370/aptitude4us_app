@@ -33,7 +33,7 @@ import 'profile_completion_screen.dart';
 import 'screenshot_warning_screen.dart';
 import 'screenshot_blocked_screen.dart';
 import '../widgets/fullscreen_image_viewer.dart';
-import '../widgets/ppt_viewer.dart';
+import '../widgets/audio_player_widget.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // Watermark overlay widget for PDFs
@@ -282,67 +282,6 @@ class _FullScreenPdfViewerState extends State<FullScreenPdfViewer> {
   }
 }
 
-// Fullscreen PPT viewer widget
-class FullscreenPptViewer extends StatefulWidget {
-  final String pptUrl;
-  final String title;
-  final String userName;
-
-  const FullscreenPptViewer({
-    super.key,
-    required this.pptUrl,
-    required this.title,
-    required this.userName,
-  });
-
-  @override
-  State<FullscreenPptViewer> createState() => _FullscreenPptViewerState();
-}
-
-class _FullscreenPptViewerState extends State<FullscreenPptViewer> {
-  @override
-  void initState() {
-    super.initState();
-    // Allow landscape orientations for better viewing
-    AccessibilityHelper.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-  }
-
-  @override
-  void dispose() {
-    // Restore original orientations
-    AccessibilityHelper.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-    ]);
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        elevation: 0,
-        title: Text(widget.title),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
-      body: SafeArea(
-        child: PptViewer(
-          pptUrl: widget.pptUrl,
-          title: widget.title,
-          userName: widget.userName,
-        ),
-      ),
-    );
-  }
-}
 
 class ContentViewerScreen extends StatefulWidget {
   final CourseModel course;
@@ -1373,8 +1312,8 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
       case 'image':
         return _buildImageContent(content);
 
-      case 'ppt':
-        return _buildPptContent(content);
+      case 'audio':
+        return _buildAudioContent(content);
         
       case 'text':
       default:
@@ -1565,7 +1504,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
   /// playable for the rest of this session; blocked on next session when
   /// [checkIfContentViewed] returns true.
   ///
-  /// Image / link / ppt / text content types do NOT need this callback because
+  /// Image / link / audio / text content types do NOT need this callback because
   /// the confirmation-time write is sufficient for instantaneous content.
   void _markOneTimeContentViewed(ContentModel content) async {
     if (!mounted) return;
@@ -2025,8 +1964,8 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
         return const Color(0xFF1565C0); // Blue
       case 'pdf':
         return const Color(0xFF29ACD6); // Light Blue (changed from purple)
-      case 'ppt':
-        return const Color(0xFFFB8C00); // Orange
+      case 'audio':
+        return const Color(0xFF9C27B0); // Purple
       case 'image':
         return const Color(0xFFE53935); // Red
       case 'link':
@@ -2045,8 +1984,8 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
         return Icons.play_circle_outline;
       case 'pdf':
         return Icons.picture_as_pdf;
-      case 'ppt':
-        return Icons.slideshow;
+      case 'audio':
+        return Icons.headphones;
       case 'image':
         return Icons.image;
       case 'link':
@@ -2065,8 +2004,8 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
         return 'Video';
       case 'pdf':
         return 'PDF';
-      case 'ppt':
-        return 'Presentation';
+      case 'audio':
+        return 'Audio';
       case 'image':
         return 'Image';
       case 'link':
@@ -2444,12 +2383,12 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     );
   }
 
-  // Build PPT content widget
-  Widget _buildPptContent(ContentModel content) {
+  // Build audio content widget
+  Widget _buildAudioContent(ContentModel content) {
     if (content.content.isEmpty) {
       return const Center(
         child: Text(
-          'No PPT URL available.',
+          'No audio URL available.',
           style: TextStyle(color: Colors.red),
         ),
       );
@@ -2457,55 +2396,14 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
 
     return Stack(
       children: [
-        // In-app PPT viewer
-        PptViewer(
-          pptUrl: content.content,
+        AudioPlayerWidget(
+          audioUrl: content.content,
           title: content.title,
           userName: _userName,
         ),
-        
-        // Fullscreen button
-        Positioned(
-          top: 16,
-          right: 16,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.6),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: IconButton(
-              icon: const Icon(
-                Icons.fullscreen,
-                color: Colors.white,
-                size: 24,
-              ),
-              onPressed: () => _openFullscreenPpt(content),
-              tooltip: 'View fullscreen',
-            ),
-          ),
-        ),
+        // Add watermark overlay with the user's name
+        XfiniWatermark(userName: _userName),
       ],
-    );
-  }
-
-  // Helper method to open fullscreen PPT viewer
-  void _openFullscreenPpt(ContentModel content) {
-    Navigator.of(context).push(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            FullscreenPptViewer(
-          pptUrl: content.content,
-          title: content.title,
-          userName: _userName,
-        ),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(
-            opacity: animation,
-            child: child,
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 300),
-      ),
     );
   }
 

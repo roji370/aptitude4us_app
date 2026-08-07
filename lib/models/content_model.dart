@@ -62,10 +62,15 @@ class ContentModel {
         contentTypeValue = 'video';
       } else if (lowerContent.contains('.pdf')) {
         contentTypeValue = 'pdf';
-      } else if (lowerContent.contains('.ppt') ||
-                 lowerContent.contains('.pptx') ||
-                 lowerContent.contains('powerpoint')) {
-        contentTypeValue = 'ppt';
+      } else if (lowerContent.contains('.mp3') ||
+                 lowerContent.contains('.wav') ||
+                 lowerContent.contains('.m4a') ||
+                 lowerContent.contains('.aac') ||
+                 lowerContent.contains('.ogg') ||
+                 lowerContent.contains('.flac') ||
+                 lowerContent.contains('.wma') ||
+                 lowerContent.contains('audio')) {
+        contentTypeValue = 'audio';
       } else if (lowerContent.contains('.jpg') ||
                  lowerContent.contains('.jpeg') ||
                  lowerContent.contains('.png') ||

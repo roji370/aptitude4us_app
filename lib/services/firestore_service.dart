@@ -488,31 +488,31 @@ class FirestoreService {
             }
           }
 
-          // Handle PPTs
-          if (content.containsKey('ppts')) {
-            Logger.i("Processing inline PPTs");
-            final ppts = content['ppts'] as List;
-            for (var ppt in ppts) {
-              if (ppt is Map) {
-                Logger.d("Processing PPT: $ppt");
-                String pptUrl = ppt['url'] ?? ppt['content'] ?? '';
-                if (pptUrl.isNotEmpty) {
-                  Logger.i("Found PPT URL: $pptUrl");
-                  final stablePptId = ppt['id'] as String? ??
-                      '${moduleId}_ppt_${ppt['title'] ?? ''}_${ppt['order'] ?? allContents.length}';
+          // Handle Audios
+          if (content.containsKey('audios')) {
+            Logger.i("Processing inline audios");
+            final audios = content['audios'] as List;
+            for (var audio in audios) {
+              if (audio is Map) {
+                Logger.d("Processing audio: $audio");
+                String audioUrl = audio['url'] ?? audio['content'] ?? '';
+                if (audioUrl.isNotEmpty) {
+                  Logger.i("Found audio URL: $audioUrl");
+                  final stableAudioId = audio['id'] as String? ??
+                      '${moduleId}_audio_${audio['title'] ?? ''}_${audio['order'] ?? allContents.length}';
                   allContents.add(
                     ContentModel.fromJson(
                       {
-                        ...ppt,
-                        'type': 'ppt',
-                        'contentType': 'ppt',
-                        'content': pptUrl,
+                        ...audio,
+                        'type': 'audio',
+                        'contentType': 'audio',
+                        'content': audioUrl,
                       },
-                      stablePptId,
+                      stableAudioId,
                     ),
                   );
                 } else {
-                  Logger.w("Warning: Empty PPT URL in PPT data: $ppt");
+                  Logger.w("Warning: Empty audio URL in audio data: $audio");
                 }
               }
             }
