@@ -263,11 +263,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       topRight: Radius.circular(30),
                     ),
                   ),
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      return SingleChildScrollView(
+                        padding: const EdgeInsets.all(20),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight: constraints.maxHeight - 40, // account for padding
+                          ),
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
@@ -357,8 +360,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ],
                           ),
                         ),
-                      ),
-                    ],
+                      );
+                    },
                   ),
                 ),
               ),
