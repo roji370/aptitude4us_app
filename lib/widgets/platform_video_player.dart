@@ -414,6 +414,7 @@ class _iOSVideoPlayerState extends State<_iOSVideoPlayer>
   Timer? _skipFeedbackTimer;
   late AnimationController _controlsAnimationController;
   late Animation<double> _controlsAnimation;
+  double _playbackSpeed = 1.0;
 
   // Throttle tracking: only rebuild when play state or position (in seconds) changes
   bool? _lastPlayingState;
@@ -604,6 +605,19 @@ class _iOSVideoPlayerState extends State<_iOSVideoPlayer>
     });
   }
 
+  static const List<double> _speedOptions = [1.0, 1.25, 1.5, 1.75, 2.0, 0.5, 0.75];
+
+  void _cycleSpeed() {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+    final currentIndex = _speedOptions.indexOf(_playbackSpeed);
+    final nextIndex = (currentIndex + 1) % _speedOptions.length;
+    setState(() {
+      _playbackSpeed = _speedOptions[nextIndex];
+      _controller!.setPlaybackSpeed(_playbackSpeed);
+    });
+    _showControlsTemporarily();
+  }
+
   void _skipBackward() {
     if (_controller == null || !_controller!.value.isInitialized) return;
     HapticFeedback.lightImpact();
@@ -694,6 +708,69 @@ class _iOSVideoPlayerState extends State<_iOSVideoPlayer>
     return '${twoDigits(duration.inMinutes.remainder(60))}:${twoDigits(duration.inSeconds.remainder(60))}';
   }
 
+  Widget _buildCenterControls() {
+    if (!_showControls || !_isInitialized) return const SizedBox.shrink();
+    final isPlaying = _controller!.value.isPlaying;
+
+    return Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            onPressed: _skipBackward,
+            icon: const Icon(Icons.replay_10, color: Colors.white, size: 40),
+          ),
+          const SizedBox(width: 24),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.4),
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              onPressed: _togglePlayPause,
+              iconSize: 56,
+              icon: Icon(
+                isPlaying ? Icons.pause : Icons.play_arrow,
+                color: Colors.white,
+                size: 56,
+              ),
+            ),
+          ),
+          const SizedBox(width: 24),
+          IconButton(
+            onPressed: _skipForward,
+            icon: const Icon(Icons.forward_10, color: Colors.white, size: 40),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpeedButton() {
+    final label = _playbackSpeed == _playbackSpeed.roundToDouble()
+        ? '${_playbackSpeed.toInt()}x'
+        : '${_playbackSpeed}x';
+    return GestureDetector(
+      onTap: _cycleSpeed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: Colors.white54, width: 1),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildControls() {
     if (!_showControls || !_isInitialized) return const SizedBox.shrink();
     final pos = _controller!.value.position;
@@ -767,6 +844,8 @@ class _iOSVideoPlayerState extends State<_iOSVideoPlayer>
                       color: Colors.white, size: 32),
                 ),
                 const Spacer(),
+                _buildSpeedButton(),
+                const SizedBox(width: 8),
                 IconButton(
                   onPressed: _toggleMute,
                   icon: Icon(
@@ -870,6 +949,10 @@ class _iOSVideoPlayerState extends State<_iOSVideoPlayer>
             VideoWatermark(userName: widget.userName!),
           FadeTransition(
             opacity: _controlsAnimation,
+            child: _buildCenterControls(),
+          ),
+          FadeTransition(
+            opacity: _controlsAnimation,
             child: _buildControls(),
           ),
         ],
@@ -918,6 +1001,7 @@ class _iOSFullscreenVideoPlayerState extends State<_iOSFullscreenVideoPlayer>
   Timer? _skipFeedbackTimer;
   late AnimationController _controlsAnimationController;
   late Animation<double> _controlsAnimation;
+  double _playbackSpeed = 1.0;
 
   // Throttle tracking for fullscreen playback rebuilds
   bool? _lastPlayingState;
@@ -1107,6 +1191,19 @@ class _iOSFullscreenVideoPlayerState extends State<_iOSFullscreenVideoPlayer>
     });
   }
 
+  static const List<double> _speedOptions = [1.0, 1.25, 1.5, 1.75, 2.0, 0.5, 0.75];
+
+  void _cycleSpeed() {
+    if (!_controller.value.isInitialized) return;
+    final currentIndex = _speedOptions.indexOf(_playbackSpeed);
+    final nextIndex = (currentIndex + 1) % _speedOptions.length;
+    setState(() {
+      _playbackSpeed = _speedOptions[nextIndex];
+      _controller.setPlaybackSpeed(_playbackSpeed);
+    });
+    _showControlsTemporarily();
+  }
+
   void _setVolume(double volume) {
     if (!_controller.value.isInitialized) return;
     setState(() {
@@ -1171,6 +1268,72 @@ class _iOSFullscreenVideoPlayerState extends State<_iOSFullscreenVideoPlayer>
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
     return '${twoDigits(duration.inMinutes.remainder(60))}:${twoDigits(duration.inSeconds.remainder(60))}';
+  }
+
+  Widget _buildCenterControls() {
+    if (!_showControls || !_controller.value.isInitialized) {
+      return const SizedBox.shrink();
+    }
+
+    final isPlaying = _controller.value.isPlaying;
+
+    return Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            onPressed: _skipBackward,
+            icon: const Icon(Icons.replay_10, color: Colors.white, size: 48),
+          ),
+          const SizedBox(width: 32),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.4),
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              onPressed: _togglePlayPause,
+              iconSize: 64,
+              icon: Icon(
+                isPlaying ? Icons.pause : Icons.play_arrow,
+                color: Colors.white,
+                size: 64,
+              ),
+            ),
+          ),
+          const SizedBox(width: 32),
+          IconButton(
+            onPressed: _skipForward,
+            icon: const Icon(Icons.forward_10, color: Colors.white, size: 48),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpeedButton() {
+    final label = _playbackSpeed == _playbackSpeed.roundToDouble()
+        ? '${_playbackSpeed.toInt()}x'
+        : '${_playbackSpeed}x';
+    return GestureDetector(
+      onTap: _cycleSpeed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: Colors.white54, width: 1),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildFullscreenControls() {
@@ -1265,6 +1428,8 @@ class _iOSFullscreenVideoPlayerState extends State<_iOSFullscreenVideoPlayer>
                       style: const TextStyle(color: Colors.white, fontSize: 16),
                     ),
                     const Spacer(),
+                    _buildSpeedButton(),
+                    const SizedBox(width: 12),
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -1394,6 +1559,10 @@ class _iOSFullscreenVideoPlayerState extends State<_iOSFullscreenVideoPlayer>
                     ),
                   if (widget.showWatermark && widget.userName != null)
                     FullscreenVideoWatermark(userName: widget.userName!),
+                  FadeTransition(
+                    opacity: _controlsAnimation,
+                    child: _buildCenterControls(),
+                  ),
                   FadeTransition(
                     opacity: _controlsAnimation,
                     child: _buildFullscreenControls(),

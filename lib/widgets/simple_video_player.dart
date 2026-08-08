@@ -39,6 +39,7 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
   bool _showControls = true;
   double _volume = 1.0;
   bool _isMuted = false;
+  double _playbackSpeed = 1.0;
   Timer? _hideControlsTimer;
   String? _skipFeedback;
   Timer? _skipFeedbackTimer;
@@ -254,6 +255,19 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
     });
   }
 
+  static const List<double> _speedOptions = [1.0, 1.25, 1.5, 1.75, 2.0, 0.5, 0.75];
+
+  void _cycleSpeed() {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+    final currentIndex = _speedOptions.indexOf(_playbackSpeed);
+    final nextIndex = (currentIndex + 1) % _speedOptions.length;
+    setState(() {
+      _playbackSpeed = _speedOptions[nextIndex];
+      _controller!.setPlaybackSpeed(_playbackSpeed);
+    });
+    _showControlsTemporarily();
+  }
+
   // Wake lock management methods
   void _handlePlaybackStateChange() {
     if (_controller == null || !_controller!.value.isInitialized) return;
@@ -427,6 +441,83 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
     );
   }
 
+  Widget _buildCenterControls() {
+    if (!_showControls || !_isInitialized) {
+      return const SizedBox.shrink();
+    }
+
+    final isPlaying = _controller!.value.isPlaying;
+
+    return Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Skip backward
+          IconButton(
+            onPressed: _skipBackward,
+            icon: const Icon(
+              Icons.replay_10,
+              color: Colors.white,
+              size: 40,
+            ),
+          ),
+          const SizedBox(width: 24),
+          // Play/Pause
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.4),
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              onPressed: _togglePlayPause,
+              iconSize: 56,
+              icon: Icon(
+                isPlaying ? Icons.pause : Icons.play_arrow,
+                color: Colors.white,
+                size: 56,
+              ),
+            ),
+          ),
+          const SizedBox(width: 24),
+          // Skip forward
+          IconButton(
+            onPressed: _skipForward,
+            icon: const Icon(
+              Icons.forward_10,
+              color: Colors.white,
+              size: 40,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpeedButton() {
+    final label = _playbackSpeed == _playbackSpeed.roundToDouble()
+        ? '${_playbackSpeed.toInt()}x'
+        : '${_playbackSpeed}x';
+    return GestureDetector(
+      onTap: _cycleSpeed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: Colors.white54, width: 1),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildControls() {
     if (!_showControls || !_isInitialized) {
       return const SizedBox.shrink();
@@ -537,6 +628,11 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                 ),
 
                 const Spacer(),
+
+                // Speed control
+                _buildSpeedButton(),
+
+                const SizedBox(width: 8),
 
                 // Volume control (mute button only)
                 IconButton(
@@ -649,7 +745,13 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
           if (widget.showWatermark && widget.userName != null)
             VideoWatermark(userName: widget.userName!),
 
-          // Controls overlay with fade animation
+          // Center controls overlay with fade animation
+          FadeTransition(
+            opacity: _controlsAnimation,
+            child: _buildCenterControls(),
+          ),
+
+          // Bottom controls overlay with fade animation
           FadeTransition(
             opacity: _controlsAnimation,
             child: _buildControls(),
@@ -692,6 +794,7 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
   bool _showControls = true;
   late double _volume;
   late bool _isMuted;
+  double _playbackSpeed = 1.0;
   Timer? _hideControlsTimer;
   String? _skipFeedback;
   Timer? _skipFeedbackTimer;
@@ -930,6 +1033,19 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
     });
   }
 
+  static const List<double> _speedOptions = [1.0, 1.25, 1.5, 1.75, 2.0, 0.5, 0.75];
+
+  void _cycleSpeed() {
+    if (!_controller.value.isInitialized) return;
+    final currentIndex = _speedOptions.indexOf(_playbackSpeed);
+    final nextIndex = (currentIndex + 1) % _speedOptions.length;
+    setState(() {
+      _playbackSpeed = _speedOptions[nextIndex];
+      _controller.setPlaybackSpeed(_playbackSpeed);
+    });
+    _showControlsTemporarily();
+  }
+
   void _setVolume(double volume) {
     if (!_controller.value.isInitialized) return;
 
@@ -1023,6 +1139,80 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
     Future.delayed(const Duration(milliseconds: 100), () {
       widget.onExit(isPlaying);
     });
+  }
+
+  Widget _buildCenterControls() {
+    if (!_showControls || !_controller.value.isInitialized) {
+      return const SizedBox.shrink();
+    }
+
+    final isPlaying = _controller.value.isPlaying;
+
+    return Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            onPressed: _skipBackward,
+            icon: const Icon(
+              Icons.replay_10,
+              color: Colors.white,
+              size: 48,
+            ),
+          ),
+          const SizedBox(width: 32),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.4),
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              onPressed: _togglePlayPause,
+              iconSize: 64,
+              icon: Icon(
+                isPlaying ? Icons.pause : Icons.play_arrow,
+                color: Colors.white,
+                size: 64,
+              ),
+            ),
+          ),
+          const SizedBox(width: 32),
+          IconButton(
+            onPressed: _skipForward,
+            icon: const Icon(
+              Icons.forward_10,
+              color: Colors.white,
+              size: 48,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpeedButton() {
+    final label = _playbackSpeed == _playbackSpeed.roundToDouble()
+        ? '${_playbackSpeed.toInt()}x'
+        : '${_playbackSpeed}x';
+    return GestureDetector(
+      onTap: _cycleSpeed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: Colors.white54, width: 1),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildFullscreenControls() {
@@ -1145,6 +1335,11 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
                     ),
 
                     const Spacer(),
+
+                    // Speed control
+                    _buildSpeedButton(),
+
+                    const SizedBox(width: 12),
 
                     // Volume control
                     Row(
@@ -1290,7 +1485,13 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
                   if (widget.showWatermark && widget.userName != null)
                     FullscreenVideoWatermark(userName: widget.userName!),
 
-                  // Controls overlay with fade animation
+                  // Center controls overlay with fade animation
+                  FadeTransition(
+                    opacity: _controlsAnimation,
+                    child: _buildCenterControls(),
+                  ),
+
+                  // Bottom controls overlay with fade animation
                   FadeTransition(
                     opacity: _controlsAnimation,
                     child: _buildFullscreenControls(),
