@@ -1965,7 +1965,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
       case 'pdf':
         return const Color(0xFF29ACD6); // Light Blue (changed from purple)
       case 'audio':
-        return const Color(0xFF9C27B0); // Purple
+        return Colors.white; // White background (like link)
       case 'image':
         return const Color(0xFFE53935); // Red
       case 'link':
@@ -2394,16 +2394,33 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
       );
     }
 
-    return Stack(
-      children: [
-        AudioPlayerWidget(
-          audioUrl: content.content,
-          title: content.title,
-          userName: _userName,
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF1976D2),
+          width: 1.5,
         ),
-        // Add watermark overlay with the user's name
-        XfiniWatermark(userName: _userName),
-      ],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          AudioPlayerWidget(
+            audioUrl: content.content,
+            title: content.title,
+            userName: _userName,
+          ),
+          // Add watermark overlay with the user's name
+          XfiniWatermark(userName: _userName),
+        ],
+      ),
     );
   }
 

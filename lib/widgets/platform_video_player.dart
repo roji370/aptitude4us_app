@@ -605,7 +605,7 @@ class _iOSVideoPlayerState extends State<_iOSVideoPlayer>
     });
   }
 
-  static const List<double> _speedOptions = [1.0, 1.25, 1.5, 1.75, 2.0, 0.5, 0.75];
+  static const List<double> _speedOptions = [1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 0.5, 0.75];
 
   void _cycleSpeed() {
     if (_controller == null || !_controller!.value.isInitialized) return;
@@ -786,7 +786,7 @@ class _iOSVideoPlayerState extends State<_iOSVideoPlayer>
         ),
       ),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -947,13 +947,20 @@ class _iOSVideoPlayerState extends State<_iOSVideoPlayer>
             ),
           if (widget.showWatermark && widget.userName != null)
             VideoWatermark(userName: widget.userName!),
+          // Bottom controls - positioned at bottom only, not full height
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: FadeTransition(
+              opacity: _controlsAnimation,
+              child: _buildControls(),
+            ),
+          ),
+          // Center controls - rendered on top so they receive taps
           FadeTransition(
             opacity: _controlsAnimation,
             child: _buildCenterControls(),
-          ),
-          FadeTransition(
-            opacity: _controlsAnimation,
-            child: _buildControls(),
           ),
         ],
       ),
@@ -1191,7 +1198,7 @@ class _iOSFullscreenVideoPlayerState extends State<_iOSFullscreenVideoPlayer>
     });
   }
 
-  static const List<double> _speedOptions = [1.0, 1.25, 1.5, 1.75, 2.0, 0.5, 0.75];
+  static const List<double> _speedOptions = [1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 0.5, 0.75];
 
   void _cycleSpeed() {
     if (!_controller.value.isInitialized) return;
@@ -1559,13 +1566,18 @@ class _iOSFullscreenVideoPlayerState extends State<_iOSFullscreenVideoPlayer>
                     ),
                   if (widget.showWatermark && widget.userName != null)
                     FullscreenVideoWatermark(userName: widget.userName!),
+                  // Fullscreen controls - full height for top+bottom gradient
+                  FadeTransition(
+                    opacity: _controlsAnimation,
+                    child: IgnorePointer(
+                      ignoring: false,
+                      child: _buildFullscreenControls(),
+                    ),
+                  ),
+                  // Center controls - rendered on top so they receive taps
                   FadeTransition(
                     opacity: _controlsAnimation,
                     child: _buildCenterControls(),
-                  ),
-                  FadeTransition(
-                    opacity: _controlsAnimation,
-                    child: _buildFullscreenControls(),
                   ),
                 ],
               )

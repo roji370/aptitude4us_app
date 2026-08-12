@@ -255,7 +255,7 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
     });
   }
 
-  static const List<double> _speedOptions = [1.0, 1.25, 1.5, 1.75, 2.0, 0.5, 0.75];
+  static const List<double> _speedOptions = [1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 0.5, 0.75];
 
   void _cycleSpeed() {
     if (_controller == null || !_controller!.value.isInitialized) return;
@@ -536,7 +536,7 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
         ),
       ),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
         children: [
           // Time display and fullscreen button
           Padding(
@@ -745,16 +745,21 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
           if (widget.showWatermark && widget.userName != null)
             VideoWatermark(userName: widget.userName!),
 
-          // Center controls overlay with fade animation
+          // Bottom controls overlay with fade animation - positioned at bottom
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: FadeTransition(
+              opacity: _controlsAnimation,
+              child: _buildControls(),
+            ),
+          ),
+
+          // Center controls overlay with fade animation - on top for tap handling
           FadeTransition(
             opacity: _controlsAnimation,
             child: _buildCenterControls(),
-          ),
-
-          // Bottom controls overlay with fade animation
-          FadeTransition(
-            opacity: _controlsAnimation,
-            child: _buildControls(),
           ),
         ],
       ),
@@ -1033,7 +1038,7 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
     });
   }
 
-  static const List<double> _speedOptions = [1.0, 1.25, 1.5, 1.75, 2.0, 0.5, 0.75];
+  static const List<double> _speedOptions = [1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 0.5, 0.75];
 
   void _cycleSpeed() {
     if (!_controller.value.isInitialized) return;
@@ -1485,16 +1490,16 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
                   if (widget.showWatermark && widget.userName != null)
                     FullscreenVideoWatermark(userName: widget.userName!),
 
-                  // Center controls overlay with fade animation
-                  FadeTransition(
-                    opacity: _controlsAnimation,
-                    child: _buildCenterControls(),
-                  ),
-
-                  // Bottom controls overlay with fade animation
+                  // Fullscreen controls - full height for top+bottom gradient
                   FadeTransition(
                     opacity: _controlsAnimation,
                     child: _buildFullscreenControls(),
+                  ),
+
+                  // Center controls overlay - rendered on top so they receive taps
+                  FadeTransition(
+                    opacity: _controlsAnimation,
+                    child: _buildCenterControls(),
                   ),
                 ],
               )

@@ -26,7 +26,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
   String _errorMessage = '';
   double _playbackSpeed = 1.0;
 
-  static const List<double> _speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+  static const List<double> _speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0];
 
   @override
   void initState() {
@@ -130,32 +130,32 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
       );
     }
 
-    return Center(
+    return SingleChildScrollView(
       child: Padding(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(20.0),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             // Album art / audio icon
             Container(
-              width: 160,
-              height: 160,
+              width: 120,
+              height: 120,
               decoration: BoxDecoration(
-                color: const Color(0xFF9C27B0).withValues(alpha: 0.1),
+                color: const Color(0xFF1976D2).withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(
-                  color: const Color(0xFF9C27B0).withValues(alpha: 0.3),
+                  color: const Color(0xFF1976D2).withValues(alpha: 0.3),
                   width: 2,
                 ),
               ),
               child: const Icon(
                 Icons.headphones,
-                size: 80,
-                color: Color(0xFF9C27B0),
+                size: 60,
+                color: Color(0xFF1976D2),
               ),
             ),
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 20),
 
             // Title
             Text(
@@ -168,7 +168,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
               overflow: TextOverflow.ellipsis,
             ),
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
 
             // Progress bar
             StreamBuilder<Duration?>(
@@ -183,10 +183,10 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
                       children: [
                         SliderTheme(
                           data: SliderTheme.of(context).copyWith(
-                            activeTrackColor: const Color(0xFF9C27B0),
+                            activeTrackColor: const Color(0xFF1976D2),
                             inactiveTrackColor:
-                                const Color(0xFF9C27B0).withValues(alpha: 0.2),
-                            thumbColor: const Color(0xFF9C27B0),
+                                const Color(0xFF1976D2).withValues(alpha: 0.2),
+                            thumbColor: const Color(0xFF1976D2),
                             trackHeight: 4,
                             thumbShape: const RoundSliderThumbShape(
                               enabledThumbRadius: 8,
@@ -234,7 +234,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
               },
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
 
             // Playback controls
             Row(
@@ -245,7 +245,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
                   onPressed: _changeSpeed,
                   style: TextButton.styleFrom(
                     backgroundColor:
-                        const Color(0xFF9C27B0).withValues(alpha: 0.1),
+                        const Color(0xFF1976D2).withValues(alpha: 0.1),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),
@@ -257,13 +257,13 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
                   child: Text(
                     '${_playbackSpeed}x',
                     style: const TextStyle(
-                      color: Color(0xFF9C27B0),
+                      color: Color(0xFF1976D2),
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
 
-                const SizedBox(width: 16),
+                const SizedBox(width: 12),
 
                 // Rewind 10s
                 IconButton(
@@ -275,11 +275,11 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
                     );
                   },
                   icon: const Icon(Icons.replay_10),
-                  iconSize: 36,
+                  iconSize: 32,
                   color: Colors.grey[700],
                 ),
 
-                const SizedBox(width: 8),
+                const SizedBox(width: 4),
 
                 // Play/Pause button
                 StreamBuilder<PlayerState>(
@@ -292,14 +292,14 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
                     if (processingState == ProcessingState.loading ||
                         processingState == ProcessingState.buffering) {
                       return Container(
-                        width: 64,
-                        height: 64,
+                        width: 56,
+                        height: 56,
                         decoration: const BoxDecoration(
-                          color: Color(0xFF9C27B0),
+                          color: Color(0xFF1976D2),
                           shape: BoxShape.circle,
                         ),
                         child: const Padding(
-                          padding: EdgeInsets.all(16),
+                          padding: EdgeInsets.all(14),
                           child: CircularProgressIndicator(
                             color: Colors.white,
                             strokeWidth: 3,
@@ -310,10 +310,10 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
 
                     if (processingState == ProcessingState.completed) {
                       return Container(
-                        width: 64,
-                        height: 64,
+                        width: 56,
+                        height: 56,
                         decoration: const BoxDecoration(
-                          color: Color(0xFF9C27B0),
+                          color: Color(0xFF1976D2),
                           shape: BoxShape.circle,
                         ),
                         child: IconButton(
@@ -322,16 +322,16 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
                             _player.play();
                           },
                           icon: const Icon(Icons.replay, color: Colors.white),
-                          iconSize: 32,
+                          iconSize: 28,
                         ),
                       );
                     }
 
                     return Container(
-                      width: 64,
-                      height: 64,
+                      width: 56,
+                      height: 56,
                       decoration: const BoxDecoration(
-                        color: Color(0xFF9C27B0),
+                        color: Color(0xFF1976D2),
                         shape: BoxShape.circle,
                       ),
                       child: IconButton(
@@ -346,13 +346,13 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
                           playing ? Icons.pause : Icons.play_arrow,
                           color: Colors.white,
                         ),
-                        iconSize: 32,
+                        iconSize: 28,
                       ),
                     );
                   },
                 ),
 
-                const SizedBox(width: 8),
+                const SizedBox(width: 4),
 
                 // Forward 30s
                 IconButton(
@@ -363,7 +363,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
                     _player.seek(newPos > duration ? duration : newPos);
                   },
                   icon: const Icon(Icons.forward_30),
-                  iconSize: 36,
+                  iconSize: 32,
                   color: Colors.grey[700],
                 ),
               ],
