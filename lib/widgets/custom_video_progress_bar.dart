@@ -32,6 +32,9 @@ class CustomVideoProgressBar extends StatefulWidget {
   /// Called when the user finishes dragging the thumb (or cancels).
   /// Use this to restart the controls auto-hide timer in the parent.
   final VoidCallback? onDragEnd;
+  /// When true, the progress bar is display-only: dragging and tapping
+  /// to seek are disabled. Used for one-time-view videos.
+  final bool disableSeeking;
 
   const CustomVideoProgressBar({
     super.key,
@@ -46,6 +49,7 @@ class CustomVideoProgressBar extends StatefulWidget {
     this.activeThumbRadius = 8.0,
     this.onDragStart,
     this.onDragEnd,
+    this.disableSeeking = false,
   });
 
   @override
@@ -287,13 +291,13 @@ class _CustomVideoProgressBarState extends State<CustomVideoProgressBar>
     }
 
     return GestureDetector(
-      // Drag gestures for scrubbing.
-      onHorizontalDragStart: _onDragStart,
-      onHorizontalDragUpdate: _onDragUpdate,
-      onHorizontalDragEnd: _onDragEnd,
-      onHorizontalDragCancel: _onDragCancel,
-      // Tap for instant seek.
-      onTapDown: _onTapDown,
+      // Drag gestures for scrubbing (disabled when seeking is blocked).
+      onHorizontalDragStart: widget.disableSeeking ? null : _onDragStart,
+      onHorizontalDragUpdate: widget.disableSeeking ? null : _onDragUpdate,
+      onHorizontalDragEnd: widget.disableSeeking ? null : _onDragEnd,
+      onHorizontalDragCancel: widget.disableSeeking ? null : _onDragCancel,
+      // Tap for instant seek (disabled when seeking is blocked).
+      onTapDown: widget.disableSeeking ? null : _onTapDown,
       child: Container(
         height: 40, // Generous touch area
         color: Colors.transparent,

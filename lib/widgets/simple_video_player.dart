@@ -16,6 +16,9 @@ class SimpleVideoPlayer extends StatefulWidget {
   final VideoPlayerController? existingController;
   /// Called once when 80% of the video is watched (for one-time-view tracking).
   final VoidCallback? onViewedCallback;
+  /// When true, all seeking controls are disabled: progress bar dragging/tapping,
+  /// skip ±10s buttons, and double-tap-to-skip. Used for one-time-view videos.
+  final bool disableSeeking;
 
   const SimpleVideoPlayer({
     super.key,
@@ -26,6 +29,7 @@ class SimpleVideoPlayer extends StatefulWidget {
     this.showWatermark = true,
     this.existingController,
     this.onViewedCallback,
+    this.disableSeeking = false,
   });
 
   @override
@@ -430,6 +434,7 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
             },
             volume: _volume,
             isMuted: _isMuted,
+            disableSeeking: widget.disableSeeking,
           );
         },
         transitionDuration: const Duration(milliseconds: 300),
@@ -452,16 +457,17 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Skip backward
-          IconButton(
-            onPressed: _skipBackward,
-            icon: const Icon(
-              Icons.replay_10,
-              color: Colors.white,
-              size: 40,
+          // Skip backward (hidden when seeking is disabled)
+          if (!widget.disableSeeking)
+            IconButton(
+              onPressed: _skipBackward,
+              icon: const Icon(
+                Icons.replay_10,
+                color: Colors.white,
+                size: 40,
+              ),
             ),
-          ),
-          const SizedBox(width: 24),
+          if (!widget.disableSeeking) const SizedBox(width: 24),
           // Play/Pause
           Container(
             decoration: BoxDecoration(
@@ -478,16 +484,17 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
               ),
             ),
           ),
-          const SizedBox(width: 24),
-          // Skip forward
-          IconButton(
-            onPressed: _skipForward,
-            icon: const Icon(
-              Icons.forward_10,
-              color: Colors.white,
-              size: 40,
+          if (!widget.disableSeeking) const SizedBox(width: 24),
+          // Skip forward (hidden when seeking is disabled)
+          if (!widget.disableSeeking)
+            IconButton(
+              onPressed: _skipForward,
+              icon: const Icon(
+                Icons.forward_10,
+                color: Colors.white,
+                size: 40,
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -584,6 +591,7 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
               activeThumbRadius: 8.0,
               onDragStart: _pauseControlsTimer,
               onDragEnd: _resumeControlsTimer,
+              disableSeeking: widget.disableSeeking,
             ),
           ),
 
@@ -593,17 +601,18 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Skip backward button
-                IconButton(
-                  onPressed: _skipBackward,
-                  icon: const Icon(
-                    Icons.replay_10,
-                    color: Colors.white,
-                    size: 32,
+                // Skip backward button (hidden when seeking is disabled)
+                if (!widget.disableSeeking)
+                  IconButton(
+                    onPressed: _skipBackward,
+                    icon: const Icon(
+                      Icons.replay_10,
+                      color: Colors.white,
+                      size: 32,
+                    ),
                   ),
-                ),
 
-                const SizedBox(width: 8),
+                if (!widget.disableSeeking) const SizedBox(width: 8),
 
                 // Play/Pause button
                 IconButton(
@@ -615,17 +624,18 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                   ),
                 ),
 
-                const SizedBox(width: 8),
+                if (!widget.disableSeeking) const SizedBox(width: 8),
 
-                // Skip forward button
-                IconButton(
-                  onPressed: _skipForward,
-                  icon: const Icon(
-                    Icons.forward_10,
-                    color: Colors.white,
-                    size: 32,
+                // Skip forward button (hidden when seeking is disabled)
+                if (!widget.disableSeeking)
+                  IconButton(
+                    onPressed: _skipForward,
+                    icon: const Icon(
+                      Icons.forward_10,
+                      color: Colors.white,
+                      size: 32,
+                    ),
                   ),
-                ),
 
                 const Spacer(),
 
@@ -687,19 +697,19 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
           // Double-tap zones for skip
           Row(
             children: [
-              // Left zone - skip backward
+              // Left zone - skip backward (or just toggle controls when seeking disabled)
               Expanded(
                 child: GestureDetector(
                   onTap: _toggleControls,
-                  onDoubleTap: () => _skipBackward(),
+                  onDoubleTap: widget.disableSeeking ? null : () => _skipBackward(),
                   child: Container(color: Colors.transparent),
                 ),
               ),
-              // Right zone - skip forward
+              // Right zone - skip forward (or just toggle controls when seeking disabled)
               Expanded(
                 child: GestureDetector(
                   onTap: _toggleControls,
-                  onDoubleTap: () => _skipForward(),
+                  onDoubleTap: widget.disableSeeking ? null : () => _skipForward(),
                   child: Container(color: Colors.transparent),
                 ),
               ),
@@ -777,6 +787,8 @@ class _FullscreenVideoPlayer extends StatefulWidget {
   final Function(bool wasPlaying) onExit;
   final double volume;
   final bool isMuted;
+  /// When true, all seeking controls are disabled in fullscreen mode.
+  final bool disableSeeking;
 
   const _FullscreenVideoPlayer({
     required this.sharedController,
@@ -787,6 +799,7 @@ class _FullscreenVideoPlayer extends StatefulWidget {
     required this.onExit,
     required this.volume,
     required this.isMuted,
+    this.disableSeeking = false,
   });
 
   @override
@@ -1157,15 +1170,16 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            onPressed: _skipBackward,
-            icon: const Icon(
-              Icons.replay_10,
-              color: Colors.white,
-              size: 48,
+          if (!widget.disableSeeking)
+            IconButton(
+              onPressed: _skipBackward,
+              icon: const Icon(
+                Icons.replay_10,
+                color: Colors.white,
+                size: 48,
+              ),
             ),
-          ),
-          const SizedBox(width: 32),
+          if (!widget.disableSeeking) const SizedBox(width: 32),
           Container(
             decoration: BoxDecoration(
               color: Colors.black.withOpacity(0.4),
@@ -1181,15 +1195,16 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
               ),
             ),
           ),
-          const SizedBox(width: 32),
-          IconButton(
-            onPressed: _skipForward,
-            icon: const Icon(
-              Icons.forward_10,
-              color: Colors.white,
-              size: 48,
+          if (!widget.disableSeeking) const SizedBox(width: 32),
+          if (!widget.disableSeeking)
+            IconButton(
+              onPressed: _skipForward,
+              icon: const Icon(
+                Icons.forward_10,
+                color: Colors.white,
+                size: 48,
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -1293,6 +1308,7 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
                   activeThumbRadius: 8.0,
                   onDragStart: _pauseControlsTimer,
                   onDragEnd: _resumeControlsTimer,
+                  disableSeeking: widget.disableSeeking,
                 ),
               ),
 
@@ -1301,15 +1317,16 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
-                    // Skip backward button
-                    IconButton(
-                      onPressed: _skipBackward,
-                      icon: const Icon(
-                        Icons.replay_10,
-                        color: Colors.white,
-                        size: 32,
+                    // Skip backward button (hidden when seeking is disabled)
+                    if (!widget.disableSeeking)
+                      IconButton(
+                        onPressed: _skipBackward,
+                        icon: const Icon(
+                          Icons.replay_10,
+                          color: Colors.white,
+                          size: 32,
+                        ),
                       ),
-                    ),
 
                     // Play/Pause button
                     IconButton(
@@ -1321,15 +1338,16 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
                       ),
                     ),
 
-                    // Skip forward button
-                    IconButton(
-                      onPressed: _skipForward,
-                      icon: const Icon(
-                        Icons.forward_10,
-                        color: Colors.white,
-                        size: 32,
+                    // Skip forward button (hidden when seeking is disabled)
+                    if (!widget.disableSeeking)
+                      IconButton(
+                        onPressed: _skipForward,
+                        icon: const Icon(
+                          Icons.forward_10,
+                          color: Colors.white,
+                          size: 32,
+                        ),
                       ),
-                    ),
 
                     const SizedBox(width: 16),
 
@@ -1424,11 +1442,11 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
                   // Double-tap zones for skip
                   Row(
                     children: [
-                      // Left zone - skip backward
+                      // Left zone - skip backward (disabled when seeking is blocked)
                       Expanded(
                         child: GestureDetector(
                           onTap: _toggleControls,
-                          onDoubleTap: () => _skipBackward(),
+                          onDoubleTap: widget.disableSeeking ? null : () => _skipBackward(),
                           child: Container(color: Colors.transparent),
                         ),
                       ),
@@ -1440,11 +1458,11 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer>
                           color: Colors.transparent,
                         ),
                       ),
-                      // Right zone - skip forward
+                      // Right zone - skip forward (disabled when seeking is blocked)
                       Expanded(
                         child: GestureDetector(
                           onTap: _toggleControls,
-                          onDoubleTap: () => _skipForward(),
+                          onDoubleTap: widget.disableSeeking ? null : () => _skipForward(),
                           child: Container(color: Colors.transparent),
                         ),
                       ),

@@ -1092,6 +1092,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                   onViewedCallback: content.isOneTimeView
                       ? () => _markOneTimeContentViewed(content)
                       : null,
+                  disableSeeking: content.isOneTimeView,
                 ),
               ),
             ),
