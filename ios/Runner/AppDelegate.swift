@@ -237,6 +237,13 @@ final class ScreenProtectionManager {
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, MessagingDelegate {
+  private var methodChannelConfigured = false
+
+  /// Shared Flutter engine used by both AppDelegate and SceneDelegate.
+  /// This ensures plugins are registered on the same engine that the
+  /// FlutterViewController uses.
+  let flutterEngine = FlutterEngine(name: "io.flutter", project: nil)
+
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -254,52 +261,67 @@ final class ScreenProtectionManager {
       Messaging.messaging().delegate = self
     }
     
-    // Call super FIRST to ensure proper Flutter engine initialization
-    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    // Start the shared Flutter engine
+    flutterEngine.run()
     
-    // Register plugins AFTER Flutter engine is ready to avoid nil registrar
-    GeneratedPluginRegistrant.register(with: self)
+    // Register plugins on the shared engine so they're available
+    // to the FlutterViewController created by SceneDelegate
+    GeneratedPluginRegistrant.register(with: flutterEngine)
 
-    // Setup method channel for screen protection
-    if let flutterViewController = window?.rootViewController as? FlutterViewController {
-      let channel = FlutterMethodChannel(
-        name: "flutter.native/screenProtection",
-        binaryMessenger: flutterViewController.binaryMessenger
-      )
+    // Try to setup method channel now (may not work with scene lifecycle
+    // since window isn't available yet - SceneDelegate will call it again)
+    setupMethodChannel()
+    
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
 
-      // Set the Flutter channel reference in ScreenProtectionManager
-      ScreenProtectionManager.shared.setFlutterChannel(channel)
-      print("📱 Flutter method channel established for screen protection")
-      
-      channel.setMethodCallHandler { [weak self] call, result in
-        guard let self = self else { result(FlutterError(code: "UNAVAILABLE", message: "AppDelegate deallocated", details: nil)); return }
-        switch call.method {
-        case "preventScreenshots":
-          if let enable = call.arguments as? Bool {
-            if enable {
-              ScreenProtectionManager.shared.enable(on: self.window)
-            } else {
-              ScreenProtectionManager.shared.disable()
-            }
-            result(true)
+  /// Sets up the Flutter method channel for screen protection.
+  /// Called from both didFinishLaunchingWithOptions and SceneDelegate
+  /// to handle both traditional and scene-based lifecycle.
+  func setupMethodChannel() {
+    guard !methodChannelConfigured else { return }
+    guard let flutterViewController = window?.rootViewController as? FlutterViewController else {
+      print("📱 FlutterViewController not available yet, deferring method channel setup")
+      return
+    }
+
+    methodChannelConfigured = true
+
+    let channel = FlutterMethodChannel(
+      name: "flutter.native/screenProtection",
+      binaryMessenger: flutterViewController.binaryMessenger
+    )
+
+    // Set the Flutter channel reference in ScreenProtectionManager
+    ScreenProtectionManager.shared.setFlutterChannel(channel)
+    print("📱 Flutter method channel established for screen protection")
+    
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else { result(FlutterError(code: "UNAVAILABLE", message: "AppDelegate deallocated", details: nil)); return }
+      switch call.method {
+      case "preventScreenshots":
+        if let enable = call.arguments as? Bool {
+          if enable {
+            ScreenProtectionManager.shared.enable(on: self.window)
           } else {
-            result(FlutterError(code: "BAD_ARGS", message: "Expected Bool for preventScreenshots", details: nil))
+            ScreenProtectionManager.shared.disable()
           }
-        case "enableScreenshotMonitoring":
-          print("📱 Flutter requested to enable screenshot monitoring")
-          ScreenProtectionManager.shared.enableScreenshotMonitoring()
           result(true)
-        case "disableScreenshotMonitoring":
-          print("📱 Flutter requested to disable screenshot monitoring")
-          ScreenProtectionManager.shared.disableScreenshotMonitoring()
-          result(true)
-        default:
-          result(FlutterMethodNotImplemented)
+        } else {
+          result(FlutterError(code: "BAD_ARGS", message: "Expected Bool for preventScreenshots", details: nil))
         }
+      case "enableScreenshotMonitoring":
+        print("📱 Flutter requested to enable screenshot monitoring")
+        ScreenProtectionManager.shared.enableScreenshotMonitoring()
+        result(true)
+      case "disableScreenshotMonitoring":
+        print("📱 Flutter requested to disable screenshot monitoring")
+        ScreenProtectionManager.shared.disableScreenshotMonitoring()
+        result(true)
+      default:
+        result(FlutterMethodNotImplemented)
       }
     }
-    
-    return result
   }
   
   // Handle foreground notifications - This will show notifications even when app is in foreground

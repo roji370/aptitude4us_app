@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -24,6 +25,30 @@ class NotificationService {
   // Track if the service has been initialized
   bool _isInitialized = false;
 
+  /// Completer-based concurrency guard: if initialize() is already in flight,
+  /// subsequent callers await the existing run rather than starting a new one.
+  /// This prevents overlapping init runs when .timeout() fires but the
+  /// underlying native call is still running.
+  Completer<void>? _initCompleter;
+
+  /// Guard to prevent duplicate listener registrations on retry.
+  /// Listeners (authStateChanges, onTokenRefresh, onMessage, etc.) are NOT
+  /// idempotent — registering them twice causes double-processing.
+  bool _listenersRegistered = false;
+
+  /// Granular init status flags — downstream code checks these to decide
+  /// whether to prompt the user or retry specific subsystems.
+  ///
+  /// Optimistic default (true) for permission: assume granted unless we
+  /// detect otherwise. Pessimistic default (false) for cleanup: assume
+  /// not done until confirmed.
+  bool _permissionGranted = true;
+  bool _tokenCleanupCompleted = false;
+
+  /// Public getters for downstream UI decisions.
+  bool get permissionGranted => _permissionGranted;
+  bool get tokenCleanupCompleted => _tokenCleanupCompleted;
+
   /// Initialize Firebase services
   Future<void> _initializeFirebaseServices() async {
     if (_firebaseMessaging != null && _auth != null) return;
@@ -43,11 +68,41 @@ class NotificationService {
     }
   }
 
-  /// Initialize the notification service
+  /// Initialize the notification service.
+  ///
+  /// Uses a Completer-based concurrency guard: if initialize() is already
+  /// in flight (e.g. from a previous call whose .timeout() fired but the
+  /// underlying native work is still running), subsequent callers await
+  /// the existing run rather than starting an overlapping one.
   Future<void> initialize() async {
-    // Prevent multiple initializations
     if (_isInitialized) return;
 
+    // If init is already in flight, await it rather than starting another
+    if (_initCompleter != null && !_initCompleter!.isCompleted) {
+      Logger.i('NotificationService: init already in flight — awaiting existing run');
+      return _initCompleter!.future;
+    }
+
+    _initCompleter = Completer<void>();
+
+    try {
+      await _doInitialize();
+      _initCompleter!.complete();
+    } catch (e) {
+      // Reset completer so next call creates a fresh run (retry).
+      // _isInitialized is still false (it's the last line of _doInitialize),
+      // so the retry will re-run from scratch.
+      _initCompleter!.completeError(e);
+      _initCompleter = null;
+      rethrow;
+    }
+  }
+
+  /// Actual initialization logic, called only once via the Completer guard.
+  ///
+  /// _isInitialized = true is the LAST statement — if anything above throws,
+  /// the service stays uninitialised and the next initialize() call retries.
+  Future<void> _doInitialize() async {
     // Ensure Firebase services are ready first
     await _initializeFirebaseServices();
 
@@ -111,14 +166,32 @@ class NotificationService {
     await clearBadges();
     Logger.i('✅ Badges cleared on app initialization');
 
-    // Request Awesome Notifications permissions
-    await AwesomeNotifications().isNotificationAllowed().then((
-      isAllowed,
-    ) async {
-      if (!isAllowed) {
-        await AwesomeNotifications().requestPermissionToSendNotifications();
+    // Request Awesome Notifications permissions (with timeout).
+    // On OPPO/ColorOS, requestPermissionToSendNotifications() can hang
+    // if the system notification manager intercepts the dialog.
+    // Timeout is 6s to allow three method-channel round trips
+    // (isAllowed + requestPermission + re-check) plus user interaction.
+    try {
+      final gotPermission = await Future(() async {
+        final isAllowed = await AwesomeNotifications().isNotificationAllowed();
+        if (!isAllowed) {
+          await AwesomeNotifications().requestPermissionToSendNotifications();
+          // Re-check after request to get accurate status
+          return await AwesomeNotifications().isNotificationAllowed();
+        }
+        return true;
+      }).timeout(const Duration(seconds: 6), onTimeout: () {
+        Logger.w('⏰ Notification permission request timed out — will retry on next launch');
+        return false; // Could not confirm permission
+      });
+      _permissionGranted = gotPermission;
+      if (!gotPermission) {
+        Logger.w('Notification permission not confirmed (timed out or denied)');
       }
-    });
+    } catch (e) {
+      Logger.e('Error requesting notification permission (non-fatal): $e');
+      _permissionGranted = false;
+    }
 
     // Request FCM permissions
     if (_firebaseMessaging != null) {
@@ -164,16 +237,30 @@ class NotificationService {
             } else {
               Logger.i('APNs token available, proceeding with cleanup');
               await cleanupTokens();
+              _tokenCleanupCompleted = true;
               Logger.i('Token cleanup completed during initialization');
             }
           } catch (e) {
             Logger.e('Error checking APNs token: $e');
             Logger.i('Skipping cleanup due to APNs token unavailability');
+            // _tokenCleanupCompleted stays false
           }
         } else {
-          // On Android, proceed with normal cleanup
-          await cleanupTokens();
-          Logger.i('Token cleanup completed during initialization');
+          // On Android, proceed with cleanup (with timeout — FCM/Firestore
+          // operations can hang on devices with aggressive battery management).
+          try {
+            await cleanupTokens().timeout(
+              const Duration(seconds: 5),
+              onTimeout: () {
+                Logger.w('⏰ Token cleanup timed out during init — will retry on next auth state change');
+              },
+            );
+            _tokenCleanupCompleted = true;
+            Logger.i('Token cleanup completed during initialization');
+          } catch (e) {
+            Logger.e('Token cleanup failed during init (non-fatal): $e');
+            // _tokenCleanupCompleted stays false — retry on next auth state change
+          }
         }
       } catch (e) {
         Logger.e('Error during token cleanup in initialization: $e');
@@ -184,97 +271,107 @@ class NotificationService {
       Logger.i('No user logged in during initialization');
     }
 
-    // Also listen for auth state changes to refresh token on login
-    if (_auth != null) {
-      _auth!.authStateChanges().listen((User? user) async {
-        if (user != null) {
-          // User logged in, run cleanup and refresh token
-          // On iOS, check for APNs token first
-          if (defaultTargetPlatform == TargetPlatform.iOS) {
-            try {
-              String? apnsToken = await _firebaseMessaging?.getAPNSToken();
-              if (apnsToken == null) {
-                Logger.w('APNs token not available after login, will retry later');
+    // Guard: only register listeners once. If _doInitialize() failed after
+    // registering listeners and is retried, skip this section to avoid
+    // duplicate event processing (authStateChanges, onTokenRefresh,
+    // onMessage, onMessageOpenedApp are NOT idempotent).
+    if (!_listenersRegistered) {
+      _listenersRegistered = true;
+
+      // Also listen for auth state changes to refresh token on login
+      if (_auth != null) {
+        _auth!.authStateChanges().listen((User? user) async {
+          if (user != null) {
+            // User logged in, run cleanup and refresh token
+            // On iOS, check for APNs token first
+            if (defaultTargetPlatform == TargetPlatform.iOS) {
+              try {
+                String? apnsToken = await _firebaseMessaging?.getAPNSToken();
+                if (apnsToken == null) {
+                  Logger.w('APNs token not available after login, will retry later');
+                  return;
+                }
+              } catch (e) {
+                Logger.e('Error checking APNs token after login: $e');
                 return;
               }
-            } catch (e) {
-              Logger.e('Error checking APNs token after login: $e');
-              return;
             }
-          }
-          
-          // Proceed with cleanup
-          cleanupTokens()
-              .then((_) {
-                Logger.i('Token cleanup completed after login');
-              })
-              .catchError((e) {
-                Logger.e('Error during token cleanup after login: $e');
-              });
-        }
-      });
-    }
-
-    // Handle token refresh
-    if (_firebaseMessaging != null) {
-      _firebaseMessaging!.onTokenRefresh.listen((token) {
-        Logger.i('FCM token refreshed automatically: $token');
-        _saveTokenToFirestore(token);
-      });
-      
-      // For iOS: Listen for APNs token availability
-      if (defaultTargetPlatform == TargetPlatform.iOS && userId != null) {
-        Logger.i('Setting up APNs token availability listener for iOS');
-        // Poll for APNs token periodically until it's available
-        Future.delayed(const Duration(seconds: 2), () async {
-          try {
-            String? apnsToken = await _firebaseMessaging?.getAPNSToken();
-            if (apnsToken != null) {
-              Logger.i('✅ APNs token now available: $apnsToken');
-              // Now that APNs token is available, run cleanup
-              try {
-                await cleanupTokens();
-                Logger.i('Deferred token cleanup completed after APNs token became available');
-              } catch (e) {
-                Logger.e('Error during deferred cleanup: $e');
-              }
-            } else {
-              Logger.w('APNs token still not available after 2 seconds');
-            }
-          } catch (e) {
-            Logger.e('Error checking for APNs token after delay: $e');
+            
+            // Proceed with cleanup
+            cleanupTokens()
+                .then((_) {
+                  Logger.i('Token cleanup completed after login');
+                })
+                .catchError((e) {
+                  Logger.e('Error during token cleanup after login: $e');
+                });
           }
         });
       }
-    }
 
-    // Handle foreground messages
-    FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
-
-    // Background message handler is registered in main.dart for universal push notifications
-    // FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
-    // Handle when app is opened from terminated state
-    if (_firebaseMessaging != null) {
-      RemoteMessage? initialMessage =
-          await _firebaseMessaging!.getInitialMessage();
-      if (initialMessage != null) {
-        _handleNotificationTap(initialMessage);
+      // Handle token refresh
+      if (_firebaseMessaging != null) {
+        _firebaseMessaging!.onTokenRefresh.listen((token) {
+          Logger.i('FCM token refreshed automatically: $token');
+          _saveTokenToFirestore(token);
+        });
+        
+        // For iOS: Listen for APNs token availability
+        if (defaultTargetPlatform == TargetPlatform.iOS && userId != null) {
+          Logger.i('Setting up APNs token availability listener for iOS');
+          // Poll for APNs token periodically until it's available
+          Future.delayed(const Duration(seconds: 2), () async {
+            try {
+              String? apnsToken = await _firebaseMessaging?.getAPNSToken();
+              if (apnsToken != null) {
+                Logger.i('✅ APNs token now available: $apnsToken');
+                // Now that APNs token is available, run cleanup
+                try {
+                  await cleanupTokens();
+                  Logger.i('Deferred token cleanup completed after APNs token became available');
+                } catch (e) {
+                  Logger.e('Error during deferred cleanup: $e');
+                }
+              } else {
+                Logger.w('APNs token still not available after 2 seconds');
+              }
+            } catch (e) {
+              Logger.e('Error checking for APNs token after delay: $e');
+            }
+          });
+        }
       }
+
+      // Handle foreground messages
+      FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+
+      // Background message handler is registered in main.dart for universal push notifications
+      // FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+      // Handle when app is opened from terminated state
+      if (_firebaseMessaging != null) {
+        RemoteMessage? initialMessage =
+            await _firebaseMessaging!.getInitialMessage();
+        if (initialMessage != null) {
+          _handleNotificationTap(initialMessage);
+        }
+      }
+
+      // Handle when app is in background but opened
+      FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
+
+      // Setup Awesome Notifications action handlers
+      await AwesomeNotifications().setListeners(
+        onActionReceivedMethod: _onNotificationAction,
+        onNotificationCreatedMethod: _onNotificationCreated,
+        onNotificationDisplayedMethod: _onNotificationDisplayed,
+        onDismissActionReceivedMethod: _onDismissActionReceived,
+      );
     }
 
-    // Handle when app is in background but opened
-    FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
-
-    // Setup Awesome Notifications action handlers
-    await AwesomeNotifications().setListeners(
-      onActionReceivedMethod: _onNotificationAction,
-      onNotificationCreatedMethod: _onNotificationCreated,
-      onNotificationDisplayedMethod: _onNotificationDisplayed,
-      onDismissActionReceivedMethod: _onDismissActionReceived,
-    );
-
-    // Mark as initialized
+    // Mark as initialized — MUST be the last statement.
+    // If anything above throws, _isInitialized stays false and the
+    // next initialize() call will retry via a fresh Completer.
     _isInitialized = true;
   }
 

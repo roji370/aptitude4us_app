@@ -58,7 +58,9 @@ Future<String> getDeviceId() async {
 Future<String> _resolveDeviceId() async {
   // ── Step 1: Check secure storage (primary) ──
   try {
-    final secureId = await _secureStorage.read(key: _secureDeviceIdKey);
+    final secureId = await _secureStorage
+        .read(key: _secureDeviceIdKey)
+        .timeout(const Duration(seconds: 3));
     if (secureId != null && secureId.isNotEmpty) {
       Logger.d('Device ID loaded from secure storage');
       return secureId;
@@ -77,7 +79,9 @@ Future<String> _resolveDeviceId() async {
 
       // Write to secure storage
       try {
-        await _secureStorage.write(key: _secureDeviceIdKey, value: legacyId);
+        await _secureStorage
+            .write(key: _secureDeviceIdKey, value: legacyId)
+            .timeout(const Duration(seconds: 3));
         Logger.i('Device ID migration successful');
       } catch (e) {
         Logger.w('Failed to write migrated ID to secure storage: $e');
@@ -101,7 +105,9 @@ Future<String> _resolveDeviceId() async {
 
   // Store in secure storage
   try {
-    await _secureStorage.write(key: _secureDeviceIdKey, value: deviceId);
+    await _secureStorage
+        .write(key: _secureDeviceIdKey, value: deviceId)
+        .timeout(const Duration(seconds: 3));
     Logger.i('New device ID stored in secure storage');
   } catch (e) {
     Logger.w('Failed to store new device ID in secure storage: $e');

@@ -154,41 +154,41 @@ class _SplashScreenState extends State<SplashScreen>
 
       Logger.i("✅ Firebase initialized successfully in SplashScreen");
 
-      // STEP 2: Initialize Notification Service
-      if (mounted) {
-        setState(() {
-          _loadingText = "Setting up notifications...";
-        });
-      }
-
+      // STEP 2: Notification Service (fire-and-forget — not on critical path)
+      // Register background handler synchronously, then kick off init in
+      // the background. The user reaches login/home without waiting for
+      // notification setup. This structurally prevents the entire class of
+      // "notification init hangs splash" bugs (e.g. OPPO/ColorOS permission
+      // dialogs, cleanupTokens() Firestore stalls).
       try {
-        // Register background message handler
         FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
         Logger.i('📱 Background message handler registered');
-        
-        // Initialize notification service WITH timeout.
-        // AwesomeNotifications().initialize(), requestPermission(), and
-        // cleanupTokens() can all hang on certain devices (e.g. custom
-        // ROMs, aggressive battery managers, corrupted notification DB).
-        final notificationService = Provider.of<NotificationService>(context, listen: false);
-        await notificationService.initialize().timeout(
-          const Duration(seconds: 10),
-          onTimeout: () {
-            Logger.w('⏰ Notification service initialization timed out — continuing without full setup');
-          },
-        );
-        Logger.i('✅ NotificationService initialized - push notifications ready');
-        
-        // Store globally for app-wide access
-        globalNotificationService = notificationService;
       } catch (e) {
-        Logger.e("Notification service initialization error: $e");
-        // Continue even if notifications fail
+        Logger.e("Background message handler registration error: $e");
+      }
+
+      // CRITICAL: Check mounted before accessing context after the async gap
+      // from Firebase init. If widget was disposed (e.g. user killed app
+      // during init), Provider.of would throw "deactivated widget ancestor".
+      if (!mounted || _hasNavigated) return;
+
+      try {
+        final notificationService = Provider.of<NotificationService>(context, listen: false);
+        globalNotificationService = notificationService;
+
+        // Fire-and-forget: initialize in background with its own internal
+        // timeouts, concurrency guards, and granular status tracking.
+        notificationService.initialize().then((_) {
+          Logger.i('✅ NotificationService initialized in background');
+        }).catchError((e) {
+          Logger.e('Notification service background init failed: $e');
+        });
+      } catch (e) {
+        Logger.e("Notification service setup error: $e");
       }
 
       if (!mounted || _hasNavigated) return;
 
-      await Future.delayed(const Duration(milliseconds: 400));
 
       // STEP 3: Check app version
       if (mounted) {
