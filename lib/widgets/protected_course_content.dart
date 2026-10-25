@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
-import '../services/subscription_service.dart';
+import '../providers/session_provider.dart';
 import '../services/screenshot_blocking_service.dart';
 import '../screens/subscription_expired_screen.dart';
 import '../screens/screenshot_warning_screen.dart';
@@ -18,10 +18,14 @@ import '../screens/login_screen.dart';
 /// Widget that protects course content behind subscription validation
 ///
 /// This widget ensures that users can only access course content if they have:
-/// 1. A valid, active subscription
-/// 2. The course assigned to their account
+/// 1. A valid, active subscription (via [SessionProvider])
+/// 2. The course assigned to their account (via [AuthService.isCourseAssigned])
 ///
-/// If access is denied, shows SubscriptionExpiredScreen instead of content
+/// If access is denied, shows SubscriptionExpiredScreen instead of content.
+///
+/// Subscription state is read from [SessionProvider] via `context.select`,
+/// so rebuilds only happen when the subscription status actually changes.
+/// Course assignment is checked via custom claims (verify-on-denial pattern).
 class ProtectedCourseContent extends StatefulWidget {
   final Widget child;
   final String? courseId;
@@ -40,85 +44,156 @@ class ProtectedCourseContent extends StatefulWidget {
   State<ProtectedCourseContent> createState() => _ProtectedCourseContentState();
 }
 
-class _ProtectedCourseContentState extends State<ProtectedCourseContent>
-    with WidgetsBindingObserver {
-  final SubscriptionService _subscriptionService = SubscriptionService();
+class _ProtectedCourseContentState extends State<ProtectedCourseContent> {
   final ScreenshotBlockingService _screenshotService =
       ScreenshotBlockingService();
-  bool? _hasAccess;
-  bool _isLoading = true;
-  String? _errorMessage;
+
+  // ── Course assignment state (only relevant when courseId is non-null) ──
+  bool? _isCourseAssigned; // null = not checked yet
+  bool _isCourseCheckLoading = false;
+  String? _courseErrorMessage;
+
+  // ── Generation tracking ──
+  int _lastCheckedGeneration = -1;
+
+  // ── Screenshot/screen-recording state ──
   bool _isNavigatingToSubscription = false;
   bool _showingScreenshotWarning = false;
   bool _showingScreenRecordingWarning = false;
-  bool _hasInitialCheckCompleted = false; // Track whether initial check is done
-  int _backgroundRetryCount = 0; // Tracks consecutive background check failures
-  static const int _maxBackgroundRetries = 3; // Show refresh prompt after this many failures
-  bool _showRefreshPrompt = false; // Show a non-intrusive banner asking user to refresh
-  bool _isManualRefreshing = false; // True while user-triggered refresh is in progress
-  Timer? _retryTimer; // Cancellable handle for scheduled background retries
+
+  // ── Error / auth state ──
+  String? _errorMessage;
+
+  // ── Retry cooldown ──
+  Timer? _retryCooldownTimer;
+  int _retryCooldownSeconds = 0;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _initializeScreenshotService();
-    _checkAccess();
+    // Course assignment check is triggered in build() via generation
+    // tracking (context.select on dataGeneration), so no need to call it here.
   }
 
   @override
   void dispose() {
-    _retryTimer?.cancel();
-    _retryTimer = null;
-    WidgetsBinding.instance.removeObserver(this);
+    _retryCooldownTimer?.cancel();
     _screenshotService.removeListener(_onScreenshotServiceChanged);
     _screenshotService.stopMonitoring();
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
-
-    // Re-check access when app becomes active (useful for external subscription changes)
-    if (state == AppLifecycleState.resumed) {
-      Logger.i(
-        '🔄 App resumed - re-checking subscription access with fresh data',
-      );
-
-      // Check for admin reset when app resumes (iOS only feature)
-      if (ResponsiveHelper.isIOS()) {
-        _screenshotService.checkForAdminReset();
-      }
-
-      _checkAccess(forceRefresh: true);
-    }
-  }
 
   @override
   void didUpdateWidget(ProtectedCourseContent oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Re-check access if courseId changes. Reset all per-course state so the
-    // new course performs a fresh initial check (with loading UI) instead of
-    // a background refresh that could leak the previous course's access state.
     if (oldWidget.courseId != widget.courseId) {
-      _retryTimer?.cancel();
-      _retryTimer = null;
-      _hasAccess = null;
-      _hasInitialCheckCompleted = false;
-      _backgroundRetryCount = 0;
-      _showRefreshPrompt = false;
-      _isManualRefreshing = false;
+      // courseId changed — reset course-level state
+      _isCourseAssigned = null;
+      _isCourseCheckLoading = false;
+      _courseErrorMessage = null;
       _isNavigatingToSubscription = false;
       _errorMessage = null;
-      _checkAccess();
+      if (widget.courseId != null) {
+        _checkCourseAssignment();
+      }
     }
   }
 
-  /// Force refresh access check (can be called when user returns from subscription screen)
-  void refreshAccess() {
-    Logger.i('🔄 Manually refreshing subscription access with fresh data');
-    _checkAccess(forceRefresh: true);
+  // ── Course assignment check (verify-on-denial via claims) ──
+
+  Future<void> _checkCourseAssignment() async {
+    if (!mounted || widget.courseId == null) return;
+
+    final courseId = widget.courseId!;
+
+    setState(() {
+      _isCourseCheckLoading = true;
+      _courseErrorMessage = null;
+    });
+
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final currentUser = authService.currentUser;
+
+      if (currentUser == null) {
+        if (mounted) {
+          setState(() {
+            _isCourseAssigned = false;
+            _isCourseCheckLoading = false;
+            _errorMessage = 'Please log in to access content';
+          });
+        }
+        return;
+      }
+
+      // Uses the verify-on-denial pattern:
+      // Fast path: cached claims say assigned → true (0 reads)
+      // Denial path: claims say no → refreshClaimsIfAllowed → re-check
+      final assigned = await authService
+          .isCourseAssigned(courseId)
+          .timeout(const Duration(seconds: 8));
+
+      if (mounted) {
+        setState(() {
+          _isCourseAssigned = assigned;
+          _isCourseCheckLoading = false;
+          if (!assigned) {
+            _courseErrorMessage = null; // Not an error, just not assigned
+          }
+        });
+      }
+    } catch (e) {
+      Logger.e('❌ Course assignment check failed: $e');
+      if (mounted) {
+        setState(() {
+          // Fail closed: deny access on error
+          _isCourseAssigned = false;
+          _isCourseCheckLoading = false;
+          _courseErrorMessage =
+              'Unable to verify course access. Please try again.';
+        });
+      }
+    }
+
+    // Start cooldown countdown if the check denied access and cooldown is active.
+    if (mounted && _isCourseAssigned == false) {
+      _startRetryCooldown();
+    }
+  }
+
+  /// Reads the authoritative cooldown from [AuthService] and starts a
+  /// periodic timer that decrements [_retryCooldownSeconds] each second.
+  /// The Retry button is disabled while the countdown is active.
+  void _startRetryCooldown() {
+    _retryCooldownTimer?.cancel();
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final remaining = authService.claimsRefreshCooldownRemaining;
+    if (remaining <= 0) {
+      if (_retryCooldownSeconds != 0) {
+        setState(() { _retryCooldownSeconds = 0; });
+      }
+      return;
+    }
+    _retryCooldownSeconds = remaining;
+    setState(() {});
+    _retryCooldownTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) {
+        if (!mounted) {
+          _retryCooldownTimer?.cancel();
+          return;
+        }
+        setState(() {
+          _retryCooldownSeconds--;
+          if (_retryCooldownSeconds <= 0) {
+            _retryCooldownSeconds = 0;
+            _retryCooldownTimer?.cancel();
+          }
+        });
+      },
+    );
   }
 
   /// Navigate to subscription screen and handle result
@@ -144,29 +219,19 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
 
       Logger.i('📱 Returned from subscription screen with result: $result');
 
-      // Check if subscription was activated
-      if (result != null && result['subscriptionActivated'] == true) {
-        Logger.i('✅ Subscription was activated - refreshing access');
+      if (mounted) {
+        // Force a subscription re-check via SessionProvider
+        final session =
+            Provider.of<SessionProvider>(context, listen: false);
+        await session.checkSubscription(forceRefresh: true);
 
-        if (mounted) {
-          // Force refresh the access check with fresh server data
-          _checkAccess(forceRefresh: true);
-        }
-      } else {
-        Logger.i('❌ No subscription activation - user may have closed screen');
-
-        if (mounted) {
-          // Still refresh in case something changed
-          _checkAccess(forceRefresh: true);
+        // Also re-check course assignment if applicable
+        if (widget.courseId != null) {
+          await _checkCourseAssignment();
         }
       }
     } catch (error) {
       Logger.e('❌ Error navigating to subscription screen: $error');
-
-      if (mounted) {
-        // Fallback: still try to refresh access
-        _checkAccess(forceRefresh: true);
-      }
     } finally {
       if (mounted) {
         setState(() {
@@ -176,342 +241,9 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     }
   }
 
-  Future<void> _checkAccess({bool forceRefresh = false}) async {
-    if (!mounted) return;
+  // ── Screenshot service (unchanged from original) ──
 
-    // Cancel any previously-scheduled background retry — this call supersedes it.
-    _retryTimer?.cancel();
-    _retryTimer = null;
-
-    // CRITICAL UX FIX: If we already completed an initial check and the user
-    // had access, do the re-check silently in the background without resetting
-    // the UI. This prevents the "Verifying access..." flash when navigating
-    // back to the home screen or when the app resumes.
-    final bool isBackgroundRefresh = _hasInitialCheckCompleted && _hasAccess == true;
-
-    if (!isBackgroundRefresh) {
-      // Only show loading UI on the initial check or when access was previously denied
-      setState(() {
-        _isLoading = true;
-        _errorMessage = null;
-      });
-    } else {
-      Logger.i('🔄 Background subscription re-check (no UI disruption)');
-    }
-
-    try {
-      final authService = Provider.of<AuthService>(context, listen: false);
-      final currentUser = authService.currentUser;
-
-      // Update screenshot service with current user state (iOS only)
-      if (ResponsiveHelper.isIOS()) {
-        _screenshotService.onUserAuthChanged(currentUser);
-      }
-
-      if (currentUser == null) {
-        Logger.w('🔐 No authenticated user for content access check');
-        if (mounted) {
-          setState(() {
-            _hasAccess = false;
-            _isLoading = false;
-            _hasInitialCheckCompleted = true;
-            _errorMessage = 'Please log in to access content';
-          });
-        }
-        return;
-      }
-
-      // LOCAL-FIRST VALIDATION: For background refreshes, check the cached
-      // endDate against the user's current local time before hitting the server.
-      // This makes rechecks instant when the subscription clearly hasn't expired.
-      if (isBackgroundRefresh && !forceRefresh) {
-        final localValidity = _subscriptionService.isSubscriptionLocallyValid(
-          currentUser.uid,
-        );
-
-        if (localValidity == true) {
-          // Subscription endDate is still in the future — skip the server call
-          final endDate = _subscriptionService.getActiveSubscriptionEndDate(
-            currentUser.uid,
-          );
-          Logger.i(
-            '⚡ Local validation passed — subscription valid until '
-            '${endDate?.toLocal()} — skipping server call',
-          );
-          _backgroundRetryCount = 0;
-
-          if (mounted && _showRefreshPrompt) {
-            setState(() {
-              _showRefreshPrompt = false;
-              _isManualRefreshing = false;
-            });
-          }
-          return; // No server call needed
-        } else if (localValidity == false) {
-          // Cached endDate is in the past — subscription likely expired
-          Logger.w(
-            '⏰ Local validation: subscription endDate has passed — '
-            'verifying with server',
-          );
-          // Fall through to server check with forceRefresh
-          forceRefresh = true;
-        }
-        // localValidity == null: no cache, fall through to normal server check
-      }
-
-      // Server-side validation
-      late Future<bool> accessCheckFuture;
-
-      if (widget.courseId == null) {
-        Logger.i(
-          '🔍 Checking general subscription access for user ${currentUser.uid} (forceRefresh: $forceRefresh, background: $isBackgroundRefresh)',
-        );
-        accessCheckFuture = _subscriptionService.checkUserActiveSubscription(
-          currentUser.uid,
-          forceRefresh: forceRefresh,
-        );
-      } else {
-        Logger.i(
-          '🔐 Checking course access for ${widget.courseId} (forceRefresh: $forceRefresh, background: $isBackgroundRefresh)',
-        );
-        accessCheckFuture = _subscriptionService.hasAccessToCourse(
-          currentUser.uid,
-          widget.courseId!,
-          forceRefresh: forceRefresh,
-        );
-      }
-
-      // Apply timeout — throw on timeout so it enters the retry path
-      final hasAccess = await accessCheckFuture.timeout(
-        const Duration(seconds: 10),
-      );
-
-      // Success — reset the retry counter and clear any refresh prompt
-      _backgroundRetryCount = 0;
-
-      if (mounted && (_showRefreshPrompt || _isManualRefreshing)) {
-        setState(() {
-          _showRefreshPrompt = false;
-          _isManualRefreshing = false;
-        });
-      }
-
-      if (mounted) {
-        // Only update UI if the result actually changed, or if this is the initial check
-        if (!isBackgroundRefresh || hasAccess != _hasAccess) {
-          setState(() {
-            _hasAccess = hasAccess;
-            _isLoading = false;
-            _hasInitialCheckCompleted = true;
-          });
-
-          // If access was revoked during a background check, log it clearly
-          if (isBackgroundRefresh && !hasAccess) {
-            Logger.w('⚠️ Subscription access revoked during background check');
-          }
-        } else {
-          // Background check confirmed access is still valid — no UI update needed
-          Logger.i('✅ Background subscription check confirmed: access still valid');
-        }
-      }
-    } catch (error) {
-      Logger.e('❌ Error checking content access: $error');
-
-      if (isBackgroundRefresh) {
-        _backgroundRetryCount++;
-        Logger.w(
-          '⚠️ Background subscription check failed '
-          '(attempt $_backgroundRetryCount/$_maxBackgroundRetries): $error',
-        );
-
-        if (_backgroundRetryCount >= _maxBackgroundRetries) {
-          // All silent retries exhausted — show a non-intrusive prompt asking
-          // the user to manually verify. Content stays visible.
-          Logger.w(
-            '⚠️ Max background retries reached — prompting user to refresh manually',
-          );
-          _backgroundRetryCount = 0;
-
-          if (mounted) {
-            setState(() {
-              _showRefreshPrompt = true;
-            });
-          }
-        } else {
-          // Schedule a silent retry with exponential backoff (2s, 4s, 8s)
-          final retryDelay = Duration(seconds: 2 * _backgroundRetryCount);
-          Logger.i('🔁 Scheduling background retry in ${retryDelay.inSeconds}s');
-
-          _retryTimer?.cancel();
-          _retryTimer = Timer(retryDelay, () {
-            _retryTimer = null;
-            if (mounted) {
-              _checkAccess(forceRefresh: true);
-            }
-          });
-        }
-      } else {
-        // On initial check, show the error
-        if (mounted) {
-          setState(() {
-            _hasAccess = false;
-            _isLoading = false;
-            _hasInitialCheckCompleted = true;
-            _errorMessage = 'Unable to verify access. Please try again.';
-          });
-        }
-      }
-    }
-  }
-
-  /// Handle the user tapping "Verify Now" on the refresh prompt banner.
-  /// If this manual refresh also fails, revoke access.
-  Future<void> _handleManualRefresh() async {
-    if (!mounted || _isManualRefreshing) return;
-
-    setState(() {
-      _isManualRefreshing = true;
-    });
-
-    Logger.i('🔄 User-triggered manual subscription refresh');
-
-    try {
-      final authService = Provider.of<AuthService>(context, listen: false);
-      final currentUser = authService.currentUser;
-
-      if (currentUser == null) {
-        // No user — revoke access
-        if (mounted) {
-          setState(() {
-            _hasAccess = false;
-            _isLoading = false;
-            _showRefreshPrompt = false;
-            _isManualRefreshing = false;
-            _errorMessage = 'Please log in to access content';
-          });
-        }
-        return;
-      }
-
-      late Future<bool> accessCheckFuture;
-      if (widget.courseId == null) {
-        accessCheckFuture = _subscriptionService.checkUserActiveSubscription(
-          currentUser.uid,
-          forceRefresh: true,
-        );
-      } else {
-        accessCheckFuture = _subscriptionService.hasAccessToCourse(
-          currentUser.uid,
-          widget.courseId!,
-          forceRefresh: true,
-        );
-      }
-
-      final hasAccess = await accessCheckFuture.timeout(
-        const Duration(seconds: 15), // Slightly longer timeout for manual retry
-      );
-
-      if (mounted) {
-        setState(() {
-          _hasAccess = hasAccess;
-          _isLoading = false;
-          _showRefreshPrompt = false;
-          _isManualRefreshing = false;
-          _backgroundRetryCount = 0;
-        });
-
-        if (hasAccess) {
-          Logger.i('✅ Manual refresh confirmed: subscription is active');
-        } else {
-          Logger.w('⚠️ Manual refresh confirmed: subscription is NOT active');
-        }
-      }
-    } catch (error) {
-      Logger.e('❌ Manual subscription refresh failed: $error');
-
-      // User-triggered refresh failed — now revoke access for safety
-      if (mounted) {
-        setState(() {
-          _hasAccess = false;
-          _isLoading = false;
-          _showRefreshPrompt = false;
-          _isManualRefreshing = false;
-          _errorMessage = 'Unable to verify subscription. Please check your connection and try again.';
-        });
-      }
-    }
-  }
-
-  /// Build a non-intrusive banner prompting the user to verify their subscription
-  Widget _buildRefreshPromptBanner() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.orange[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange[300]!, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.wifi_off_rounded,
-            color: Colors.orange[700],
-            size: 20,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Subscription status could not be verified',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.orange[900],
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          _isManualRefreshing
-              ? SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange[700]!),
-                  ),
-                )
-              : TextButton(
-                  onPressed: _handleManualRefresh,
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.orange[800],
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      side: BorderSide(color: Colors.orange[400]!),
-                    ),
-                  ),
-                  child: const Text(
-                    'Verify Now',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                  ),
-                ),
-        ],
-      ),
-    );
-  }
-
-  /// Initialize the screenshot blocking service
   Future<void> _initializeScreenshotService() async {
-    // Initialize on both iOS and Android
     if (!ResponsiveHelper.isIOS() && !ResponsiveHelper.isAndroid()) {
       Logger.i('📱 Screenshot blocking not available on this platform');
       return;
@@ -521,14 +253,10 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
       await _screenshotService.initialize();
       _screenshotService.addListener(_onScreenshotServiceChanged);
 
-      // Update screenshot service with current user state
       final authService = Provider.of<AuthService>(context, listen: false);
       await _screenshotService.onUserAuthChanged(authService.currentUser);
 
-      // Check for admin reset before starting monitoring
       await _screenshotService.checkForAdminReset();
-
-      // Start monitoring when content is accessed
       await _screenshotService.startMonitoring();
 
       Logger.i('📱 Screenshot blocking service initialized successfully');
@@ -537,35 +265,30 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     }
   }
 
-  /// Handle screenshot service state changes
   void _onScreenshotServiceChanged() {
     if (!mounted) return;
 
     Logger.i('📱 Screenshot service state changed');
 
-    // Check if access was restored (admin reset) - only show once
     if (_screenshotService.shouldShowResetMessage) {
       _showAccessRestoredMessage();
     }
 
-    // Check if we should show warning (first screenshot)
     if (_screenshotService.shouldShowWarning() && !_showingScreenshotWarning) {
       _showScreenshotWarning();
     }
 
-    // Check if we should show screen recording warning
-    if (_screenshotService.shouldShowScreenRecordingWarning && !_showingScreenRecordingWarning) {
+    if (_screenshotService.shouldShowScreenRecordingWarning &&
+        !_showingScreenRecordingWarning) {
       Logger.w('📱 Triggering screen recording warning dialog');
       _showScreenRecordingWarning();
     }
 
-    // Check if access should be blocked (second screenshot)
     if (_screenshotService.shouldBlockAccess()) {
       _showScreenshotBlocked();
     }
   }
 
-  /// Show screenshot warning screen
   void _showScreenshotWarning() {
     if (_showingScreenshotWarning) return;
 
@@ -573,7 +296,6 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
       _showingScreenshotWarning = true;
     });
 
-    // Mark that we're showing the warning to prevent repeated displays
     _screenshotService.markWarningShown();
 
     Logger.w('📱 Showing screenshot warning screen');
@@ -589,9 +311,8 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
                 });
               },
             ),
-        transitionDuration: Duration(milliseconds: 150), // Faster transition
+        transitionDuration: Duration(milliseconds: 150),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          // Quick fade transition instead of default slide
           return FadeTransition(opacity: animation, child: child);
         },
         fullscreenDialog: true,
@@ -599,7 +320,6 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     );
   }
 
-  /// Show screenshot blocked screen
   void _showScreenshotBlocked() {
     Logger.e('📱 Showing screenshot blocked screen');
 
@@ -610,9 +330,8 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
                 const ScreenshotBlockedScreen(),
         transitionDuration: Duration(
           milliseconds: 100,
-        ), // Even faster for blocking
+        ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          // Instant fade transition for immediate blocking
           return FadeTransition(opacity: animation, child: child);
         },
         fullscreenDialog: true,
@@ -620,7 +339,6 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     );
   }
 
-  /// Show screen recording warning dialog
   void _showScreenRecordingWarning() {
     if (_showingScreenRecordingWarning) return;
 
@@ -632,7 +350,7 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
 
     showDialog(
       context: context,
-      barrierDismissible: false, // Force user to acknowledge
+      barrierDismissible: false,
       builder: (BuildContext context) {
         return ScreenRecordingWarningDialog(
           onDismiss: () {
@@ -646,11 +364,9 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     );
   }
 
-  /// Show access restored message when admin resets violations
   void _showAccessRestoredMessage() {
     Logger.i('🎉 Showing access restored message');
 
-    // Acknowledge that we're showing the message
     _screenshotService.acknowledgeResetMessage();
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -675,70 +391,89 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
     );
   }
 
+  // ── Build ──
+
   @override
   Widget build(BuildContext context) {
-    // Check for screenshot blocking first (iOS only - Android uses FLAG_SECURE)
+    // Screenshot blocking first (iOS only - Android uses FLAG_SECURE)
     if (ResponsiveHelper.isIOS() && _screenshotService.shouldBlockAccess()) {
       Logger.e('📱 Access blocked due to screenshot violations');
       return const ScreenshotBlockedScreen();
     }
-    // Show error state
+
+    // Auth error (e.g. no user)
     if (_errorMessage != null) {
       return _buildErrorState();
     }
 
-    // Show content if access granted
-    if (_hasAccess == true) {
-      Logger.i('✅ Content access granted');
+    // Read session state from SessionProvider via context.select.
+    // Widget only rebuilds when a selected value actually changes.
+    final hasActiveSubscription = context.select<SessionProvider, bool>(
+      (s) => s.hasActiveSubscription,
+    );
+    final hasCheckedOnce = context.select<SessionProvider, bool>(
+      (s) => s.hasCheckedOnce,
+    );
+    // dataGeneration: ensures this widget rebuilds when SessionProvider's
+    // generation counter bumps (e.g. stale-resume refresh), even if
+    // hasActiveSubscription/hasCheckedOnce didn't change.
+    final dataGeneration = context.select<SessionProvider, int>(
+      (s) => s.dataGeneration,
+    );
 
-      // If background checks failed, show a non-intrusive refresh banner
-      // over the content (content stays fully visible and usable)
-      if (_showRefreshPrompt) {
-        return Stack(
-          children: [
-            widget.child,
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: SafeArea(
-                child: _buildRefreshPromptBanner(),
-              ),
-            ),
-          ],
-        );
-      }
-
-      return widget.child;
-    }
-
-    // Show loading state while checking access (regardless of showLoadingSpinner setting)
-    if (_isLoading || _hasAccess == null) {
+    // Still loading initial subscription check
+    if (!hasCheckedOnce) {
       return _buildLoadingState();
     }
 
-    // Show subscription expired screen if access definitively denied
-    if (_hasAccess == false) {
+    // Subscription expired → show expired screen
+    if (!hasActiveSubscription) {
       Logger.w(
-        '🚫 Content access denied - showing subscription expired screen',
+        '🚫 Content access denied - subscription expired',
       );
-
-      // Navigate to subscription screen and listen for result (only if not already navigating)
       if (!_isNavigatingToSubscription) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _navigateToSubscriptionScreen();
         });
       }
-
-      // Show loading while navigating
       return _buildLoadingState();
     }
 
-    // Fallback to loading state (should not reach here)
-    return _buildLoadingState();
+    // ── Subscription is active. Check course assignment if courseId is set. ──
+
+    if (widget.courseId != null) {
+      // Re-verify course assignment when data generation changes.
+      // The context.select on dataGeneration above ensures this widget
+      // rebuilds even if subscription fields didn't change.
+      if (_lastCheckedGeneration != dataGeneration) {
+        _lastCheckedGeneration = dataGeneration;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _checkCourseAssignment();
+        });
+      }
+
+      // Course assignment error
+      if (_courseErrorMessage != null) {
+        return _buildCourseErrorState();
+      }
+
+      // Still checking course assignment
+      if (_isCourseCheckLoading || _isCourseAssigned == null) {
+        return _buildLoadingState(message: 'Checking course access...');
+      }
+
+      // Course not assigned — show "not assigned" screen with retry
+      if (_isCourseAssigned == false) {
+        return _buildCourseNotAssignedState();
+      }
+    }
+
+    // ── All checks passed — show content ──
+    Logger.i('✅ Content access granted');
+    return widget.child;
   }
 
-  Widget _buildLoadingState() {
+  Widget _buildLoadingState({String? message}) {
     return Scaffold(
       backgroundColor: Colors.white,
       body: Container(
@@ -756,7 +491,7 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
               ),
               const SizedBox(height: 24),
               Text(
-                'Verifying access...',
+                message ?? 'Verifying access...',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w500,
@@ -772,7 +507,6 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
                 ),
               ],
               const SizedBox(height: 40),
-              // Add some visual feedback that something is happening
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
@@ -824,7 +558,6 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
             if (isAuthMissing)
               ElevatedButton(
                 onPressed: () async {
-                  // Clear any stale persistent data before redirecting
                   await AuthPersistenceService.clearAll();
                   if (!mounted) return;
                   Navigator.of(context).pushAndRemoveUntil(
@@ -846,7 +579,18 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
               )
             else
               ElevatedButton(
-                onPressed: _checkAccess,
+                onPressed: () {
+                  setState(() {
+                    _errorMessage = null;
+                  });
+                  // Trigger a fresh subscription check
+                  final session =
+                      Provider.of<SessionProvider>(context, listen: false);
+                  session.checkSubscription(forceRefresh: true);
+                  if (widget.courseId != null) {
+                    _checkCourseAssignment();
+                  }
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
@@ -858,6 +602,124 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent>
                 child: const Text('Try Again'),
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Course-level error state (network failure during assignment check)
+  Widget _buildCourseErrorState() {
+    return Container(
+      padding: const EdgeInsets.all(40),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.wifi_off_rounded, size: 64, color: Colors.orange[300]),
+            const SizedBox(height: 16),
+            Text(
+              'Unable to Verify Access',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.orange[700],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _courseErrorMessage!,
+              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () => _checkCourseAssignment(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 16,
+                ),
+              ),
+              child: const Text('Try Again'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// "Course not assigned" state — generic message, Retry button.
+  /// No mention of renewal or internal details; just "contact your administrator".
+  Widget _buildCourseNotAssignedState() {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(40),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.lock_outline_rounded,
+                size: 64,
+                color: Colors.grey[400],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Course Not Available',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[800],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'This course is not currently assigned to your account. '
+                'Please contact your administrator for access.',
+                style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton.icon(
+                onPressed: _retryCooldownSeconds > 0
+                    ? null // disabled during cooldown
+                    : () => _checkCourseAssignment(),
+                icon: Icon(
+                  _retryCooldownSeconds > 0 ? Icons.timer : Icons.refresh,
+                ),
+                label: Text(
+                  _retryCooldownSeconds > 0
+                      ? 'Retry in ${_retryCooldownSeconds}s'
+                      : 'Retry',
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey[300],
+                  disabledForegroundColor: Colors.grey[600],
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32,
+                    vertical: 16,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(
+                  'Go Back',
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -891,37 +753,29 @@ class ProtectedCourseScreen extends StatelessWidget {
 
 /// Mixin for adding subscription validation to existing widgets
 mixin SubscriptionValidationMixin<T extends StatefulWidget> on State<T> {
-  final SubscriptionService _subscriptionService = SubscriptionService();
-
   /// Quick method to check if current user has course access
   Future<bool> validateCourseAccess(String courseId) async {
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
-      final currentUser = authService.currentUser;
-
-      if (currentUser == null) return false;
-
-      return await _subscriptionService.hasAccessToCourse(
-        currentUser.uid,
-        courseId,
-      );
+      return await authService.isCourseAssigned(courseId);
     } catch (error) {
       Logger.e('❌ Course access validation failed: $error');
       return false;
     }
   }
 
-  /// Quick method to check if current user has active subscription
-  Future<bool> validateSubscriptionStatus() async {
+  /// Quick method to check if current user has active subscription.
+  ///
+  /// Note: The catch block returns `false` (fail-closed), which is
+  /// intentionally stricter than the optimistic-true default used in
+  /// [SessionProvider]. This catches programming errors (e.g. missing
+  /// provider in the widget tree) rather than network failures. Callers
+  /// who need the optimistic default should read
+  /// `SessionProvider.hasActiveSubscription` directly.
+  bool validateSubscriptionStatus() {
     try {
-      final authService = Provider.of<AuthService>(context, listen: false);
-      final currentUser = authService.currentUser;
-
-      if (currentUser == null) return false;
-
-      return await _subscriptionService.checkUserActiveSubscription(
-        currentUser.uid,
-      );
+      final session = Provider.of<SessionProvider>(context, listen: false);
+      return session.hasActiveSubscription;
     } catch (error) {
       Logger.e('❌ Subscription status validation failed: $error');
       return false;

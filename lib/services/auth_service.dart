@@ -716,6 +716,80 @@ class AuthService {
     }
   }
 
+  // ── Claims cooldown (shared by isCourseAssigned and pull-to-refresh) ──
+
+  DateTime? _lastForcedClaimsRefresh;
+  static const Duration _claimsRefreshCooldown = Duration(seconds: 60);
+
+  /// Seconds remaining before claims can be refreshed again, or 0 if ready.
+  int get claimsRefreshCooldownRemaining {
+    if (_lastForcedClaimsRefresh == null) return 0;
+    final elapsed = DateTime.now().difference(_lastForcedClaimsRefresh!);
+    final remaining = _claimsRefreshCooldown - elapsed;
+    return remaining.isNegative ? 0 : remaining.inSeconds;
+  }
+
+  /// Refresh custom claims via [getIdToken(true)] if the cooldown has elapsed.
+  ///
+  /// Returns `true` if claims were actually refreshed, `false` if skipped
+  /// (cooldown active) or failed. Both [isCourseAssigned] and pull-to-refresh
+  /// call this so they share the same cooldown window.
+  ///
+  /// Cooldown is set on *attempt*, not success, to prevent rapid retries
+  /// that hit Firebase rate limits.
+  Future<bool> refreshClaimsIfAllowed() async {
+    if (!_isFirebaseAvailable || currentUser == null) return false;
+
+    final now = DateTime.now();
+    if (_lastForcedClaimsRefresh != null &&
+        now.difference(_lastForcedClaimsRefresh!) < _claimsRefreshCooldown) {
+      Logger.i('📋 Claims refresh cooldown active — skipping');
+      return false;
+    }
+
+    _lastForcedClaimsRefresh = now; // set on attempt, not success
+    try {
+      await forceTokenRefresh();
+      Logger.i('🔑 Custom claims refreshed');
+      return true;
+    } catch (e) {
+      Logger.e('Claims refresh failed: $e');
+      return false;
+    }
+  }
+
+  // ── Course assignment check (verify-on-denial) ──
+
+  /// Check if a course is assigned to the current user.
+  ///
+  /// Fast path: cached claims say "assigned" → returns `true` (0 reads).
+  /// Denial path: claims say "not assigned" → calls [refreshClaimsIfAllowed]
+  /// (1 Auth API call, 0 Firestore reads) → re-checks → returns result.
+  ///
+  /// Fails CLOSED: if claims say "not assigned" and the refresh fails or
+  /// is on cooldown, returns `false`. This is intentional — claims had a
+  /// definitive "no", so granting access on error would be wrong.
+  Future<bool> isCourseAssigned(String courseId) async {
+    // Fast path: cached claims
+    final assignedIds = await getAssignedCourseIds();
+    if (assignedIds.contains(courseId)) {
+      return true; // Claims say yes — proceed (Firestore rules are the real gate)
+    }
+
+    // Claims say no. Verify with fresh token, respecting cooldown.
+    Logger.i('📋 Claims say course $courseId not assigned — verifying');
+    final refreshed = await refreshClaimsIfAllowed();
+
+    if (!refreshed) {
+      // Cooldown active or refresh failed — trust cached claims (deny)
+      return false;
+    }
+
+    // Re-read claims after refresh
+    final freshIds = await getAssignedCourseIds();
+    return freshIds.contains(courseId);
+  }
+
   // Verify and refresh token to ensure custom claims are up to date
   Future<Map<String, dynamic>> verifyAndRefreshClaims() async {
     if (!_isFirebaseAvailable || currentUser == null) {

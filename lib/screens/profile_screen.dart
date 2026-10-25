@@ -8,6 +8,8 @@ import '../utils/logger.dart';
 import '../models/user_model.dart';
 import '../utils/adaptive_navigation.dart';
 import 'login_screen.dart';
+import '../utils/tab_notifier.dart';
+import '../providers/session_provider.dart';
 import 'chat_screen.dart';
 import 'community_chat_screen.dart';
 import 'past_questions_screen.dart';
@@ -116,6 +118,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (dialogShown && mounted) {
         if (Navigator.canPop(context)) {
           Navigator.pop(context);
+        }
+      }
+
+      // Reset tab notifier so the next login starts on Home tab
+      activeTabNotifier.value = 0;
+
+      // Clear session provider state (subscription cache, observers, epoch)
+      if (mounted) {
+        try {
+          Provider.of<SessionProvider>(context, listen: false).clear();
+        } catch (e) {
+          Logger.e('Error clearing session provider (non-fatal): $e');
         }
       }
 

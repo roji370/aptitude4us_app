@@ -20,6 +20,7 @@ import '../models/course_model.dart';
 import '../models/module_model.dart';
 import '../services/storage_service.dart';
 import '../services/auth_service.dart';
+import '../providers/session_provider.dart';
 import '../utils/pdf_loader.dart';
 import '../widgets/custom_pdf_viewer.dart';
 import '../services/firestore_service.dart';
@@ -714,33 +715,48 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
 
   Future<void> _loadContent() async {
     final authService = Provider.of<AuthService>(context, listen: false);
+    final sessionProvider = context.read<SessionProvider>();
 
     setState(() {
       _isLoading = true;
     });
 
     try {
-      // First verify the user has access to this course
+      // Verify course access:
+      // - Assignment: claims-based isCourseAssigned (0 Firestore reads on
+      //   happy path). Skipped in exam overview mode because that path finds
+      //   the course from the global course list, not the user's assigned
+      //   courses — checking claims here could deny access if claims haven't
+      //   synced from the user doc yet (Cloud Function lag).
+      // - Subscription: in-memory SessionProvider (0 reads).
+      // This replaces the old hasAccessToCourse() which read the user doc +
+      // subscription from Firestore on every content view.
       Logger.i("Verifying access to course: ${widget.course.id}");
-      final hasAccess = await authService.hasAccessToCourse(widget.course.id);
 
-      if (!hasAccess) {
+      final isAssigned = widget.isExamOverviewMode
+          ? true // Exam overview bypasses assignment check
+          : await authService.isCourseAssigned(widget.course.id);
+      if (!mounted) return;
+
+      final hasSubscription = sessionProvider.hasActiveSubscription;
+
+      if (!isAssigned || !hasSubscription) {
         Logger.w(
-          "Access denied: User does not have access to course ${widget.course.id}",
+          "Access denied: assigned=$isAssigned, subscription=$hasSubscription "
+          "for course ${widget.course.id}",
         );
         setState(() {
           _isLoading = false;
         });
 
-        // Show access denied message
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('You do not have access to this course content.'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(!isAssigned
+                ? 'You do not have access to this course content.'
+                : 'Your subscription has expired.'),
+            backgroundColor: Colors.red,
+          ),
+        );
         return;
       }
 
@@ -779,9 +795,11 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
       // Log stack trace for better error diagnosis
       Logger.e("Stack trace: ${StackTrace.current}");
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -947,25 +965,12 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
         listen: false,
       );
 
-      // Get auth service to verify access
-      final authService = Provider.of<AuthService>(context, listen: false);
-
-      // Print debug info
-      Logger.d("User ID: ${authService.currentUser?.uid}");
+      // Access was already verified by _loadContent() — no need to re-check
+      // here. The old hasAccessToCourse call cost 2+ Firestore reads and was
+      // purely redundant since _loadContent gates all content display.
       Logger.d("Course ID: ${widget.course.id}");
       Logger.d("Module ID: ${widget.module.id}");
       Logger.d("PDF URL: $pdfUrl");
-
-      // Verify course access first
-      final hasAccess = await authService.hasAccessToCourse(widget.course.id);
-      Logger.d("Access check result: $hasAccess");
-
-      if (!hasAccess) {
-        Logger.w("Access denied to course ${widget.course.id}");
-        throw Exception(
-          "You don't have access to this course content. Please verify your course access.",
-        );
-      }
 
       String secureUrl;
 

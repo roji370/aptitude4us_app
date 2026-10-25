@@ -7,7 +7,6 @@ import '../models/course_model.dart';
 import '../models/module_model.dart';
 import '../services/content_update_service.dart';
 import '../services/firestore_service.dart';
-import '../services/auth_service.dart';
 import '../utils/logger.dart';
 import '../utils/route_transitions.dart';
 import '../widgets/custom_bottom_navigation.dart';
@@ -57,7 +56,6 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
       context,
       listen: false,
     );
-    final authService = Provider.of<AuthService>(context, listen: false);
 
     setState(() {
       _isLoading = true;
@@ -65,22 +63,10 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
     });
 
     try {
-      // First verify the user has access to this course
-      Logger.i("Verifying access to course: ${widget.course.id}");
-      final hasAccess = await authService.hasAccessToCourse(widget.course.id);
-
-      if (!hasAccess) {
-        Logger.w(
-          "Access denied: User does not have access to course ${widget.course.id}",
-        );
-        setState(() {
-          _errorMessage = 'You do not have access to this course content.';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      Logger.i("Access granted: User has access to course ${widget.course.id}");
+      // Course access (subscription + assignment) was already verified by
+      // ProtectedCourseContent at the AssignedCoursesScreen level. The old
+      // hasAccessToCourse() call here cost 2+ Firestore reads and was
+      // redundant for every screen in the navigation chain below it.
 
       // Load all content for the module
       final allContent = await firestoreService.getModuleContent(

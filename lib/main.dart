@@ -23,6 +23,7 @@ import 'services/firestore_service.dart';
 import 'services/notification_service.dart';
 import 'services/storage_service.dart';
 import 'services/subscription_service.dart';
+import 'providers/session_provider.dart';
 import 'utils/accessibility_helper.dart';
 import 'utils/adaptive_navigation.dart';
 import 'utils/app_colors.dart';
@@ -188,6 +189,9 @@ void main() async {
         Provider<NotificationService>(
           create: (_) => globalNotificationService ?? NotificationService(),
           lazy: true, // Lazy - will initialize in SplashScreen
+        ),
+        ChangeNotifierProvider<SessionProvider>(
+          create: (_) => SessionProvider(),
         ),
       ],
       child: const MyApp(),

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../utils/app_colors.dart';
 import '../utils/responsive_helper.dart';
-import '../screens/main_screen.dart';
+import '../utils/tab_notifier.dart';
 
 class CustomBottomNavigation extends StatelessWidget {
   final int selectedIndex;
@@ -93,15 +93,14 @@ class CustomBottomNavigation extends StatelessWidget {
     );
   }
 
-  /// Navigate to MainScreen with the selected tab index.
-  /// Used by sub-screens (module_list, content_viewer, etc.) that have
-  /// their own bottom nav to navigate back to the persistent shell.
+  /// Navigate back to MainScreen with the selected tab index.
+  ///
+  /// Instead of destroying and recreating MainScreen (pushAndRemoveUntil),
+  /// this sets the tab via [activeTabNotifier] and pops back to the root
+  /// route. MainScreen listens to the notifier and switches tabs without
+  /// re-running initState on any of the IndexedStack children.
   static void handleNavigation(BuildContext context, int index) {
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (context) => MainScreen(initialIndex: index),
-      ),
-      (route) => false,
-    );
+    activeTabNotifier.value = index;
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 }

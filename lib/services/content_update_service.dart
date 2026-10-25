@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/logger.dart';
 
@@ -25,6 +27,179 @@ class ContentUpdateService {
   // Keyed by content-item IDs only. Parents derive their state from children.
   // ---------------------------------------------------------------------------
   static final _seenItemIds = <String>{};
+
+  // ---------------------------------------------------------------------------
+  // Course-level badge ValueNotifiers (Step 6).
+  //
+  // Each course gets a ValueNotifier<bool> that the UI binds to via
+  // ValueListenableBuilder. Badge state is computed once via server refresh
+  // (refreshCourseBadgeFromServer) and then cheaply re-derived from memory
+  // (refreshCourseBadgeFromMemory) on pop-back — zero Firestore reads.
+  // ---------------------------------------------------------------------------
+  static final Map<String, ValueNotifier<bool>> _courseBadgeNotifiers = {};
+  static final Map<String, Set<String>> _courseUnseenItemIds = {};
+  /// Module-level badge state per course — stored from server refresh and
+  /// OR'd into memory derivation. These aren't tracked by _seenItemIds
+  /// (they represent module-rename/structural updates, not content items).
+  static final Map<String, bool> _courseHasModuleLevel = {};
+
+  /// Get or create a ValueNotifier for a course's badge state.
+  /// Initial value is false (no badge) until a refresh populates it.
+  ValueNotifier<bool> courseBadgeNotifier(String courseId) {
+    return _courseBadgeNotifiers.putIfAbsent(
+      courseId,
+      () => ValueNotifier<bool>(false),
+    );
+  }
+
+  /// Full server refresh for a single course's badge.
+  /// Computes the badge state, unseen item set, and module-level flag in a
+  /// single pass through the Firestore data. Stores results for later
+  /// zero-read memory derivation via [refreshCourseBadgeFromMemory].
+  ///
+  /// Read cost: 1 modules query + 1 contentUpdates query + M validItemIds
+  /// queries = M+2 reads per course.
+  Future<void> refreshCourseBadgeFromServer(
+    String courseId,
+    String userId,
+  ) async {
+    try {
+      // 1. Get published modules
+      final publishedModulesSnap = await _firestore
+          .collection('modules')
+          .where('courseId', isEqualTo: courseId)
+          .where('isPublished', isEqualTo: true)
+          .get();
+      final publishedModuleIds =
+          publishedModulesSnap.docs.map((d) => d.id).toSet();
+
+      // 2. Get all contentUpdates for this course+user
+      final updates = await _firestore
+          .collection('contentUpdates')
+          .where('courseId', isEqualTo: courseId)
+          .where('notifiedUsers', arrayContains: userId)
+          .get();
+
+      final prefs = await SharedPreferences.getInstance();
+      final allUnseenItemIds = <String>{};
+      bool hasModuleLevel = false;
+
+      // Group docs by module, separate course-level docs
+      final docsByModule =
+          <String, List<QueryDocumentSnapshot<Map<String, dynamic>>>>{};
+      for (var doc in updates.docs) {
+        final data = doc.data();
+        final moduleId = data['moduleId'] as String?;
+
+        if (moduleId == null) {
+          // Course-level doc — check if unseen (any type, matching
+          // hasCourseUpdate's unfiltered behavior).
+          final seenBy = List<String>.from(data['seenBy'] ?? []);
+          if (!seenBy.contains(userId) &&
+              !(prefs.getBool('seen_update_${doc.id}') ?? false)) {
+            hasModuleLevel = true;
+          }
+        } else if (publishedModuleIds.contains(moduleId)) {
+          docsByModule.putIfAbsent(moduleId, () => []).add(doc);
+        }
+      }
+
+      // 3. Per-module: collect unseen item IDs + check module-level docs
+      for (var entry in docsByModule.entries) {
+        final moduleId = entry.key;
+        final moduleDocs = entry.value;
+
+        final validIds = await _loadValidItemIds(moduleId);
+
+        // Unseen content items
+        final unseenItems = await getUnseenItemIds(
+          courseId,
+          moduleId,
+          userId,
+          validItemIds: validIds,
+          cachedDocs: moduleDocs,
+        );
+        allUnseenItemIds.addAll(unseenItems);
+
+        // Module-level (non-content) docs
+        if (!hasModuleLevel) {
+          hasModuleLevel = await _hasUnseenNonContentDocs(moduleDocs, userId);
+        }
+      }
+
+      // 4. Store for memory derivation and update the notifier
+      _courseUnseenItemIds[courseId] = allUnseenItemIds;
+      _courseHasModuleLevel[courseId] = hasModuleLevel;
+
+      final stillUnseen = allUnseenItemIds.difference(_seenItemIds);
+      courseBadgeNotifier(courseId).value =
+          stillUnseen.isNotEmpty || hasModuleLevel;
+    } catch (e) {
+      Logger.e('Error refreshing badge for $courseId: $e');
+    }
+  }
+
+  /// Zero-read memory derivation. Re-computes badge from the last server
+  /// refresh's unseen set minus items seen this session. Call on pop-back
+  /// from a module/content screen instead of re-fetching from Firestore.
+  void refreshCourseBadgeFromMemory(String courseId) {
+    final lastUnseen = _courseUnseenItemIds[courseId];
+    if (lastUnseen == null) return; // no prior server data — nothing to derive
+
+    final stillUnseen = lastUnseen.difference(_seenItemIds);
+    final hasModuleLevel = _courseHasModuleLevel[courseId] ?? false;
+    courseBadgeNotifier(courseId).value =
+        stillUnseen.isNotEmpty || hasModuleLevel;
+  }
+
+  /// Batch refresh all course badges with a concurrency cap.
+  /// Runs at most [maxConcurrent] server refreshes at a time to avoid
+  /// overwhelming Firestore with N×(M+2) concurrent reads.
+  Future<void> refreshAllCourseBadges(
+    List<String> courseIds,
+    String userId, {
+    int maxConcurrent = 3,
+  }) async {
+    // Simple semaphore: track how many are in-flight, queue the rest.
+    int running = 0;
+    final queue = List<String>.from(courseIds);
+    final allDone = Completer<void>();
+    int completed = 0;
+    final total = courseIds.length;
+
+    if (total == 0) return;
+
+    void scheduleNext() {
+      while (running < maxConcurrent && queue.isNotEmpty) {
+        final id = queue.removeAt(0);
+        running++;
+        refreshCourseBadgeFromServer(id, userId).whenComplete(() {
+          running--;
+          completed++;
+          if (completed == total) {
+            allDone.complete();
+          } else {
+            scheduleNext();
+          }
+        });
+      }
+    }
+
+    scheduleNext();
+    await allDone.future;
+  }
+
+  /// Clear all badge state. Call on sign-out to prevent cross-account leakage.
+  static void clearBadgeNotifiers() {
+    for (final notifier in _courseBadgeNotifiers.values) {
+      notifier.value = false;
+    }
+    _courseBadgeNotifiers.clear();
+    _courseUnseenItemIds.clear();
+    _courseHasModuleLevel.clear();
+    _seenItemIds.clear();
+  }
+
 
   /// Mark a content item as seen in memory (instant badge clear).
   void markItemSeen(String itemId) => _seenItemIds.add(itemId);
@@ -251,106 +426,7 @@ class ContentUpdateService {
     return false;
   }
 
-  // ---------------------------------------------------------------------------
-  // Course-level badge check  (for course cards)
-  // ---------------------------------------------------------------------------
 
-  /// Returns true if ANY update doc in the course is unseen.
-  ///
-  /// Uses the exact same per-module logic as [hasModuleUpdate] so that
-  /// course and module badge states are always consistent.
-  /// Only checks modules that are published (matching what the user sees).
-  Future<bool> hasCourseUpdate(String courseId, String userId) async {
-    try {
-      // Load the set of published module IDs — only these are visible to users.
-      // Update docs referencing deleted/unpublished modules are ignored.
-      final publishedModulesSnap = await _firestore
-          .collection('modules')
-          .where('courseId', isEqualTo: courseId)
-          .where('isPublished', isEqualTo: true)
-          .get();
-      final publishedModuleIds =
-          publishedModulesSnap.docs.map((d) => d.id).toSet();
-      Logger.i('[hasCourseUpdate] course=$courseId, publishedModules=$publishedModuleIds');
-
-      final updates = await _firestore
-          .collection('contentUpdates')
-          .where('courseId', isEqualTo: courseId)
-          .where('notifiedUsers', arrayContains: userId)
-          .get();
-      Logger.i('[hasCourseUpdate] total update docs: ${updates.docs.length}');
-
-      final prefs = await SharedPreferences.getInstance();
-
-      // Group docs by moduleId.
-      final docsByModule =
-          <String, List<QueryDocumentSnapshot<Map<String, dynamic>>>>{};
-      final docsWithoutModule =
-          <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-      int skippedOrphaned = 0;
-
-      for (var doc in updates.docs) {
-        final moduleId = doc.data()['moduleId'] as String?;
-        if (moduleId != null) {
-          // Skip docs for modules that don't exist or aren't published.
-          if (!publishedModuleIds.contains(moduleId)) {
-            skippedOrphaned++;
-            Logger.i('[hasCourseUpdate] SKIP orphaned doc ${doc.id} (module=$moduleId not published)');
-            continue;
-          }
-          docsByModule.putIfAbsent(moduleId, () => []).add(doc);
-        } else {
-          docsWithoutModule.add(doc);
-        }
-      }
-      Logger.i('[hasCourseUpdate] docsWithoutModule=${docsWithoutModule.length}, '
-          'moduleGroups=${docsByModule.length}, skippedOrphaned=$skippedOrphaned');
-
-      // 1. Check course-level docs (no moduleId).
-      for (var doc in docsWithoutModule) {
-        final data = doc.data();
-        final seenBy = List<String>.from(data['seenBy'] ?? []);
-        if (seenBy.contains(userId)) continue;
-        if (prefs.getBool('seen_update_${doc.id}') ?? false) continue;
-        Logger.i('[hasCourseUpdate] ⚠️ UNSEEN course-level doc: ${doc.id}, type=${data['type']}');
-        return true; // unseen course-level doc
-      }
-
-      // 2. Check each published module — same logic as hasModuleUpdate.
-      for (var entry in docsByModule.entries) {
-        final moduleId = entry.key;
-        final moduleDocs = entry.value;
-
-        final validIds = await _loadValidItemIds(moduleId);
-        Logger.i('[hasCourseUpdate] module=$moduleId, validIds=${validIds?.length ?? "null (no filter)"}, docs=${moduleDocs.length}');
-
-        // Unseen content items?
-        final unseenItems = await getUnseenItemIds(
-          courseId,
-          moduleId,
-          userId,
-          validItemIds: validIds,
-          cachedDocs: moduleDocs,
-        );
-        if (unseenItems.isNotEmpty) {
-          Logger.i('[hasCourseUpdate] ⚠️ UNSEEN items in module $moduleId: $unseenItems');
-          return true;
-        }
-
-        // Unseen module-level docs?
-        if (await _hasUnseenNonContentDocs(moduleDocs, userId)) {
-          Logger.i('[hasCourseUpdate] ⚠️ UNSEEN module-level docs in module $moduleId');
-          return true;
-        }
-      }
-
-      Logger.i('[hasCourseUpdate] ✅ Course $courseId fully seen');
-      return false;
-    } catch (e) {
-      Logger.e('Error checking course updates: $e');
-      return false;
-    }
-  }
 
   /// Check if a single update document is fully seen.
   ///

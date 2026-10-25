@@ -9,6 +9,7 @@ import '../services/auth_service.dart';
 import '../services/auth_persistence_service.dart';
 import '../services/firestore_service.dart';
 import '../services/subscription_service.dart';
+import '../providers/session_provider.dart';
 import '../services/version_check_service.dart';
 import '../utils/accessibility_helper.dart';
 import '../utils/logger.dart';
@@ -439,6 +440,19 @@ class _SplashScreenState extends State<SplashScreen>
               notificationService.refreshToken();
             } catch (e) {
               Logger.e("Error setting up notifications (non-fatal): $e");
+            }
+          }
+
+          // Initialize session provider with the authenticated user
+          if (mounted) {
+            try {
+              final sessionProvider = Provider.of<SessionProvider>(
+                context,
+                listen: false,
+              );
+              await sessionProvider.initialize(userId);
+            } catch (e) {
+              Logger.e("Error initializing session provider (non-fatal): $e");
             }
           }
 

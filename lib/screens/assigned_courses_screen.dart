@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../models/course_model.dart';
 import '../models/user_model.dart';
+import '../providers/session_provider.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/content_update_service.dart';
@@ -22,15 +24,20 @@ class AssignedCoursesScreen extends StatefulWidget {
 }
 
 class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
-  late Future<List<CourseModel>> _coursesFuture;
-  late Future<UserModel?> _userFuture;
+  // ── Resolved data fields (no FutureBuilders needed) ──
+  UserModel? _user;
+  List<CourseModel> _courses = [];
   bool _isLoading = true;
   bool _hasLoadedData = false;
   int _totalAssignedCourses = 0;
+
+  // ── Concurrency / freshness ──
+  int _loadToken = 0;
+  int _loadedGeneration = -1;
+
   final ContentUpdateService _updateService = ContentUpdateService();
-  // Incremented after returning from ModuleListScreen to force re-fetch.
-  int _courseRefreshKey = 0;
-  
+  final Map<String, int> _moduleCounts = {};
+
   // Search functionality
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -40,17 +47,10 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
     super.initState();
     Logger.i("🚀 AssignedCoursesScreen: initState called");
 
-    // Use post-frame callback to ensure the widget is fully built
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Logger.i("🚀 AssignedCoursesScreen: Post-frame callback triggered");
-
-      // Force first frame render for iOS Simulator
-      if (mounted) {
-        Logger.i("🚀 AssignedCoursesScreen: Ensuring visual update");
-        WidgetsBinding.instance.ensureVisualUpdate();
-      }
-
       if (mounted && !_hasLoadedData) {
+        _loadedGeneration =
+            context.read<SessionProvider>().dataGeneration;
         _loadData();
       }
     });
@@ -62,79 +62,140 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
     super.dispose();
   }
 
-  Future<void> _loadData() async {
-    if (!mounted || _hasLoadedData) {
-      Logger.w(
-        "⚠️ AssignedCoursesScreen: Skipping _loadData (mounted: $mounted, hasLoadedData: $_hasLoadedData)",
-      );
-      return;
-    }
+  // ── Silent reload on generation change ──
 
-    Logger.i(
-      "🔄 AssignedCoursesScreen: Starting _loadData (optimized for preloaded data)",
-    );
-
-    final authService = Provider.of<AuthService>(context, listen: false);
-    final firestoreService = Provider.of<FirestoreService>(
-      context,
-      listen: false,
-    );
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      // AuthService now handles session restoration internally
-      Logger.i(
-        "Checking auth state - User: ${authService.currentUser?.uid ?? 'Not logged in'}",
-      );
-
-      // Get assigned course IDs directly from custom claims
-      final assignedCourseIds = await authService.getAssignedCourseIds();
-      Logger.i("📚 Assigned course IDs: $assignedCourseIds");
-
-      // Also get user data for display purposes
-      final user = await authService.getUserData();
-      Logger.i("👤 User data loaded: ${user?.displayName} (${user?.email})");
-
-      setState(() {
-        _userFuture = Future.value(user);
-
-        if (assignedCourseIds.isNotEmpty) {
-          Logger.i("🔄 Fetching courses from Firestore...");
-          _coursesFuture = firestoreService.getPublishedAssignedCourses(
-            assignedCourseIds,
-          );
-          
-          // Also get total assigned courses count for inactive course detection
-          _loadTotalCoursesCount(firestoreService, assignedCourseIds);
-        } else {
-          Logger.w("⚠️ No courses assigned to this user");
-          _coursesFuture = Future.value([]);
-          _totalAssignedCourses = 0;
-        }
-      });
-    } catch (e) {
-      Logger.e("Error loading data: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: ${e.toString()}')));
-      }
-    } finally {
-      if (mounted) {
-        Logger.i("✅ AssignedCoursesScreen: Data loading completed, showing UI");
-        setState(() {
-          _isLoading = false;
-          _hasLoadedData =
-              true; // Mark data as loaded to prevent duplicate calls
-        });
-      }
+  /// Called from build() when dataGeneration changes after data has already
+  /// been loaded once. Reloads without showing a spinner. On failure,
+  /// restores the previous generation so the next bump retries.
+  ///
+  /// No explicit retry cap: generation bumps only come from
+  /// [SessionProvider.refreshAll] (stale-resume ≥15 min) or explicit
+  /// pull-to-refresh, so the natural cadence is at most ~1 retry per
+  /// resume cycle. If this ever changes (e.g., a push notification bumps
+  /// generation), add a cap here.
+  Future<void> _silentReload(int generation) async {
+    final previousGeneration = _loadedGeneration;
+    _loadedGeneration = generation; // set before await to prevent re-entry
+    final success = await _loadData(silent: true);
+    if (!success && mounted && _loadedGeneration == generation) {
+      _loadedGeneration = previousGeneration;
     }
   }
 
-  // Modern course card with bottom-up badge from children
+  // ── Data loading ──
+
+  /// Returns true on success, false on failure.
+  ///
+  /// [silent]: don't show loading spinner (used by _silentReload).
+  /// [force]: bypass the _hasLoadedData guard (used by pull-to-refresh).
+  Future<bool> _loadData({bool silent = false, bool force = false}) async {
+    if (!mounted) return false;
+    if (!silent && !force && _hasLoadedData) return true;
+
+    final thisLoadToken = ++_loadToken;
+
+    if (!silent && !force) {
+      setState(() { _isLoading = true; });
+    }
+
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final firestoreService =
+        Provider.of<FirestoreService>(context, listen: false);
+
+    try {
+      // On pull-to-refresh, refresh claims to pick up new assignments.
+      // Uses the shared 60s cooldown so rapid pulls don't spam Firebase.
+      if (force) {
+        try {
+          await authService.refreshClaimsIfAllowed();
+        } catch (e) {
+          Logger.w('Token refresh on pull-to-refresh failed (non-fatal): $e');
+        }
+      }
+
+      final assignedCourseIds = await authService.getAssignedCourseIds();
+      Logger.i("📚 Assigned course IDs: $assignedCourseIds");
+
+      late UserModel? user;
+      late List<CourseModel> courses;
+      late int totalCount;
+
+      if (assignedCourseIds.isNotEmpty) {
+        // Parallel fetches: user data, published courses, and total count.
+        // Count query has catchError — cosmetic only; used to detect
+        // inactive courses (totalAssigned > publishedAssigned). The
+        // fallback (assignedCourseIds.length from claims) may differ from
+        // the Firestore doc count if claims contain stale/orphaned IDs,
+        // but this only matters during a transient Firestore failure and
+        // only affects whether the "inactive courses" banner shows.
+        final results = await Future.wait([
+          authService.getUserData(),
+          firestoreService.getPublishedAssignedCourses(assignedCourseIds),
+          firestoreService
+              .getAssignedCourses(assignedCourseIds)
+              .then((c) => c.length)
+              .catchError((_) => assignedCourseIds.length),
+        ]);
+        user = results[0] as UserModel?;
+        courses = results[1] as List<CourseModel>;
+        totalCount = results[2] as int;
+      } else {
+        Logger.w("⚠️ No courses assigned to this user");
+        user = await authService.getUserData();
+        courses = [];
+        totalCount = 0;
+      }
+
+      // Stale-load guard: discard if a newer load was started
+      if (!mounted || thisLoadToken != _loadToken) return false;
+
+      setState(() {
+        _user = user;
+        _courses = courses;
+        _totalAssignedCourses = totalCount;
+        _isLoading = false;
+        _hasLoadedData = true;
+      });
+
+      // Kick off badge refresh and module count fetch in the background.
+      if (user != null && courses.isNotEmpty) {
+        final courseIds = courses.map((c) => c.id).toList();
+        // Badge refresh (concurrency-capped, fires ValueNotifier updates)
+        unawaited(
+          _updateService.refreshAllCourseBadges(courseIds, user.uid),
+        );
+        // Module counts — one query per course, results cached in _moduleCounts.
+        // This replaces the old per-card FutureBuilder that re-fetched on every
+        // rebuild. Errors are swallowed (card falls back to 0).
+        unawaited(
+          Future.wait(
+            courses.map((c) => firestoreService.getModules(c.id).then(
+              (modules) {
+                if (mounted) {
+                  setState(() {
+                    _moduleCounts[c.id] = modules.length;
+                  });
+                }
+              },
+            ).catchError((_) {})),
+          ),
+        );
+      }
+
+      return true;
+    } catch (e) {
+      Logger.e("Error loading data: $e");
+      if (!mounted || thisLoadToken != _loadToken) return false;
+      if (!silent) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: ${e.toString()}')));
+      }
+      setState(() { _isLoading = false; _hasLoadedData = true; });
+      return false;
+    }
+  }
+
+  // Modern course card with bottom-up badge from ValueNotifier
   Widget _buildModernCourseCard(
     CourseModel course,
     BuildContext context,
@@ -161,17 +222,9 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
       return 145.0;
     }
 
-    return FutureBuilder<List<dynamic>>(
-      key: ValueKey('${course.id}_$_courseRefreshKey'),
-      future: Future.wait([
-        _updateService.hasCourseUpdate(course.id, userId),
-        Provider.of<FirestoreService>(context, listen: false).getModules(course.id),
-      ]),
-      builder: (context, snapshot) {
-        final hasUpdate = (snapshot.data?[0] as bool?) ?? false;
-        final modules = snapshot.data?[1] as List?;
-        final moduleCount = modules?.length ?? 0;
-
+    return ValueListenableBuilder<bool>(
+      valueListenable: _updateService.courseBadgeNotifier(course.id),
+      builder: (context, hasUpdate, _) {
         return GestureDetector(
           onTap: () {
             AppNavigator.navigateTo(
@@ -179,8 +232,10 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
               page: ModuleListScreen(course: course),
             ).then((_) {
               if (!mounted) return;
-              _courseRefreshKey++;
-              setState(() {});
+              // Zero-read memory derivation: re-compute badge from the
+              // last server refresh's unseen set minus items seen this
+              // session. No Firestore reads.
+              _updateService.refreshCourseBadgeFromMemory(course.id);
             });
           },
           child: Container(
@@ -279,7 +334,7 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                '$moduleCount Module${moduleCount != 1 ? 's' : ''}',
+                                '${_moduleCounts[course.id] ?? 0} Module${(_moduleCounts[course.id] ?? 0) != 1 ? 's' : ''}',
                                 style: GoogleFonts.inter(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w500,
@@ -306,97 +361,10 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
     );
   }
 
-  Future<void> _loadTotalCoursesCount(FirestoreService firestoreService, List<String> assignedCourseIds) async {
-    try {
-      final allCourses = await firestoreService.getAssignedCourses(assignedCourseIds);
-      _totalAssignedCourses = allCourses.length;
-      Logger.d("Total assigned courses: $_totalAssignedCourses");
-    } catch (e) {
-      Logger.w("Could not fetch total courses count: $e");
-      _totalAssignedCourses = 0;
-    }
-  }
-
+  /// Manual refresh button handler. Uses the same _loadData(force: true)
+  /// path as pull-to-refresh, which calls refreshClaimsIfAllowed internally.
   Future<void> _refreshAccountData() async {
-    try {
-      final authService = Provider.of<AuthService>(context, listen: false);
-      
-      // Show loading indicator
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
-                ),
-                SizedBox(width: 12),
-                Text('Refreshing account data...'),
-              ],
-            ),
-            duration: Duration(seconds: 2),
-            backgroundColor: AppColors.primary,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        );
-      }
-
-      await authService.forceTokenRefresh();
-
-      if (mounted) {
-        // Reload the data after token refresh
-        setState(() {
-          _hasLoadedData = false;
-        });
-        await _loadData();
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.check_circle, color: Colors.white),
-                SizedBox(width: 12),
-                Text('Account data refreshed successfully'),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      Logger.e('❌ Error refreshing account data: $e');
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.error_outline, color: Colors.white),
-                SizedBox(width: 12),
-                Expanded(child: Text('Error refreshing data: ${e.toString()}')),
-              ],
-            ),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        );
-      }
-    }
+    await _loadData(force: true);
   }
 
   Widget _buildEmptyCoursesState(Size screenSize, List<CourseModel> courses) {
@@ -662,441 +630,391 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Track data generation — triggers silent reload on stale-resume.
+    final dataGeneration = context.select<SessionProvider, int>(
+      (s) => s.dataGeneration,
+    );
+
+    if (_hasLoadedData && dataGeneration != _loadedGeneration) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _hasLoadedData && dataGeneration != _loadedGeneration) {
+          _silentReload(dataGeneration);
+        }
+      });
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       body: ProtectedCourseContent(
         contentTitle: 'Course Library',
         showLoadingSpinner: false,
-        child:
-            _isLoading
-                ? Container(
-                  color: const Color(0xFFF5F5F5),
-                  child: const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text('Loading courses...'),
-                      ],
-                    ),
+        child: _isLoading
+            ? Container(
+                color: const Color(0xFFF5F5F5),
+                child: const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Loading courses...'),
+                    ],
                   ),
-                )
-                : SafeArea(
-                  child: RefreshIndicator(
-                    onRefresh: _loadData,
-                    color: AppColors.primary,
-                    child: FutureBuilder<UserModel?>(
-                      future: _userFuture,
-                      builder: (context, userSnapshot) {
-                        if (userSnapshot.connectionState ==
-                            ConnectionState.waiting) {
-                          return const Center(
-                            child: CircularProgressIndicator(),
-                          );
-                        }
+                ),
+              )
+            : SafeArea(
+                child: RefreshIndicator(
+                  onRefresh: () => _loadData(force: true),
+                  color: AppColors.primary,
+                  child: _user == null
+                      ? const Center(
+                          child: Text('No user data available.'),
+                        )
+                      : _buildCourseList(),
+                ),
+              ),
+      ),
+    );
+  }
 
-                        if (userSnapshot.hasError) {
-                          return Center(
-                            child: Text('Error: ${userSnapshot.error}'),
-                          );
-                        }
+  /// Main course list UI — extracted from the old nested FutureBuilders.
+  /// Now reads from resolved fields (_user, _courses) instead of Futures.
+  Widget _buildCourseList() {
+    final user = _user!;
+    final courses = List<CourseModel>.from(_courses);
 
-                        final user = userSnapshot.data;
-                        if (user == null) {
-                          return const Center(
-                            child: Text('No user data available.'),
-                          );
-                        }
+    // Sort courses: pinned first, then alphabetically within each group
+    courses.sort((a, b) {
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+    });
 
-                        return FutureBuilder<List<CourseModel>>(
-                          future: _coursesFuture,
-                          builder: (context, courseSnapshot) {
-                            if (courseSnapshot.connectionState ==
-                                ConnectionState.waiting) {
-                              return const Center(
-                                child: CircularProgressIndicator(),
-                              );
-                            }
+    // Filter courses based on search query
+    final filteredCourses = _searchQuery.isEmpty
+        ? courses
+        : courses
+            .where((course) =>
+                course.title.toLowerCase().contains(_searchQuery))
+            .toList();
 
-                            if (courseSnapshot.hasError) {
-                              return Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.error_outline,
-                                      size: 80,
-                                      color: Colors.redAccent,
-                                    ),
-                                    SizedBox(height: 16),
-                                    Text(
-                                      'Error loading courses',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.black87,
-                                      ),
-                                    ),
-                                    SizedBox(height: 8),
-                                    Text(
-                                      courseSnapshot.error.toString(),
-                                      style: GoogleFonts.inter(
-                                        fontSize: 14,
-                                        color: Colors.grey[600],
-                                      ),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                    SizedBox(height: 16),
-                                    ElevatedButton(
-                                      onPressed: _loadData,
-                                      child: Text('Try Again'),
-                                    ),
-                                  ],
+    // Get first name from display name
+    final firstName = user.displayName.split(' ').first;
+
+    // Get current date
+    final now = DateTime.now();
+    final weekday = [
+      'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'
+    ][now.weekday - 1];
+    final day = now.day;
+    final month = [
+      'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+      'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
+    ][now.month - 1];
+
+    return Container(
+      color: const Color(0xFFF5F5F5),
+      child: GestureDetector(
+        onTap: () {
+          // Dismiss keyboard when tapping outside
+          FocusScope.of(context).unfocus();
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header Section
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Logo and Profile Row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Logo
+                      Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.asset(
+                                'assets/images/xfini_logo.png',
+                                width: 40,
+                                height: 40,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'XFINI ACADEMY',
+                            style: GoogleFonts.inter(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ],
+                      ),
+                      // Profile Picture
+                      Stack(
+                        children: [
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.grey[300]!,
+                                width: 2,
+                              ),
+                              image: user.photoUrl != null &&
+                                      user.photoUrl!.isNotEmpty
+                                  ? DecorationImage(
+                                      image: NetworkImage(user.photoUrl!),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null,
+                            ),
+                            child: user.photoUrl == null ||
+                                    user.photoUrl!.isEmpty
+                                ? Icon(
+                                    Icons.person,
+                                    size: 28,
+                                    color: Colors.grey[400],
+                                  )
+                                : null,
+                          ),
+                          // Online indicator
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              width: 14,
+                              height: 14,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF4CAF50),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 2,
                                 ),
-                              );
-                            }
-
-                            final courses = courseSnapshot.data ?? [];
-                            // Sort courses: pinned first, then alphabetically within each group
-                            courses.sort((a, b) {
-                              // If one is pinned and the other isn't, pinned comes first
-                              if (a.isPinned && !b.isPinned) return -1;
-                              if (!a.isPinned && b.isPinned) return 1;
-                              // If both have same pinned status, sort alphabetically
-                              return a.title.toLowerCase().compareTo(b.title.toLowerCase());
-                            });
-                            
-                            // Filter courses based on search query
-                            final filteredCourses = _searchQuery.isEmpty
-                                ? courses
-                                : courses.where((course) {
-                                    return course.title.toLowerCase().contains(_searchQuery);
-                                  }).toList();
-                            
-                            Logger.i(
-                              "📋 Course data received: ${courses.length} courses (${filteredCourses.length} after filtering)",
-                            );
-                            Logger.i(
-                              "🎨 AssignedCoursesScreen: Building main UI with ${filteredCourses.length} courses${_searchQuery.isNotEmpty ? ' (filtered)' : ' (sorted alphabetically)'}",
-                            );
-
-                            // Get first name from display name
-                            final firstName = user.displayName.split(' ').first;
-                            
-                            // Get current date
-                            final now = DateTime.now();
-                            final weekday = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'][now.weekday - 1];
-                            final day = now.day;
-                            final month = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][now.month - 1];
-
-                            return Container(
-                              color: const Color(0xFFF5F5F5),
-                              child: GestureDetector(
-                                onTap: () {
-                                  // Dismiss keyboard when tapping outside
-                                  FocusScope.of(context).unfocus();
-                                },
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                  // Header Section
-                                  Container(
-                                    color: Colors.white,
-                                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13), // Reduced from 16 (20% reduction)
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        // Logo and Profile Row
-                                        Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            // Logo - UPDATED TO USE CUSTOM IMAGE
-                                            Row(
-                                              children: [
-                                                Container(
-                                                  width: 40,
-                                                  height: 40,
-                                                  decoration: BoxDecoration(
-                                                    borderRadius: BorderRadius.circular(8),
-                                                  ),
-                                                  child: ClipRRect(
-                                                    borderRadius: BorderRadius.circular(8),
-                                                    child: Image.asset(
-                                                      'assets/images/xfini_logo.png', // Your custom logo path
-                                                      width: 40,
-                                                      height: 40,
-                                                      fit: BoxFit.cover,
-                                                    ),
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 12),
-                                                Text(
-                                                  'XFINI ACADEMY',
-                                                  style: GoogleFonts.inter(
-                                                    fontSize: 18,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: Colors.black87,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            // Profile Picture
-                                            Stack(
-                                              children: [
-                                                Container(
-                                                  width: 48,
-                                                  height: 48,
-                                                  decoration: BoxDecoration(
-                                                    shape: BoxShape.circle,
-                                                    border: Border.all(
-                                                      color: Colors.grey[300]!,
-                                                      width: 2,
-                                                    ),
-                                                    image: user.photoUrl != null && user.photoUrl!.isNotEmpty
-                                                        ? DecorationImage(
-                                                            image: NetworkImage(user.photoUrl!),
-                                                            fit: BoxFit.cover,
-                                                          )
-                                                        : null,
-                                                  ),
-                                                  child: user.photoUrl == null || user.photoUrl!.isEmpty
-                                                      ? Icon(
-                                                          Icons.person,
-                                                          size: 28,
-                                                          color: Colors.grey[400],
-                                                        )
-                                                      : null,
-                                                ),
-                                                // Online indicator
-                                                Positioned(
-                                                  right: 0,
-                                                  bottom: 0,
-                                                  child: Container(
-                                                    width: 14,
-                                                    height: 14,
-                                                    decoration: BoxDecoration(
-                                                      color: const Color(0xFF4CAF50),
-                                                      shape: BoxShape.circle,
-                                                      border: Border.all(
-                                                        color: Colors.white,
-                                                        width: 2,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 11), // Reduced from 14 (20% reduction)
-                                        // Date and Greeting Row
-                                        Row(
-                                          children: [
-                                            Icon(
-                                              Icons.wb_sunny_outlined,
-                                              size: 16,
-                                              color: Colors.grey[600],
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Text(
-                                              '$weekday $day $month',
-                                              style: GoogleFonts.inter(
-                                                fontSize: 12,
-                                                color: Colors.grey[600],
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 6), // Reduced from 7 (20% reduction)
-                                        // Greeting and Refresh
-                                        Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Text(
-                                              'Hi, $firstName',
-                                              style: GoogleFonts.inter(
-                                                fontSize: 28,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.black87,
-                                              ),
-                                            ),
-                                            Container(
-                                              decoration: BoxDecoration(
-                                                border: Border.all(
-                                                  color: const Color(0xFF4A90E2),
-                                                  width: 1.5,
-                                                ),
-                                                borderRadius: BorderRadius.circular(20),
-                                              ),
-                                              child: Material(
-                                                color: Colors.transparent,
-                                                child: InkWell(
-                                                  onTap: _refreshAccountData,
-                                                  borderRadius: BorderRadius.circular(20),
-                                                  child: Padding(
-                                                    padding: const EdgeInsets.symmetric(
-                                                      horizontal: 12,
-                                                      vertical: 6,
-                                                    ),
-                                                    child: Row(
-                                                      mainAxisSize: MainAxisSize.min,
-                                                      children: [
-                                                        Icon(
-                                                          Icons.refresh,
-                                                          size: 16,
-                                                          color: const Color(0xFF4A90E2),
-                                                        ),
-                                                        const SizedBox(width: 4),
-                                                        Text(
-                                                          'Refresh',
-                                                          style: GoogleFonts.inter(
-                                                            fontSize: 12,
-                                                            fontWeight: FontWeight.w600,
-                                                            color: const Color(0xFF4A90E2),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 14), // Reduced from 18 (20% reduction)
-                                        // Search Bar - WITH BORDER AND FOCUSED STATE
-                                        Container(
-                                          height: 48,
-                                          decoration: BoxDecoration(
-                                            color: Colors.grey[100],
-                                            borderRadius: BorderRadius.circular(24),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.black.withOpacity(0.03),
-                                                blurRadius: 8,
-                                                offset: const Offset(0, 2),
-                                              ),
-                                            ],
-                                          ),
-                                          child: TextField(
-                                            controller: _searchController,
-                                            onChanged: (value) {
-                                              setState(() {
-                                                _searchQuery = value.toLowerCase();
-                                              });
-                                            },
-                                            decoration: InputDecoration(
-                                              hintText: 'Search courses',
-                                              hintStyle: GoogleFonts.inter(
-                                                fontSize: 15,
-                                                color: Colors.grey[400],
-                                              ),
-                                              prefixIcon: Icon(
-                                                Icons.search,
-                                                color: Colors.grey[400],
-                                                size: 20,
-                                              ),
-                                              suffixIcon: _searchQuery.isNotEmpty
-                                                  ? IconButton(
-                                                      icon: Icon(
-                                                        Icons.clear,
-                                                        color: Colors.grey[400],
-                                                        size: 20,
-                                                      ),
-                                                      onPressed: () {
-                                                        setState(() {
-                                                          _searchController.clear();
-                                                          _searchQuery = '';
-                                                        });
-                                                      },
-                                                    )
-                                                  : null,
-                                              enabledBorder: OutlineInputBorder(
-                                                borderRadius: BorderRadius.circular(24),
-                                                borderSide: BorderSide(
-                                                  color: Colors.grey[300]!,
-                                                  width: 1,
-                                                ),
-                                              ),
-                                              focusedBorder: OutlineInputBorder(
-                                                borderRadius: BorderRadius.circular(24),
-                                                borderSide: BorderSide(
-                                                  color: const Color(0xFF4A90E2),
-                                                  width: 2,
-                                                ),
-                                              ),
-                                              border: OutlineInputBorder(
-                                                borderRadius: BorderRadius.circular(24),
-                                                borderSide: BorderSide(
-                                                  color: Colors.grey[300]!,
-                                                  width: 1,
-                                                ),
-                                              ),
-                                              contentPadding: const EdgeInsets.symmetric(
-                                                horizontal: 20,
-                                                vertical: 12,
-                                              ),
-                                              filled: true,
-                                              fillColor: Colors.transparent,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 11),
+                  // Date and Greeting Row
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.wb_sunny_outlined,
+                        size: 16,
+                        color: Colors.grey[600],
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '$weekday $day $month',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  // Greeting and Refresh
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Hi, $firstName',
+                        style: GoogleFonts.inter(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: const Color(0xFF4A90E2),
+                            width: 1.5,
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: _refreshAccountData,
+                            borderRadius: BorderRadius.circular(20),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.refresh,
+                                    size: 16,
+                                    color: const Color(0xFF4A90E2),
                                   ),
-                                  
-                                  // Your Courses Section - MADE 20% MORE COMPACT
-                                  Expanded(
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 16), // Reduced from 20
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          const SizedBox(height: 12), // Reduced from 16
-                                          Text(
-                                            'Your Courses',
-                                            style: GoogleFonts.inter(
-                                              fontSize: 17, // Reduced from 20
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.black87,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 10), // Reduced from 12
-                                          // Courses List
-                                          Expanded(
-                                            child: filteredCourses.isEmpty
-                                                ? _searchQuery.isNotEmpty
-                                                    ? _buildNoSearchResults()
-                                                    : _buildEmptyCoursesState(MediaQuery.of(context).size, courses)
-                                                : ListView.builder(
-                                                    physics: const AlwaysScrollableScrollPhysics(),
-                                                    itemCount: filteredCourses.length,
-                                                    itemBuilder: (context, index) {
-                                                      return _buildModernCourseCard(
-                                                        filteredCourses[index],
-                                                        context,
-                                                        user.uid,
-                                                        index,
-                                                      );
-                                                    },
-                                                  ),
-                                          ),
-                                        ],
-                                      ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Refresh',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: const Color(0xFF4A90E2),
                                     ),
                                   ),
                                 ],
-                                ),
                               ),
-                            );
-                          },
-                        );
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  // Search Bar
+                  Container(
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.03),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: TextField(
+                      controller: _searchController,
+                      onChanged: (value) {
+                        setState(() {
+                          _searchQuery = value.toLowerCase();
+                        });
                       },
+                      decoration: InputDecoration(
+                        hintText: 'Search courses',
+                        hintStyle: GoogleFonts.inter(
+                          fontSize: 15,
+                          color: Colors.grey[400],
+                        ),
+                        prefixIcon: Icon(
+                          Icons.search,
+                          color: Colors.grey[400],
+                          size: 20,
+                        ),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: Icon(
+                                  Icons.clear,
+                                  color: Colors.grey[400],
+                                  size: 20,
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _searchController.clear();
+                                    _searchQuery = '';
+                                  });
+                                },
+                              )
+                            : null,
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide(
+                            color: Colors.grey[300]!,
+                            width: 1,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide(
+                            color: const Color(0xFF4A90E2),
+                            width: 2,
+                          ),
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide(
+                            color: Colors.grey[300]!,
+                            width: 1,
+                          ),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 12,
+                        ),
+                        filled: true,
+                        fillColor: Colors.transparent,
+                      ),
                     ),
                   ),
+                ],
+              ),
+            ),
+
+            // Your Courses Section
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 12),
+                    Text(
+                      'Your Courses',
+                      style: GoogleFonts.inter(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // Courses List
+                    Expanded(
+                      child: filteredCourses.isEmpty
+                          ? _searchQuery.isNotEmpty
+                              ? _buildNoSearchResults()
+                              : _buildEmptyCoursesState(
+                                  MediaQuery.of(context).size, courses)
+                          : ListView.builder(
+                              physics:
+                                  const AlwaysScrollableScrollPhysics(),
+                              itemCount: filteredCourses.length,
+                              itemBuilder: (context, index) {
+                                return _buildModernCourseCard(
+                                  filteredCourses[index],
+                                  context,
+                                  user.uid,
+                                  index,
+                                );
+                              },
+                            ),
+                    ),
+                  ],
                 ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
