@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/chat_service.dart';
 import '../services/attachment_service.dart';
+import '../utils/app_colors.dart';
 import '../widgets/attachment_picker.dart';
 import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
@@ -968,7 +969,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                       height: 24,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1565C0)),
+                        valueColor: AlwaysStoppedAnimation<Color>(AppColors.secondary),
                       ),
                     )
                   : Icon(

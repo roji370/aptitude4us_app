@@ -6,6 +6,7 @@ import '../models/module_model.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/content_update_service.dart';
+import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import '../utils/route_transitions.dart';
 import '../widgets/custom_bottom_navigation.dart';
@@ -146,27 +147,7 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
     }
   }
 
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-    CustomBottomNavigation.handleNavigation(context, index);
-  }
 
-  // Dynamic font size calculation based on title length
-  double _getTitleFontSize(String title) {
-    final length = title.length;
-    if (length <= 20) return 18.0; // Short titles - normal size
-    if (length <= 40) return 16.0; // Medium titles - slightly smaller
-    return 14.0; // Long titles - smallest
-  }
-
-  // Dynamic card height based on title length
-  double _getCardHeight(String title) {
-    final length = title.length;
-    if (length <= 40) return 130.0; // Normal height for short/medium titles
-    return 145.0; // Taller for long titles
-  }
 
 
   Widget _buildEmptyModulesState(Size screenSize) {
@@ -285,28 +266,29 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
         }
       },
       child: Scaffold(
-        backgroundColor: Colors.grey[50],
+        backgroundColor: AppColors.surface,
         appBar: AppBar(
-          backgroundColor: Colors.grey[50],
+          backgroundColor: AppColors.surface,
           elevation: 0,
+          surfaceTintColor: Colors.transparent,
           leading: widget.isExamOverviewMode 
-            ? null // Hide back button during exam overview
+            ? null
             : IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.black),
+                icon: const Icon(Icons.arrow_back_rounded, color: AppColors.onSurface),
                 onPressed: () => Navigator.of(context).pop(),
               ),
           title: Text(
             widget.course.title,
             style: GoogleFonts.inter(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: AppColors.primary,
             ),
           ),
         ),
       body:
           _isLoading
-              ? const Center(child: CircularProgressIndicator())
+              ? const Center(child: CircularProgressIndicator(color: AppColors.secondary))
               : FutureBuilder<List<ModuleModel>>(
                   future: _modulesFuture,
                   builder: (context, snapshot) {
@@ -334,9 +316,9 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
                                 Text(
                                   'Modules',
                                   style: GoogleFonts.inter(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.onSurface,
                                   ),
                                 ),
                                 const SizedBox(height: 16),
@@ -376,12 +358,11 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
     );
   }
 
-  /// Build modern module card. Badge is derived from hasModuleUpdate.
+  /// Build modern module card — Stitch design with accent strip.
   Widget _buildModernModuleCard(ModuleModel module, int index) {
-    // Alternate between blue and light blue backgrounds
-    final backgroundColor = index % 2 == 0
-        ? const Color(0xFF1565C0)
-        : const Color(0xFF29ACD6);
+    final accentColor = index % 2 == 0
+        ? AppColors.primary
+        : AppColors.secondary;
 
     return FutureBuilder<bool>(
       key: ValueKey('${module.id}_$_refreshKey'),
@@ -406,83 +387,89 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
               ),
             ).then((_) {
               if (!mounted) return;
-              // Force re-fetch of badge state for all modules.
               _refreshKey++;
               setState(() {});
             });
           },
           child: Container(
             width: double.infinity,
-            height: _getCardHeight(module.title),
             decoration: BoxDecoration(
-              color: backgroundColor,
-              borderRadius: BorderRadius.circular(16),
+              color: AppColors.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: backgroundColor.withOpacity(0.3),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
                 ),
               ],
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
               children: [
-                // Badge strip — always 28px tall, badge right-aligned when present
-                SizedBox(
-                  height: 28,
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 10),
-                      child: hasUpdate
-                          ? _buildUpdateBadgePill()
-                          : const SizedBox.shrink(),
-                    ),
-                  ),
+                Positioned(
+                  left: 0, top: 0, bottom: 0,
+                  child: Container(width: 6, color: accentColor),
                 ),
-                // Main content
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // Left side - Text content
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                'Module ${index + 1}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.white70,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Flexible(
-                                child: Text(
-                                  module.title,
-                                  style: GoogleFonts.inter(
-                                    fontSize: _getTitleFontSize(module.title),
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                    height: 1.2,
-                                  ),
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 32, height: 32,
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceContainer,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Center(
+                          child: Text(
+                            '${index + 1}',
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: accentColor,
+                            ),
                           ),
                         ),
-                        // Right side - Grid icon
-                        _buildModuleGridIcon(),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              module.title,
+                              style: GoogleFonts.inter(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.onSurface,
+                                letterSpacing: 0.14,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Module ${index + 1}',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w400,
+                                color: AppColors.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (hasUpdate)
+                        _buildUpdateBadgePill(),
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: AppColors.outline,
+                        size: 20,
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -493,93 +480,29 @@ class _ModuleListScreenState extends State<ModuleListScreen> {
     );
   }
 
-  /// The standard "UPDATE" badge pill.
+  /// Teal update badge pill.
   Widget _buildUpdateBadgePill() {
-    return IgnorePointer(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7.2, vertical: 3.6),
-        decoration: BoxDecoration(
-          color: Colors.orange,
-          borderRadius: BorderRadius.circular(10.8),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.circle,
-              size: 7.2,
-              color: Colors.white,
-            ),
-            const SizedBox(width: 3.6),
-            Text(
-              'UPDATE',
-              style: GoogleFonts.inter(
-                fontSize: 9,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.secondaryContainer,
+        borderRadius: BorderRadius.circular(20),
       ),
-    );
-  }
-
-  /// Build the grid icon for module cards
-  Widget _buildModuleGridIcon() {
-    return Column(
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.white, width: 2),
-                borderRadius: BorderRadius.circular(4),
-              ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.circle, size: 6, color: AppColors.onSecondaryContainer),
+          const SizedBox(width: 4),
+          Text(
+            'New',
+            style: GoogleFonts.inter(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: AppColors.onSecondaryContainer,
             ),
-            const SizedBox(width: 8),
-            Container(
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.white, width: 2),
-              ),
-              child: Transform.rotate(
-                angle: 0.785398, // 45 degrees in radians
-                child: Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.transparent),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Container(
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.white, width: 2),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.white, width: 2),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-          ],
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 }

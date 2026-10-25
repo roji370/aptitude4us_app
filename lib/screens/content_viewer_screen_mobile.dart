@@ -13,6 +13,7 @@ import '../utils/responsive_helper.dart';
 import '../utils/accessibility_helper.dart';
 import '../widgets/adaptive_container.dart';
 import '../utils/logger.dart';
+import '../utils/app_colors.dart';
 import '../utils/content_state_manager.dart';
 
 import '../models/content_model.dart';
@@ -76,7 +77,7 @@ class XfiniWatermark extends StatelessWidget {
                             style: const TextStyle(
                               fontSize: 28,
                               fontWeight: FontWeight.bold,
-                              color: Color(0xFF323483),
+                              color: AppColors.primary,
                             ),
                           ),
                         ),
@@ -1164,7 +1165,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                 bottom: 16,
                 right: 16,
                 child: FloatingActionButton(
-                  backgroundColor: const Color(0xFF323483),
+                  backgroundColor: AppColors.primary,
                   mini: true,
                   heroTag: "content_pdf_fullscreen_btn", // Unique hero tag
                   child: const Icon(Icons.fullscreen, color: Colors.white),
@@ -1251,7 +1252,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                     icon: const Icon(Icons.refresh),
                     label: const Text('Retry'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF323483),
+                      backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
                     ),
                     onPressed: () {
@@ -1393,7 +1394,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: const Row(
               children: [
-                Icon(Icons.lock, color: Color(0xFF323483)),
+                Icon(Icons.lock, color: AppColors.primary),
                 SizedBox(width: 8),
                 Text('Content Expired'),
               ],
@@ -1404,7 +1405,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK', style: TextStyle(color: Color(0xFF323483))),
+                child: Text('OK', style: TextStyle(color: AppColors.primary)),
               ),
             ],
           ),
@@ -1424,7 +1425,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Row(
             children: [
-              Icon(Icons.visibility_off, color: Color(0xFF323483)),
+              Icon(Icons.visibility_off, color: AppColors.primary),
               SizedBox(width: 8),
               Text('One-Time View'),
             ],
@@ -1439,7 +1440,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF323483),
+                backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
               ),
               onPressed: () => Navigator.of(ctx).pop(true),
@@ -1539,7 +1540,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Row(
             children: [
-              Icon(Icons.lock, color: Color(0xFF323483)),
+              Icon(Icons.lock, color: AppColors.primary),
               SizedBox(width: 8),
               Text('Content Expired'),
             ],
@@ -1550,7 +1551,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('OK', style: TextStyle(color: Color(0xFF323483))),
+              child: Text('OK', style: TextStyle(color: AppColors.primary)),
             ),
           ],
         ),
@@ -1566,7 +1567,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          CircularProgressIndicator(color: Color(0xFF323483)),
+          CircularProgressIndicator(color: AppColors.primary),
           SizedBox(height: 16),
           Text(
             'Verifying access…',
@@ -1588,13 +1589,13 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: const Color(0xFF323483).withOpacity(0.1),
+                color: AppColors.primary.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
                 Icons.lock,
                 size: 52,
-                color: Color(0xFF323483),
+                color: AppColors.primary,
               ),
             ),
             const SizedBox(height: 24),
@@ -1603,7 +1604,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
               style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF323483),
+                color: AppColors.primary,
               ),
             ),
             const SizedBox(height: 12),
@@ -1777,7 +1778,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                                     ResponsiveHelper.isTablet(context)
                                         ? 18
                                         : 16,
-                                color: const Color(0xFF323483),
+                                color: AppColors.primary,
                               ),
                             ),
                           ],
@@ -1815,7 +1816,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                               icon: const Icon(Icons.refresh),
                               label: const Text('Try Again'),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF323483),
+                                backgroundColor: AppColors.primary,
                                 foregroundColor: Colors.white,
                               ),
                             ),
@@ -1950,13 +1951,13 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: enabled
-              ? const Color(0xFF323483).withOpacity(0.1)
+              ? AppColors.primary.withValues(alpha: 0.1)
               : Colors.grey.withOpacity(0.1),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Icon(
           icon,
-          color: enabled ? const Color(0xFF323483) : Colors.grey[400],
+          color: enabled ? AppColors.primary : Colors.grey[400],
           size: 20,
         ),
       ),
@@ -1967,19 +1968,19 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
   Color _getColorForContentType(String type) {
     switch (type.toLowerCase()) {
       case 'video':
-        return const Color(0xFF1565C0); // Blue
+        return AppColors.primary; // Navy
       case 'pdf':
-        return const Color(0xFF29ACD6); // Light Blue (changed from purple)
+        return AppColors.secondary; // Teal
       case 'audio':
         return Colors.white; // White background (like link)
       case 'image':
         return const Color(0xFFE53935); // Red
       case 'link':
-        return const Color(0xFF1976D2); // Blue
+        return AppColors.primaryContainer; // Navy container
       case 'text':
-        return const Color(0xFF388E3C); // Green
+        return AppColors.secondary; // Teal
       default:
-        return const Color(0xFF323483); // Default brand color
+        return AppColors.primary; // Default brand color
     }
   }
 
@@ -2123,7 +2124,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF323483).withOpacity(0.05),
+                      color: AppColors.primary.withValues(alpha: 0.05),
                       borderRadius: const BorderRadius.only(
                         topLeft: Radius.circular(20),
                         topRight: Radius.circular(20),
@@ -2136,7 +2137,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                           style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
-                            color: const Color(0xFF323483),
+                            color: AppColors.primary,
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -2146,7 +2147,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                             vertical: 6,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF323483).withOpacity(0.1),
+                            color: AppColors.primary.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
@@ -2154,7 +2155,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                             style: GoogleFonts.inter(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: const Color(0xFF323483),
+                              color: AppColors.primary,
                             ),
                           ),
                         ),
@@ -2309,7 +2310,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                                   loadingProgress.expectedTotalBytes!
                               : null,
                           valueColor: const AlwaysStoppedAnimation<Color>(
-                            Color(0xFF323483),
+                            AppColors.primary,
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -2405,7 +2406,7 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: const Color(0xFF1976D2),
+          color: AppColors.primaryContainer,
           width: 1.5,
         ),
         boxShadow: [

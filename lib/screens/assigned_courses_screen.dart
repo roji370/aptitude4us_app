@@ -195,32 +195,24 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
     }
   }
 
-  // Modern course card with bottom-up badge from ValueNotifier
+  // Course card matching Stitch Screen 5 — white card with accent strip
   Widget _buildModernCourseCard(
     CourseModel course,
     BuildContext context,
     String userId,
     int index,
   ) {
-    // Alternate between blue and light blue gradients
-    final backgroundColor = index % 2 == 0
-        ? const Color(0xFF1565C0)
-        : const Color(0xFF29ACD6);
+    // Alternate accent colors: navy (primary) and teal (secondary)
+    final accentColor = index % 2 == 0
+        ? AppColors.primary
+        : AppColors.secondary;
 
-    // Dynamic font size calculation based on title length
-    double getTitleFontSize(String title) {
-      final length = title.length;
-      if (length <= 20) return 18.0;
-      if (length <= 40) return 16.0;
-      return 14.0;
-    }
+    // Icon per course type
+    final courseIcon = index % 2 == 0
+        ? Icons.medical_services_rounded
+        : Icons.monitor_heart_rounded;
 
-    // Dynamic card height based on title length
-    double getCardHeight(String title) {
-      final length = title.length;
-      if (length <= 40) return 130.0;
-      return 145.0;
-    }
+    final moduleCount = _moduleCounts[course.id] ?? 0;
 
     return ValueListenableBuilder<bool>(
       valueListenable: _updateService.courseBadgeNotifier(course.id),
@@ -239,118 +231,111 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
             });
           },
           child: Container(
-            height: getCardHeight(course.title),
-            margin: const EdgeInsets.only(bottom: 10),
+            margin: const EdgeInsets.only(bottom: 8),
             decoration: BoxDecoration(
-              color: backgroundColor,
-              borderRadius: BorderRadius.circular(16),
+              color: AppColors.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: backgroundColor.withOpacity(0.3),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
                 ),
               ],
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
               children: [
-                // Badge strip — always 26px tall, badge right-aligned when present
-                SizedBox(
-                  height: 26,
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: hasUpdate
-                          ? IgnorePointer(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 5.4,
-                                  vertical: 2.7,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange,
-                                  borderRadius: BorderRadius.circular(9),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.circle,
-                                      size: 5.4,
-                                      color: Colors.white,
-                                    ),
-                                    const SizedBox(width: 2.7),
-                                    Text(
-                                      'UPDATE',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 8.1,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-                    ),
+                // Accent strip
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: Container(
+                    width: 6,
+                    color: accentColor,
                   ),
                 ),
-                // Main content - horizontal layout
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(19, 2, 19, 14),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Icon
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceContainer,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          courseIcon,
+                          size: 18,
+                          color: accentColor,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Title & meta
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              course.title,
+                              style: GoogleFonts.inter(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.onSurface,
+                                letterSpacing: 0.14,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '$moduleCount Modules',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w400,
+                                color: AppColors.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Badge
+                      if (hasUpdate)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.secondaryContainer,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
+                              Icon(
+                                Icons.circle,
+                                size: 6,
+                                color: AppColors.onSecondaryContainer,
+                              ),
+                              const SizedBox(width: 4),
                               Text(
-                                'Course ${index + 1}',
+                                'Updated',
                                 style: GoogleFonts.inter(
-                                  fontSize: 12,
+                                  fontSize: 10,
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.white70,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Flexible(
-                                child: Text(
-                                  course.title,
-                                  style: GoogleFonts.inter(
-                                    fontSize: getTitleFontSize(course.title),
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                    height: 1.2,
-                                  ),
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                '${_moduleCounts[course.id] ?? 0} Module${(_moduleCounts[course.id] ?? 0) != 1 ? 's' : ''}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.white70,
+                                  color: AppColors.onSecondaryContainer,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        Icon(
-                          Icons.book_outlined,
-                          size: 50,
-                          color: Colors.white.withOpacity(0.3),
-                        ),
-                      ],
-                    ),
+                    ],
                   ),
                 ),
               ],
@@ -644,20 +629,20 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppColors.surface,
       body: ProtectedCourseContent(
         contentTitle: 'Course Library',
         showLoadingSpinner: false,
         child: _isLoading
             ? Container(
-                color: const Color(0xFFF5F5F5),
-                child: const Center(
+                color: AppColors.surface,
+                child: Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Loading courses...'),
+                      const CircularProgressIndicator(color: AppColors.secondary),
+                      const SizedBox(height: 16),
+                      Text('Loading courses...', style: GoogleFonts.inter(color: AppColors.onSurfaceVariant)),
                     ],
                   ),
                 ),
@@ -713,7 +698,7 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
     ][now.month - 1];
 
     return Container(
-      color: const Color(0xFFF5F5F5),
+      color: AppColors.surface,
       child: GestureDetector(
         onTap: () {
           // Dismiss keyboard when tapping outside
@@ -724,8 +709,8 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
           children: [
             // Header Section
             Container(
-              color: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+              color: AppColors.surface,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -736,30 +721,43 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                       // Logo
                       Row(
                         children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.asset(
-                                'assets/images/xfini_logo.png',
-                                width: 40,
-                                height: 40,
-                                fit: BoxFit.cover,
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.asset(
+                              'assets/logo.png',
+                              width: 32,
+                              height: 32,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => Container(
+                                width: 32,
+                                height: 32,
+                                color: AppColors.surfaceContainerLow,
+                                child: const Icon(Icons.school_rounded, size: 20, color: AppColors.primary),
                               ),
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'XFINI ACADEMY',
-                            style: GoogleFonts.inter(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.black87,
-                            ),
+                          const SizedBox(width: 8),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'APTITUDE 4 US',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.secondary,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                              Text(
+                                'Home',
+                                style: GoogleFonts.inter(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -817,72 +815,60 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                   // Date and Greeting Row
                   Row(
                     children: [
-                      Icon(
-                        Icons.wb_sunny_outlined,
-                        size: 16,
-                        color: Colors.grey[600],
+                      Row(
+                        children: [
+                          Text(
+                            'Hi, $firstName',
+                            style: GoogleFonts.inter(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.onSurface,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Text('👋', style: TextStyle(fontSize: 16)),
+                        ],
                       ),
-                      const SizedBox(width: 8),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.calendar_today_rounded,
+                        size: 14,
+                        color: AppColors.secondary,
+                      ),
+                      const SizedBox(width: 4),
                       Text(
                         '$weekday $day $month',
                         style: GoogleFonts.inter(
                           fontSize: 12,
-                          color: Colors.grey[600],
-                          fontWeight: FontWeight.w500,
+                          color: AppColors.onSurfaceVariant,
+                          fontWeight: FontWeight.w400,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 12),
                   // Greeting and Refresh
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'Hi, $firstName',
-                        style: GoogleFonts.inter(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: const Color(0xFF4A90E2),
-                            width: 1.5,
-                          ),
+                      const SizedBox(),
+                      Material(
+                        color: AppColors.surfaceContainerLow,
+                        borderRadius: BorderRadius.circular(20),
+                        child: InkWell(
+                          onTap: _refreshAccountData,
                           borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: _refreshAccountData,
-                            borderRadius: BorderRadius.circular(20),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.refresh,
-                                    size: 16,
-                                    color: const Color(0xFF4A90E2),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    'Refresh',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: const Color(0xFF4A90E2),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(10),
+                            child: Icon(
+                              Icons.sync_rounded,
+                              size: 20,
+                              color: AppColors.onSurfaceVariant,
                             ),
                           ),
                         ),
@@ -891,79 +877,63 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                   ),
                   const SizedBox(height: 14),
                   // Search Bar
-                  Container(
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.03),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
+                  TextField(
+                    controller: _searchController,
+                    onChanged: (value) {
+                      setState(() {
+                        _searchQuery = value.toLowerCase();
+                      });
+                    },
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: AppColors.onSurface,
                     ),
-                    child: TextField(
-                      controller: _searchController,
-                      onChanged: (value) {
-                        setState(() {
-                          _searchQuery = value.toLowerCase();
-                        });
-                      },
-                      decoration: InputDecoration(
-                        hintText: 'Search courses',
-                        hintStyle: GoogleFonts.inter(
-                          fontSize: 15,
-                          color: Colors.grey[400],
+                    decoration: InputDecoration(
+                      hintText: 'Search courses, modules, OSCE...',
+                      hintStyle: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: AppColors.outline,
+                      ),
+                      prefixIcon: const Icon(
+                        Icons.search_rounded,
+                        color: AppColors.onSurfaceVariant,
+                        size: 20,
+                      ),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(
+                                Icons.clear_rounded,
+                                color: AppColors.onSurfaceVariant,
+                                size: 20,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _searchController.clear();
+                                  _searchQuery = '';
+                                });
+                              },
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: AppColors.surfaceContainerLowest,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: AppColors.primaryContainer,
+                          width: 1.5,
                         ),
-                        prefixIcon: Icon(
-                          Icons.search,
-                          color: Colors.grey[400],
-                          size: 20,
-                        ),
-                        suffixIcon: _searchQuery.isNotEmpty
-                            ? IconButton(
-                                icon: Icon(
-                                  Icons.clear,
-                                  color: Colors.grey[400],
-                                  size: 20,
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _searchController.clear();
-                                    _searchQuery = '';
-                                  });
-                                },
-                              )
-                            : null,
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide(
-                            color: Colors.grey[300]!,
-                            width: 1,
-                          ),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide(
-                            color: const Color(0xFF4A90E2),
-                            width: 2,
-                          ),
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide(
-                            color: Colors.grey[300]!,
-                            width: 1,
-                          ),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 12,
-                        ),
-                        filled: true,
-                        fillColor: Colors.transparent,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
                       ),
                     ),
                   ),
@@ -979,13 +949,48 @@ class _AssignedCoursesScreenState extends State<AssignedCoursesScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const SizedBox(height: 12),
-                    Text(
-                      'Your Courses',
-                      style: GoogleFonts.inter(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
-                      ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Your Courses',
+                          style: GoogleFonts.inter(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.onSurface,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.secondaryContainer,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: AppColors.secondary,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                '${filteredCourses.length} Enrolled',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.onSecondaryContainer,
+                                  letterSpacing: 0.24,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 10),
                     // Courses List

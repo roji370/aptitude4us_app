@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/apk_download_service.dart';
+import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 
 /// Download state for the in-app APK update flow.
@@ -171,7 +172,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
           child: CircularProgressIndicator(
             value: _downloadProgress > 0 ? _downloadProgress : null,
             strokeWidth: 2.5,
-            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF323483)),
+            valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
           ),
         );
       case _UpdateState.downloaded:
@@ -181,7 +182,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
           height: 24,
           child: CircularProgressIndicator(
             strokeWidth: 2.5,
-            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF323483)),
+            valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
           ),
         );
       case _UpdateState.error:
@@ -227,8 +228,8 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF323483),
-              Color(0xFF4A4BA8),
+              AppColors.primary,
+              AppColors.primaryContainer,
             ],
           ),
         ),
@@ -255,7 +256,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
                   child: const Icon(
                     Icons.system_update_alt_rounded,
                     size: 80,
-                    color: Color(0xFF323483),
+                    color: AppColors.primary,
                   ),
                 ),
 
@@ -413,7 +414,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
                     onPressed: _isButtonBusy ? null : _handleUpdate,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
-                      foregroundColor: const Color(0xFF323483),
+                      foregroundColor: AppColors.primary,
                       disabledBackgroundColor: Colors.white.withValues(alpha: 0.5),
                       elevation: 8,
                       shadowColor: Colors.black.withValues(alpha: 0.3),

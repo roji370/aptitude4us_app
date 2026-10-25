@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'assigned_courses_screen.dart';
-import 'mock_tests_home_page.dart';
 import 'profile_screen.dart';
 import '../widgets/custom_bottom_navigation.dart';
 import '../utils/tab_notifier.dart';
@@ -23,7 +22,6 @@ class _MainScreenState extends State<MainScreen> {
   // Keep screens alive using keys
   final List<Widget> _screens = const [
     AssignedCoursesScreen(),
-    MockTestsHomePage(),
     ProfileScreen(),
   ];
 

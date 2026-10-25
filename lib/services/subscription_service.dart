@@ -11,108 +11,152 @@ class SubscriptionService {
   static final Map<String, _CachedSubscriptionData> _subscriptionCache = {};
   static const Duration _cacheTimeout = Duration(minutes: 5);
 
-  /// Get all subscriptions for a specific user
+  /// Get all subscriptions for a specific user.
+  ///
+  /// When [forceRefresh] is true, attempts a server-only read first.
+  /// If the server read fails (common on Android cold start when Firestore's
+  /// gRPC channel isn't established yet), falls back to a cache read, then
+  /// to the in-memory cache. If all sources fail, rethrows so the caller
+  /// (SessionProvider) can handle it without overwriting the optimistic default.
   Future<List<Map<String, dynamic>>> getUserSubscriptions(
     String userId, {
     bool forceRefresh = false,
   }) async {
-    try {
-      // Check cache first if not forcing refresh
-      if (!forceRefresh && _subscriptionCache.containsKey(userId)) {
-        final cachedData = _subscriptionCache[userId]!;
-        if (DateTime.now().difference(cachedData.timestamp) < _cacheTimeout) {
-          Logger.i(
-            '📋 Using cached subscriptions for user: $userId (${cachedData.subscriptions.length} subscriptions)',
-          );
-          return cachedData.subscriptions;
+    // Check in-memory cache first if not forcing refresh
+    if (!forceRefresh && _subscriptionCache.containsKey(userId)) {
+      final cachedData = _subscriptionCache[userId]!;
+      if (DateTime.now().difference(cachedData.timestamp) < _cacheTimeout) {
+        Logger.i(
+          '📋 Using cached subscriptions for user: $userId (${cachedData.subscriptions.length} subscriptions)',
+        );
+        return cachedData.subscriptions;
+      }
+    }
+
+    Logger.i(
+      '📋 Fetching subscriptions for user: $userId (forceRefresh: $forceRefresh)',
+    );
+
+    QuerySnapshot<Map<String, dynamic>>? querySnapshot;
+
+    if (forceRefresh) {
+      // Try server first; fall back to Firestore cache on failure
+      // (Android cold start: gRPC channel may not be ready yet)
+      try {
+        querySnapshot = await _firestore
+            .collection('subscriptions')
+            .where('userId', isEqualTo: userId)
+            .get(const GetOptions(source: Source.server));
+      } catch (serverError) {
+        Logger.w(
+          '⚠️ Server fetch failed, falling back to Firestore cache: $serverError',
+        );
+        try {
+          querySnapshot = await _firestore
+              .collection('subscriptions')
+              .where('userId', isEqualTo: userId)
+              .get(const GetOptions(source: Source.cache));
+          Logger.i('📋 Successfully read subscriptions from Firestore cache');
+        } catch (cacheError) {
+          Logger.e('❌ Firestore cache also failed: $cacheError');
+          // Last resort: return in-memory cache if available
+          if (_subscriptionCache.containsKey(userId)) {
+            Logger.i('📋 Using stale in-memory cache as last resort');
+            return _subscriptionCache[userId]!.subscriptions;
+          }
+          // Nothing available — rethrow so SessionProvider keeps
+          // the optimistic default instead of treating this as "no subscription"
+          rethrow;
         }
       }
-
-      Logger.i(
-        '📋 Fetching subscriptions for user: $userId (forceRefresh: $forceRefresh)',
-      );
-
-      final querySnapshot = await _firestore
-          .collection('subscriptions')
-          .where('userId', isEqualTo: userId)
-          .get(forceRefresh ? const GetOptions(source: Source.server) : null);
-
-      final subscriptions = <Map<String, dynamic>>[];
-
-      for (final doc in querySnapshot.docs) {
-        final data = doc.data();
-        final endDate = (data['endDate'] as Timestamp?)?.toDate() ?? DateTime.now();
-        final examDate = (data['examDate'] as Timestamp?)?.toDate();
-        // Prefer the admin-written denormalized effectiveEndDate (which uses
-        // end-of-day for examDate). Fall back to local compute for legacy docs
-        // that have not been backfilled yet.
-        final adminEffective = (data['effectiveEndDate'] as Timestamp?)?.toDate();
-        final effectiveEndDate = adminEffective ??
-            ((examDate != null && examDate.isBefore(endDate))
-                ? DateTime(examDate.year, examDate.month, examDate.day, 23, 59, 59, 999)
-                : endDate);
-        
-        subscriptions.add({
-          'id': doc.id,
-          ...data,
-          'startDate':
-              (data['startDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
-          'endDate': endDate,
-          'examDate': examDate,
-          'effectiveEndDate': effectiveEndDate,
-        });
+    } else {
+      // Default: Firestore decides server vs cache
+      try {
+        querySnapshot = await _firestore
+            .collection('subscriptions')
+            .where('userId', isEqualTo: userId)
+            .get();
+      } catch (error) {
+        Logger.e('❌ Error fetching user subscriptions: $error');
+        // Return in-memory cache if available, otherwise rethrow
+        if (_subscriptionCache.containsKey(userId)) {
+          return _subscriptionCache[userId]!.subscriptions;
+        }
+        rethrow;
       }
-
-      // Cache the result
-      _subscriptionCache[userId] = _CachedSubscriptionData(
-        subscriptions: subscriptions,
-        timestamp: DateTime.now(),
-      );
-
-      Logger.i(
-        '📋 Found ${subscriptions.length} subscriptions for user $userId',
-      );
-      return subscriptions;
-    } catch (error) {
-      Logger.e('❌ Error fetching user subscriptions: $error');
-      return [];
     }
+
+    final subscriptions = <Map<String, dynamic>>[];
+
+    for (final doc in querySnapshot.docs) {
+      final data = doc.data();
+      final endDate = (data['endDate'] as Timestamp?)?.toDate() ?? DateTime.now();
+      final examDate = (data['examDate'] as Timestamp?)?.toDate();
+      // Prefer the admin-written denormalized effectiveEndDate (which uses
+      // end-of-day for examDate). Fall back to local compute for legacy docs
+      // that have not been backfilled yet.
+      final adminEffective = (data['effectiveEndDate'] as Timestamp?)?.toDate();
+      final effectiveEndDate = adminEffective ??
+          ((examDate != null && examDate.isBefore(endDate))
+              ? DateTime(examDate.year, examDate.month, examDate.day, 23, 59, 59, 999)
+              : endDate);
+      
+      subscriptions.add({
+        'id': doc.id,
+        ...data,
+        'startDate':
+            (data['startDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        'endDate': endDate,
+        'examDate': examDate,
+        'effectiveEndDate': effectiveEndDate,
+      });
+    }
+
+    // Cache the result
+    _subscriptionCache[userId] = _CachedSubscriptionData(
+      subscriptions: subscriptions,
+      timestamp: DateTime.now(),
+    );
+
+    Logger.i(
+      '📋 Found ${subscriptions.length} subscriptions for user $userId',
+    );
+    return subscriptions;
   }
 
-  /// Check if user has at least one active subscription
+  /// Check if user has at least one active subscription.
+  ///
+  /// Propagates exceptions from [getUserSubscriptions] so that callers
+  /// (e.g. SessionProvider) can distinguish "no subscription" from
+  /// "couldn't reach any data source" and handle them differently.
   Future<bool> checkUserActiveSubscription(
     String userId, {
     bool forceRefresh = false,
   }) async {
-    try {
-      Logger.i(
-        '🔍 Checking active subscription for user: $userId (forceRefresh: $forceRefresh)',
-      );
+    Logger.i(
+      '🔍 Checking active subscription for user: $userId (forceRefresh: $forceRefresh)',
+    );
 
-      final subscriptions = await getUserSubscriptions(
-        userId,
-        forceRefresh: forceRefresh,
-      );
+    final subscriptions = await getUserSubscriptions(
+      userId,
+      forceRefresh: forceRefresh,
+    );
 
-      // Check if user has at least one active subscription
-      final hasActiveSubscription = subscriptions.any((subscription) {
-        final status = subscription['status'] as String?;
-        // Use effectiveEndDate which already accounts for exam date
-        final effectiveEndDate = subscription['effectiveEndDate'] as DateTime?;
+    // Check if user has at least one active subscription
+    final hasActiveSubscription = subscriptions.any((subscription) {
+      final status = subscription['status'] as String?;
+      // Use effectiveEndDate which already accounts for exam date
+      final effectiveEndDate = subscription['effectiveEndDate'] as DateTime?;
 
-        return status == 'active' &&
-            effectiveEndDate != null &&
-            effectiveEndDate.isAfter(DateTime.now());
-      });
+      return status == 'active' &&
+          effectiveEndDate != null &&
+          effectiveEndDate.isAfter(DateTime.now());
+    });
 
-      Logger.i(
-        '🔍 User $userId has active subscription: $hasActiveSubscription',
-      );
-      return hasActiveSubscription;
-    } catch (error) {
-      Logger.e('❌ Error checking user active subscription: $error');
-      return false;
-    }
+    Logger.i(
+      '🔍 User $userId has active subscription: $hasActiveSubscription',
+    );
+    return hasActiveSubscription;
   }
 
   /// Check if user has access to a specific course (combines assignment + subscription check)

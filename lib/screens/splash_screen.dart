@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -12,6 +13,7 @@ import '../services/subscription_service.dart';
 import '../providers/session_provider.dart';
 import '../services/version_check_service.dart';
 import '../utils/accessibility_helper.dart';
+import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
 import 'login_screen.dart';
@@ -76,17 +78,17 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   void _configureStatusBar() {
-    // Configure status bar for splash screen
+    // Configure status bar for the new light-surface splash design
     if (ResponsiveHelper.isIOS()) {
       AccessibilityHelper.configureSystemUI(
-        statusBarColor: const Color(0xFF1A237E),
-        statusBarIconBrightness: Brightness.light,
+        statusBarColor: AppColors.surface,
+        statusBarIconBrightness: Brightness.dark,
       );
     } else {
       SystemChrome.setSystemUIOverlayStyle(
         const SystemUiOverlayStyle(
-          statusBarColor: Color(0xFF1A237E),
-          statusBarIconBrightness: Brightness.light,
+          statusBarColor: AppColors.surface,
+          statusBarIconBrightness: Brightness.dark,
         ),
       );
     }
@@ -446,19 +448,31 @@ class _SplashScreenState extends State<SplashScreen>
           // Initialize session provider with the authenticated user
           if (mounted) {
             try {
+              Logger.w("🔧 DIAG: About to call sessionProvider.initialize($userId)");
               final sessionProvider = Provider.of<SessionProvider>(
                 context,
                 listen: false,
               );
+              Logger.w("🔧 DIAG: SessionProvider obtained — hasCheckedOnce=${sessionProvider.hasCheckedOnce}, hasActive=${sessionProvider.hasActiveSubscription}");
               await sessionProvider.initialize(userId);
+              Logger.w("🔧 DIAG: initialize() COMPLETED — hasCheckedOnce=${sessionProvider.hasCheckedOnce}, hasActive=${sessionProvider.hasActiveSubscription}");
             } catch (e) {
-              Logger.e("Error initializing session provider (non-fatal): $e");
+              Logger.e("🔧 DIAG: initialize() THREW: $e");
             }
+          } else {
+            Logger.w("🔧 DIAG: NOT mounted before initialize — skipped!");
           }
 
           if (mounted && !_hasNavigated) {
+            final sessionProvider = Provider.of<SessionProvider>(
+              context,
+              listen: false,
+            );
+            Logger.w("🔧 DIAG: About to navigate home — hasCheckedOnce=${sessionProvider.hasCheckedOnce}, hasActive=${sessionProvider.hasActiveSubscription}, gen=${sessionProvider.dataGeneration}");
             innerTimeout.cancel();
             _navigateToHome();
+          } else {
+            Logger.w("🔧 DIAG: Skipping _navigateToHome — mounted=$mounted, _hasNavigated=$_hasNavigated");
           }
           return;
         }
@@ -863,157 +877,181 @@ class _SplashScreenState extends State<SplashScreen>
     // All heavy initialization is deferred to post-frame callback in initState
 
     return Scaffold(
-      backgroundColor: const Color(0xFF1A237E), // Deep blue background
+      backgroundColor: AppColors.surface,
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: Color(0xFF1A237E),
-          statusBarIconBrightness: Brightness.light,
+          statusBarColor: AppColors.surface,
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
         ),
       ),
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF1A237E), // Deep blue
-              Color(0xFF3F51B5), // Slightly lighter blue
-            ],
-          ),
-        ),
+        color: AppColors.surface,
         child: SafeArea(
           child: FadeTransition(
             opacity: _fadeAnimation,
-            child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 32),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // App Logo/Text - matches native splash branding
-                  Text(
-                    'XFINI',
-                    style: TextStyle(
-                      fontFamily: 'Poppins',
-                      fontSize: ResponsiveHelper.adaptiveFontSize(
-                        context,
-                        48.0,
+                  // ── Top: Accreditation status ──────────────────────
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: AppColors.secondary,
+                          shape: BoxShape.circle,
+                        ),
                       ),
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
-                      letterSpacing: 2.0,
-                      shadows: [
-                        Shadow(
-                          offset: const Offset(0, 2),
-                          blurRadius: 4,
-                          color: Colors.black.withValues(alpha: 0.3),
+                    ],
+                  ),
+
+                  // ── Center: Brand identity ────────────────────────
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Logo circle
+                      Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceContainerLowest,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.06),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-
-                  SizedBox(
-                    height: ResponsiveHelper.getAdaptiveSpacing(
-                      context,
-                      compact: 16.0,
-                      regular: 20.0,
-                      pro: 24.0,
-                      large: 28.0,
-                      extraLarge: 32.0,
-                    ),
-                  ),
-
-                  // Subtitle - enhanced for better readability
-                  Text(
-                    'Academy',
-                    style: TextStyle(
-                      fontFamily: 'Poppins',
-                      fontSize: ResponsiveHelper.adaptiveFontSize(
-                        context,
-                        18.0,
+                        padding: const EdgeInsets.all(8),
+                        child: Image.asset(
+                          'assets/logo.png',
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => Icon(
+                            Icons.school_rounded,
+                            size: 48,
+                            color: AppColors.primary,
+                          ),
+                        ),
                       ),
-                      fontWeight: FontWeight.w400,
-                      color: Colors.white.withValues(alpha: 0.95),
-                      letterSpacing: 1.5,
-                      shadows: [
-                        Shadow(
-                          offset: const Offset(0, 1),
-                          blurRadius: 2,
-                          color: Colors.black.withValues(alpha: 0.2),
+                      const SizedBox(height: 24),
+
+                      // App title
+                      Text(
+                        'APTITUDE 4 US',
+                        style: GoogleFonts.inter(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2,
+                          color: AppColors.primary,
+                          height: 32 / 24,
                         ),
-                      ],
-                    ),
-                  ),
+                      ),
+                      const SizedBox(height: 4),
 
-                  SizedBox(
-                    height: ResponsiveHelper.getAdaptiveSpacing(
-                      context,
-                      compact: 40.0,
-                      regular: 50.0,
-                      pro: 55.0,
-                      large: 60.0,
-                      extraLarge: 70.0,
-                    ),
-                  ),
-
-                  // Loading indicator
-                  if (!_isNavigating)
-                    Column(
-                      children: [
-                        SizedBox(
-                          width: ResponsiveHelper.adaptiveFontSize(
-                            context,
-                            32.0,
-                          ),
-                          height: ResponsiveHelper.adaptiveFontSize(
-                            context,
-                            32.0,
-                          ),
-                          child: CircularProgressIndicator(
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              Colors.white.withValues(alpha: 0.8),
-                            ),
-                            strokeWidth: 3.0,
-                          ),
+                      // Subtitle
+                      Text(
+                        'Nursing Education & Exam Preparation',
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w400,
+                          color: AppColors.onSurfaceVariant,
+                          height: 20 / 14,
                         ),
+                      ),
+                      const SizedBox(height: 32),
 
-                        SizedBox(
-                          height: ResponsiveHelper.getAdaptiveSpacing(
-                            context,
-                            compact: 16.0,
-                            regular: 20.0,
-                            pro: 24.0,
-                            large: 28.0,
-                            extraLarge: 32.0,
-                          ),
-                        ),
-
-                        // Loading text - enhanced visibility
-                        Text(
-                          _loadingText,
-                          style: TextStyle(
-                            fontFamily: 'Poppins',
-                            fontSize: ResponsiveHelper.adaptiveFontSize(
-                              context,
-                              14.0,
-                            ),
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white.withValues(alpha: 0.9),
-                            letterSpacing: 0.5,
-                            shadows: [
-                              Shadow(
-                                offset: const Offset(0, 1),
-                                blurRadius: 2,
-                                color: Colors.black.withValues(alpha: 0.3),
+                      // Progress indicator
+                      if (!_isNavigating)
+                        Column(
+                          children: [
+                            SizedBox(
+                              width: 180,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  minHeight: 4,
+                                  backgroundColor: AppColors.surfaceContainer,
+                                  valueColor: const AlwaysStoppedAnimation<Color>(
+                                    AppColors.secondary,
+                                  ),
+                                ),
                               ),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              _loadingText,
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w400,
+                                color: AppColors.onSurfaceVariant,
+                                height: 18 / 12,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                    ],
+                  ),
+
+                  // ── Footer: Version & Copyright ───────────────────
+                  Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'v1.2.4',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.onSurfaceVariant,
+                              letterSpacing: 0.33,
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Text(
+                              '•',
+                              style: TextStyle(
+                                color: AppColors.outlineVariant,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            'Aptitude 4 Us',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.onSurfaceVariant,
+                              letterSpacing: 0.33,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '© 2024 Aptitude 4 Us. All rights reserved.',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w400,
+                          color: AppColors.outline,
+                          height: 18 / 12,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -1023,3 +1061,4 @@ class _SplashScreenState extends State<SplashScreen>
     );
   }
 }
+

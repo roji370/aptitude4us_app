@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../utils/app_colors.dart';
-import '../utils/responsive_helper.dart';
 import '../utils/tab_notifier.dart';
 
+/// Bottom navigation bar matching the Stitch "Aptitude 4 Us" design system.
+///
+/// Uses a frosted surface with a subtle top border and secondary (teal)
+/// highlight for the active tab, matching screen 5 (Home Dashboard).
 class CustomBottomNavigation extends StatelessWidget {
   final int selectedIndex;
   final Function(int) onTap;
@@ -17,48 +20,47 @@ class CustomBottomNavigation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(28, 20, 28, 20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1565C0),
-        borderRadius: BorderRadius.circular(30),
+        color: AppColors.surfaceContainerLowest.withValues(alpha: 0.92),
+        border: const Border(
+          top: BorderSide(
+            color: AppColors.outlineVariant,
+            width: 0.5,
+          ),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.blue.withOpacity(0.3),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
+            color: const Color(0xFF0F2537).withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _buildNavItem(
-              context: context,
-              icon: Icons.home_outlined,
-              selectedIcon: Icons.home,
-              label: 'Home',
-              index: 0,
-              isSelected: selectedIndex == 0,
-            ),
-            _buildNavItem(
-              context: context,
-              icon: Icons.quiz_outlined,
-              selectedIcon: Icons.quiz,
-              label: 'Mock Tests',
-              index: 1,
-              isSelected: selectedIndex == 1,
-            ),
-            _buildNavItem(
-              context: context,
-              icon: Icons.person_outline,
-              selectedIcon: Icons.person,
-              label: 'Profile',
-              index: 2,
-              isSelected: selectedIndex == 2,
-            ),
-          ],
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildNavItem(
+                context: context,
+                icon: Icons.home_outlined,
+                selectedIcon: Icons.home_rounded,
+                label: 'Home',
+                index: 0,
+                isSelected: selectedIndex == 0,
+              ),
+              _buildNavItem(
+                context: context,
+                icon: Icons.person_outline_rounded,
+                selectedIcon: Icons.person_rounded,
+                label: 'Profile',
+                index: 1,
+                isSelected: selectedIndex == 1,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -72,10 +74,14 @@ class CustomBottomNavigation extends StatelessWidget {
     required int index,
     required bool isSelected,
   }) {
+    final Color activeColor = AppColors.secondary;
+    final Color inactiveColor = AppColors.onSurfaceVariant;
+
     return GestureDetector(
       onTap: () => onTap(index),
+      behavior: HitTestBehavior.opaque,
       child: Container(
-        color: Colors.transparent,
+        constraints: const BoxConstraints(minWidth: 64),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -83,16 +89,17 @@ class CustomBottomNavigation extends StatelessWidget {
           children: [
             Icon(
               isSelected ? selectedIcon : icon,
-              color: Colors.white,
+              color: isSelected ? activeColor : inactiveColor,
               size: 24,
             ),
             const SizedBox(height: 4),
             Text(
               label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
+              style: GoogleFonts.inter(
+                color: isSelected ? activeColor : inactiveColor,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                letterSpacing: 0.24,
               ),
             ),
           ],

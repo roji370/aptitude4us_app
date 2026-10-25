@@ -7,6 +7,7 @@ import '../models/course_model.dart';
 import '../models/module_model.dart';
 import '../services/content_update_service.dart';
 import '../services/firestore_service.dart';
+import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import '../utils/route_transitions.dart';
 import '../widgets/custom_bottom_navigation.dart';
@@ -151,35 +152,7 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
   }
 
   Color _getColorForIndex(int index) {
-    // Alternate between blue and light blue
-    return index % 2 == 0
-        ? const Color(0xFF1565C0)
-        : const Color(0xFF29ACD6);
-  }
-
-  String _getContentDuration(ContentModel content) {
-    if (content.contentType == 'video' && content.duration != null) {
-      final duration = Duration(seconds: content.duration!.toInt());
-      final minutes = duration.inMinutes;
-      final seconds = duration.inSeconds % 60;
-      return '$minutes:${seconds.toString().padLeft(2, '0')}';
-    }
-    return '';
-  }
-
-  // Dynamic font size calculation based on title length
-  double _getTitleFontSize(String title) {
-    final length = title.length;
-    if (length <= 20) return 18.0; // Short titles - normal size
-    if (length <= 40) return 16.0; // Medium titles - slightly smaller
-    return 14.0; // Long titles - smallest
-  }
-
-  // Dynamic card height based on title length
-  double _getCardHeight(String title) {
-    final length = title.length;
-    if (length <= 40) return 130.0; // Normal height for short/medium titles
-    return 145.0; // Taller for long titles
+    return index % 2 == 0 ? AppColors.primary : AppColors.secondary;
   }
 
   /// Whether this content item should show an UPDATE badge.
@@ -208,28 +181,29 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
         }
       },
       child: Scaffold(
-        backgroundColor: Colors.grey[50],
+        backgroundColor: AppColors.surface,
         appBar: AppBar(
-          backgroundColor: Colors.grey[50],
+          backgroundColor: AppColors.surface,
           elevation: 0,
+          surfaceTintColor: Colors.transparent,
           leading: widget.isExamOverviewMode
             ? null
             : IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.black),
+                icon: const Icon(Icons.arrow_back_rounded, color: AppColors.onSurface),
                 onPressed: () => Navigator.of(context).pop(),
               ),
           title: Text(
             widget.module.title,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: AppColors.primary,
             ),
           ),
         ),
       body: _isLoading
           ? const Center(
-              child: CircularProgressIndicator(),
+              child: CircularProgressIndicator(color: AppColors.secondary),
             )
           : _errorMessage != null
               ? Center(
@@ -261,7 +235,7 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
                         ElevatedButton(
                           onPressed: _loadContent,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1565C0),
+                            backgroundColor: AppColors.primary,
                             foregroundColor: Colors.white,
                           ),
                           child: const Text('Retry'),
@@ -305,10 +279,10 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
                                 // Header
                                 Text(
                                   widget.displayName,
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.onSurface,
                                   ),
                                 ),
                                 const SizedBox(height: 16),
@@ -348,23 +322,22 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
     );
   }
 
-  /// Build a content item card with an optional "UPDATE" badge.
+  /// Build a content item card — Stitch accent strip design.
   Widget _buildContentItemCard({
     required ContentModel content,
     required int index,
     required Color backgroundColor,
   }) {
     final showBadge = _hasUpdateBadge(content);
+    final icon = _getIconForContent(content);
 
     return GestureDetector(
       onTap: () {
-        // Optimistic: mark item as seen instantly in memory.
         _updateService.markItemSeen(content.id);
         if (showBadge) {
-          setState(() {}); // rebuild to hide badge
+          setState(() {});
         }
 
-        // Navigate to the viewer
         AppNavigator.navigateTo(
           context: context,
           page: ContentViewerScreen(
@@ -376,7 +349,6 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
             isExamOverviewMode: widget.isExamOverviewMode,
           ),
         ).then((_) async {
-          // Persist the seen state in SharedPreferences + Firestore
           if (_currentUserId != null) {
             await _updateService
                 .persistItemSeen(
@@ -387,117 +359,107 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
                   _currentUserId!,
                 )
                 .catchError(
-                  (e) => Logger.w('Failed to persist item as seen: $e'),
+                  (e) => Logger.w('Failed to persist item as seen: \$e'),
                 );
           }
-          // Refresh unseen IDs to update all cards
           await _refreshUnseenIds();
         });
       },
       child: Container(
         width: double.infinity,
-        height: _getCardHeight(content.title),
         decoration: BoxDecoration(
-          color: backgroundColor,
-          borderRadius: BorderRadius.circular(16),
+          color: AppColors.surfaceContainerLowest,
+          borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: backgroundColor.withOpacity(0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
             ),
           ],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
           children: [
-            // Badge strip — always 28px tall, badge right-aligned when present
-            SizedBox(
-              height: 28,
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 10),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // One-time view lock badge
-                      if (content.isOneTimeView)
-                        Container(
-                          margin: const EdgeInsets.only(right: 4),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7.2,
-                            vertical: 3.6,
+            Positioned(
+              left: 0, top: 0, bottom: 0,
+              child: Container(width: 6, color: backgroundColor),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(icon, size: 20, color: backgroundColor),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          content.title,
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.onSurface,
+                            letterSpacing: 0.14,
                           ),
-                          decoration: BoxDecoration(
-                            color: Colors.amber[700],
-                            borderRadius: BorderRadius.circular(10.8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.lock, size: 8, color: Colors.white),
-                              const SizedBox(width: 3),
-                              Text(
-                                'ONE-TIME',
-                                style: GoogleFonts.inter(
-                                  fontSize: 8.1,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '#${index + 1}',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w400,
+                            color: AppColors.onSurfaceVariant,
                           ),
                         ),
-                      // UPDATE badge
-                      if (showBadge)
-                        _buildUpdateBadgePill(),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ),
-            ),
-            // Main content
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
+                  // One-time-view pill
+                  if (content.isOneTimeView)
+                    Container(
+                      margin: const EdgeInsets.only(right: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.errorContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
+                          Icon(Icons.lock_rounded, size: 10, color: AppColors.error),
+                          const SizedBox(width: 3),
                           Text(
-                            '#${index + 1}',
-                            style: const TextStyle(
-                              fontSize: 14,
+                            '1×',
+                            style: GoogleFonts.inter(
+                              fontSize: 10,
                               fontWeight: FontWeight.w600,
-                              color: Colors.white70,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Flexible(
-                            child: Text(
-                              content.title,
-                              style: TextStyle(
-                                fontSize: _getTitleFontSize(content.title),
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                                height: 1.2,
-                              ),
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
+                              color: AppColors.error,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    _buildContentIcon(widget.contentType),
-                  ],
-                ),
+                  // Update badge
+                  if (showBadge) _buildUpdateBadgePill(),
+                  const SizedBox(width: 4),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: AppColors.outline,
+                    size: 20,
+                  ),
+                ],
               ),
             ),
           ],
@@ -506,143 +468,28 @@ class _ContentByTypeScreenState extends State<ContentByTypeScreen> {
     );
   }
 
-  /// The standard "UPDATE" badge pill used across all card levels.
+  /// Teal update badge pill.
   Widget _buildUpdateBadgePill() {
-    return IgnorePointer(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7.2, vertical: 3.6),
-        decoration: BoxDecoration(
-          color: Colors.orange,
-          borderRadius: BorderRadius.circular(10.8),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.circle, size: 5.4, color: Colors.white),
-            const SizedBox(width: 3.6),
-            Text(
-              'UPDATE',
-              style: GoogleFonts.inter(
-                fontSize: 8.1,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Build the icon container for content cards
-  Widget _buildContentIcon(String contentType) {
-    switch (contentType.toLowerCase()) {
-      case 'video':
-        return _buildVideoIcon();
-      case 'pdf':
-        return _buildPdfIcon();
-      case 'image':
-        return _buildImageIcon();
-      default:
-        return _buildDefaultIcon();
-    }
-  }
-
-  /// Build video icon with stacked lines and play button
-  Widget _buildVideoIcon() {
     return Container(
-      width: 60,
-      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.white, width: 2.5),
-        borderRadius: BorderRadius.circular(8),
+        color: AppColors.secondaryContainer,
+        borderRadius: BorderRadius.circular(20),
       ),
-      child: Stack(
-        alignment: Alignment.center,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Multiple layers to create the stacked effect
-          Positioned(
-            top: 8,
-            child: Container(
-              width: 45,
-              height: 2,
-              color: Colors.white,
+          const Icon(Icons.circle, size: 6, color: AppColors.onSecondaryContainer),
+          const SizedBox(width: 4),
+          Text(
+            'New',
+            style: GoogleFonts.inter(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: AppColors.onSecondaryContainer,
             ),
-          ),
-          Positioned(
-            top: 12,
-            child: Container(
-              width: 45,
-              height: 2,
-              color: Colors.white,
-            ),
-          ),
-          Positioned(
-            top: 16,
-            child: Container(
-              width: 45,
-              height: 2,
-              color: Colors.white,
-            ),
-          ),
-          // Play button
-          const Icon(
-            Icons.play_arrow,
-            color: Colors.white,
-            size: 32,
           ),
         ],
-      ),
-    );
-  }
-
-  /// Build PDF icon
-  Widget _buildPdfIcon() {
-    return Container(
-      width: 60,
-      height: 60,
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.white, width: 2.5),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Icon(
-        Icons.picture_as_pdf_outlined,
-        color: Colors.white,
-        size: 32,
-      ),
-    );
-  }
-
-  /// Build image icon
-  Widget _buildImageIcon() {
-    return Container(
-      width: 60,
-      height: 60,
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.white, width: 2.5),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Icon(
-        Icons.image_outlined,
-        color: Colors.white,
-        size: 32,
-      ),
-    );
-  }
-
-  /// Build default icon for other content types
-  Widget _buildDefaultIcon() {
-    return Container(
-      width: 60,
-      height: 60,
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.white, width: 2.5),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Icon(
-        Icons.description_outlined,
-        color: Colors.white,
-        size: 32,
       ),
     );
   }

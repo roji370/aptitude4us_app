@@ -7,6 +7,7 @@ import '../models/course_model.dart';
 import '../models/module_model.dart';
 import '../services/firestore_service.dart';
 import '../services/content_update_service.dart';
+import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import '../utils/route_transitions.dart';
 import '../widgets/custom_bottom_navigation.dart';
@@ -167,10 +168,7 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
   }
 
   Color _getColorForContentType(String type, int index) {
-    // Alternate between blue and light blue
-    return index % 2 == 0
-        ? const Color(0xFF1565C0)
-        : const Color(0xFF29ACD6);
+    return index % 2 == 0 ? AppColors.primary : AppColors.secondary;
   }
 
   String _getDisplayNameForContentType(String type) {
@@ -192,21 +190,6 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
     }
   }
 
-  // Dynamic font size calculation based on title length
-  double _getTitleFontSize(String title) {
-    final length = title.length;
-    if (length <= 20) return 18.0;
-    if (length <= 40) return 16.0;
-    return 14.0;
-  }
-
-  // Dynamic card height based on title length
-  double _getCardHeight(String title) {
-    final length = title.length;
-    if (length <= 40) return 130.0;
-    return 145.0;
-  }
-
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -226,28 +209,29 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
         }
       },
       child: Scaffold(
-        backgroundColor: Colors.grey[50],
+        backgroundColor: AppColors.surface,
         appBar: AppBar(
-          backgroundColor: Colors.grey[50],
+          backgroundColor: AppColors.surface,
           elevation: 0,
+          surfaceTintColor: Colors.transparent,
           leading: widget.isExamOverviewMode
             ? null
             : IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.black),
+                icon: const Icon(Icons.arrow_back_rounded, color: AppColors.onSurface),
                 onPressed: () => Navigator.of(context).pop(),
               ),
           title: Text(
             widget.module.title,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: AppColors.primary,
             ),
           ),
         ),
       body: _isLoading
           ? const Center(
-              child: CircularProgressIndicator(),
+              child: CircularProgressIndicator(color: AppColors.secondary),
             )
           : _errorMessage != null
               ? Center(
@@ -279,7 +263,7 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
                         ElevatedButton(
                           onPressed: _loadContent,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1565C0),
+                            backgroundColor: AppColors.primary,
                             foregroundColor: Colors.white,
                           ),
                           child: const Text('Retry'),
@@ -327,12 +311,12 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 // Content Header
-                                const Text(
+                                Text(
                                   'Content',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.onSurface,
                                   ),
                                 ),
                                 const SizedBox(height: 16),
@@ -379,7 +363,7 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
     );
   }
 
-  /// Build a content-type card. Badge is derived from its children.
+  /// Build a content-type card — Stitch design with accent strip.
   Widget _buildContentTypeCard({
     required String type,
     required List<ContentModel> contents,
@@ -402,80 +386,76 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
           ),
         ).then((_) async {
           if (!mounted) return;
-          // Refresh unseen IDs — child items may have been visited.
           await _refreshUnseenIds();
         });
       },
       child: Container(
         width: double.infinity,
-        height: _getCardHeight(displayName),
         decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(16),
+          color: AppColors.surfaceContainerLowest,
+          borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: color.withOpacity(0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
             ),
           ],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
           children: [
-            // Badge strip — always 28px tall, badge right-aligned when present
-            SizedBox(
-              height: 28,
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 10),
-                  child: showBadge
-                      ? _buildUpdateBadgePill()
-                      : const SizedBox.shrink(),
-                ),
-              ),
+            Positioned(
+              left: 0, top: 0, bottom: 0,
+              child: Container(width: 6, color: color),
             ),
-            // Main content
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            '${contents.length} ${contents.length == 1 ? 'Item' : 'Items'}',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white70,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Flexible(
-                            child: Text(
-                              displayName,
-                              style: TextStyle(
-                                fontSize: _getTitleFontSize(displayName),
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                                height: 1.2,
-                              ),
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceContainer,
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    _buildContentIcon(icon),
-                  ],
-                ),
+                    child: Icon(icon, size: 22, color: color),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName,
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.onSurface,
+                            letterSpacing: 0.14,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${contents.length} ${contents.length == 1 ? 'Item' : 'Items'}',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w400,
+                            color: AppColors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (showBadge) _buildUpdateBadgePill(),
+                  const SizedBox(width: 4),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: AppColors.outline,
+                    size: 20,
+                  ),
+                ],
               ),
             ),
           ],
@@ -484,47 +464,28 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
     );
   }
 
-  /// The standard "UPDATE" badge pill.
+  /// Teal update badge pill.
   Widget _buildUpdateBadgePill() {
-    return IgnorePointer(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7.2, vertical: 3.6),
-        decoration: BoxDecoration(
-          color: Colors.orange,
-          borderRadius: BorderRadius.circular(10.8),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.circle, size: 5.4, color: Colors.white),
-            const SizedBox(width: 3.6),
-            Text(
-              'UPDATE',
-              style: GoogleFonts.inter(
-                fontSize: 8.1,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Build the icon container for content cards
-  Widget _buildContentIcon(IconData icon) {
     return Container(
-      width: 60,
-      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.white, width: 2.5),
-        borderRadius: BorderRadius.circular(8),
+        color: AppColors.secondaryContainer,
+        borderRadius: BorderRadius.circular(20),
       ),
-      child: Icon(
-        icon,
-        color: Colors.white,
-        size: 32,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.circle, size: 6, color: AppColors.onSecondaryContainer),
+          const SizedBox(width: 4),
+          Text(
+            'New',
+            style: GoogleFonts.inter(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: AppColors.onSecondaryContainer,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/app_colors.dart';
 import '../utils/responsive_helper.dart';
 
 class PrivacyPolicyScreen extends StatelessWidget {
@@ -7,7 +8,13 @@ class PrivacyPolicyScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Privacy Policy'), elevation: 0),
+      backgroundColor: AppColors.surface,
+      appBar: AppBar(
+        title: Text('Privacy Policy', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
+        backgroundColor: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+      ),
       body: SingleChildScrollView(
         padding: ResponsiveHelper.getScreenHorizontalPadding(context),
         child: Column(

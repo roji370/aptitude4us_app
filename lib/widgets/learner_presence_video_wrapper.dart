@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/app_colors.dart';
 
 import '../services/learner_presence_service.dart';
 import '../utils/logger.dart';
@@ -306,7 +307,7 @@ class _Veil extends StatelessWidget {
                 icon: const Icon(Icons.videocam_rounded, size: 18),
                 label: Text(copy.cta!),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF323483),
+                  backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 22,

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:better_player_plus/better_player_plus.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import 'video_watermark.dart';
 import 'custom_video_progress_bar.dart';
@@ -342,7 +343,7 @@ class _AndroidVideoPlayerState extends State<_AndroidVideoPlayer>
               icon: const Icon(Icons.refresh),
               label: const Text('Retry'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF323483),
+                backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 24, vertical: 12),

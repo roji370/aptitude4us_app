@@ -1,5 +1,6 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import '../utils/app_colors.dart';
 
 import '../services/learner_presence_service.dart';
 
@@ -328,7 +329,7 @@ class _MiniButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: primary ? const Color(0xFF323483) : Colors.white12,
+          color: primary ? AppColors.primary : Colors.white12,
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text(

@@ -2,11 +2,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../services/auth_service.dart';
 import '../services/storage_service.dart';
+import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import '../utils/route_transitions.dart';
 import 'main_screen.dart';
@@ -87,47 +87,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
 
   Future<void> _pickImage() async {
     try {
-      // For Android, check storage/photos permission
-      if (Platform.isAndroid) {
-        // Try storage permission first (works for most Android versions)
-        PermissionStatus storageStatus = await Permission.storage.status;
-        
-        if (!storageStatus.isGranted) {
-          // Request storage permission
-          storageStatus = await Permission.storage.request();
-          
-          if (!storageStatus.isGranted) {
-            // Try photos permission as fallback (for Android 13+)
-            PermissionStatus photosStatus = await Permission.photos.status;
-            if (!photosStatus.isGranted) {
-              photosStatus = await Permission.photos.request();
-            }
-            
-            // If both are denied, show message
-            if (!photosStatus.isGranted) {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: const Text('Photo access permission is required to select a profile picture'),
-                    backgroundColor: Colors.orange,
-                    action: SnackBarAction(
-                      label: 'Settings',
-                      textColor: Colors.white,
-                      onPressed: () {
-                        openAppSettings();
-                      },
-                    ),
-                    duration: const Duration(seconds: 5),
-                  ),
-                );
-              }
-              return;
-            }
-          }
-        }
-      }
-
-      // Proceed with image picking
+      // image_picker uses the system photo picker which handles permissions internally
       final ImagePicker picker = ImagePicker();
       final XFile? image = await picker.pickImage(
         source: ImageSource.gallery,
@@ -163,8 +123,8 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: Color(0xFF323483),
+            colorScheme: ColorScheme.light(
+              primary: AppColors.primary,
               onPrimary: Colors.white,
               onSurface: Colors.black,
             ),
@@ -353,8 +313,8 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF323483),
-              Color(0xFF4A4BA8),
+              AppColors.primary,
+              AppColors.primaryContainer,
             ],
           ),
         ),
@@ -390,7 +350,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                         : 'Please fill in your details to continue',
                     style: GoogleFonts.inter(
                       fontSize: 16,
-                      color: Colors.white.withOpacity(0.9),
+                      color: Colors.white.withValues(alpha: 0.9),
                     ),
                   ),
                   const SizedBox(height: 32),
@@ -409,7 +369,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                               shape: BoxShape.circle,
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.2),
+                                  color: Colors.black.withValues(alpha: 0.2),
                                   blurRadius: 15,
                                   offset: const Offset(0, 5),
                                 ),
@@ -431,7 +391,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                                             return const Icon(
                                               Icons.add_a_photo,
                                               size: 50,
-                                              color: Color(0xFF323483),
+                                              color: AppColors.primary,
                                             );
                                           },
                                         ),
@@ -439,7 +399,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                                     : const Icon(
                                         Icons.add_a_photo,
                                         size: 50,
-                                        color: Color(0xFF323483),
+                                        color: AppColors.primary,
                                       ),
                           ),
                         ),
@@ -448,7 +408,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                           'Tap to add photo',
                           style: GoogleFonts.inter(
                             fontSize: 14,
-                            color: Colors.white.withOpacity(0.8),
+                            color: Colors.white.withValues(alpha: 0.8),
                           ),
                         ),
                       ],
@@ -465,7 +425,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
+                          color: Colors.black.withValues(alpha: 0.1),
                           blurRadius: 20,
                           offset: const Offset(0, 10),
                         ),
@@ -518,7 +478,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                               children: [
                                 const Icon(
                                   Icons.calendar_today,
-                                  color: Color(0xFF323483),
+                                  color: AppColors.primary,
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
@@ -560,7 +520,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                               children: [
                                 const Icon(
                                   Icons.event,
-                                  color: Color(0xFF323483),
+                                  color: AppColors.primary,
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
@@ -626,9 +586,9 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                       onPressed: _isLoading ? null : _saveProfile,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
-                        foregroundColor: const Color(0xFF323483),
+                        foregroundColor: AppColors.primary,
                         elevation: 8,
-                        shadowColor: Colors.black.withOpacity(0.3),
+                        shadowColor: Colors.black.withValues(alpha: 0.3),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                         ),
@@ -644,7 +604,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
                                     valueColor: AlwaysStoppedAnimation<Color>(
-                                      Color(0xFF323483),
+                                      AppColors.primary,
                                     ),
                                   ),
                                 ),
@@ -679,7 +639,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                         'You need to complete your profile to access the app',
                         style: GoogleFonts.inter(
                           fontSize: 13,
-                          color: Colors.white.withOpacity(0.8),
+                          color: Colors.white.withValues(alpha: 0.8),
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -699,7 +659,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
       style: GoogleFonts.inter(
         fontSize: 14,
         fontWeight: FontWeight.w600,
-        color: const Color(0xFF323483),
+        color: AppColors.primary,
       ),
     );
   }
@@ -707,7 +667,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
   InputDecoration _buildInputDecoration(String hint, IconData icon) {
     return InputDecoration(
       hintText: hint,
-      prefixIcon: Icon(icon, color: const Color(0xFF323483)),
+      prefixIcon: Icon(icon, color: AppColors.primary),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide(color: Colors.grey[300]!),
@@ -718,7 +678,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFF323483), width: 2),
+        borderSide: BorderSide(color: AppColors.primary, width: 2),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),

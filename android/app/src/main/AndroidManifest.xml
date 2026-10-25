@@ -11,10 +11,7 @@
     <!-- Storage handled via app-scoped getExternalStorageDirectory() - no broad permission needed -->
     <!-- Camera permissions for attachments -->
     <uses-permission android:name="android.permission.CAMERA"/>
-    <!-- File access for opening downloaded files -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+    <!-- Photo/video picking uses system photo picker via image_picker plugin - no READ_MEDIA_* permissions needed -->
 
 
     <application

@@ -1,3 +1,6 @@
+# Use Git-based specs repo instead of CDN (avoids jsdelivr CDN failures)
+source 'https://github.com/CocoaPods/Specs.git'
+
 # Uncomment this line to define a global platform for your project
 platform :ios, '16.0'
 
@@ -58,6 +61,7 @@ post_install do |installer|
       # Disable Swift Package Manager to use CocoaPods only
       config.build_settings['SWIFT_PACKAGE_MANAGER_ENABLED'] = 'NO'
       config.build_settings['USE_SPM'] = 'NO'
+
 
       # Enable permission_handler permissions for iOS
       config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [

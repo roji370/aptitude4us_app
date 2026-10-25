@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../services/auth_service.dart';
 import '../services/auth_persistence_service.dart';
+import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import '../models/user_model.dart';
 import '../utils/adaptive_navigation.dart';
@@ -64,7 +65,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         builder: (BuildContext dialogContext) {
           return const Center(
             child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1565C0)),
+              valueColor: AlwaysStoppedAnimation<Color>(AppColors.secondary),
             ),
           );
         },
@@ -195,7 +196,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               },
               child: const Text(
                 'Logout',
-                style: TextStyle(color: Color(0xFF1565C0)),
+                style: TextStyle(color: AppColors.error),
               ),
             ),
           ],
@@ -229,7 +230,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   );
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1565C0),
+                  backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 32,
@@ -249,10 +250,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-            backgroundColor: Color(0xFF1565C0),
+            backgroundColor: AppColors.surface,
             body: Center(
               child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                valueColor: AlwaysStoppedAnimation<Color>(AppColors.secondary),
               ),
             ),
           );
@@ -261,7 +262,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final userData = snapshot.data;
 
         return Scaffold(
-          backgroundColor: Colors.white,
+          backgroundColor: AppColors.surface,
           body: Column(
             children: [
               // Top Profile Header Section
@@ -270,12 +271,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Bottom Content Section
               Expanded(
                 child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(30),
-                      topRight: Radius.circular(30),
-                    ),
+                  decoration: const BoxDecoration(
+                    color: AppColors.surface,
                   ),
                   child: LayoutBuilder(
                     builder: (context, constraints) {
@@ -362,9 +359,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   if (_appVersion.isNotEmpty)
                                     Text(
                                       _appVersion,
-                                      style: TextStyle(
+                                      style: GoogleFonts.inter(
                                         fontSize: 11,
-                                        color: Colors.grey[500],
+                                        color: AppColors.onSurfaceVariant,
                                         fontWeight: FontWeight.w400,
                                       ),
                                     ),
@@ -392,43 +389,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Container(
       width: double.infinity,
       decoration: const BoxDecoration(
-        color: Color(0xFF1565C0),
+        color: AppColors.primary,
       ),
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
           child: Column(
             children: [
-              // Back button and Title
               Row(
                 children: [
-                  const SizedBox(width: 48), // Balance spacing
-                  const Expanded(
+                  const SizedBox(width: 48),
+                  Expanded(
                     child: Center(
                       child: Text(
                         'Profile',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
+                        style: GoogleFonts.inter(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
                           color: Colors.white,
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 48), // Balance spacing
+                  const SizedBox(width: 48),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
 
               // Profile Picture
               Container(
-                width: 90,
-                height: 90,
+                width: 80,
+                height: 80,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 3),
-                  color: Colors.white.withOpacity(0.3),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 3),
+                  color: Colors.white.withValues(alpha: 0.15),
                 ),
                 child: ClipOval(
                   child: photoUrl != null && photoUrl.isNotEmpty
@@ -438,7 +434,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           errorBuilder: (context, error, stackTrace) {
                             return const Icon(
                               Icons.account_circle,
-                              size: 84,
+                              size: 74,
                               color: Colors.white,
                             );
                           },
@@ -454,7 +450,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         )
                       : const Icon(
                           Icons.account_circle,
-                          size: 84,
+                          size: 74,
                           color: Colors.white,
                         ),
                 ),
@@ -464,9 +460,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Name
               Text(
                 userData?.displayName ?? 'User',
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
+                style: GoogleFonts.inter(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
                   color: Colors.white,
                 ),
               ),
@@ -475,9 +471,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Email
               Text(
                 userData?.email ?? 'user@example.com',
-                style: const TextStyle(
+                style: GoogleFonts.inter(
                   fontSize: 13,
-                  color: Colors.white,
+                  color: Colors.white.withValues(alpha: 0.8),
                   fontWeight: FontWeight.w400,
                 ),
               ),
@@ -497,33 +493,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: Colors.grey[200],
+          color: AppColors.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           children: [
-            Icon(
-              icon,
-              color: Colors.black87,
-              size: 24,
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.surfaceContainer,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                icon,
+                color: AppColors.secondary,
+                size: 20,
+              ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 title,
-                style: const TextStyle(
-                  fontSize: 16,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
                   fontWeight: FontWeight.w500,
-                  color: Colors.black87,
+                  color: AppColors.onSurface,
                 ),
               ),
             ),
             const Icon(
-              Icons.arrow_forward,
-              color: Colors.black87,
-              size: 22,
+              Icons.chevron_right_rounded,
+              color: AppColors.outline,
+              size: 20,
             ),
           ],
         ),
@@ -532,22 +536,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildLogoutButton(BuildContext context) {
-    return ElevatedButton(
-      onPressed: _showLogoutDialog,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFF1565C0),
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(25),
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _showLogoutDialog,
+        icon: const Icon(Icons.logout_rounded, size: 18),
+        label: Text(
+          'Sign Out',
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-        elevation: 3,
-      ),
-      child: const Text(
-        'Logout',
-        style: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.error,
+          side: BorderSide(color: AppColors.error.withValues(alpha: 0.3)),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
     );

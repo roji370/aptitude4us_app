@@ -5,6 +5,7 @@ import '../services/auth_service.dart';
 import '../services/auth_persistence_service.dart';
 import '../services/first_time_user_service.dart';
 import '../services/firestore_service.dart';
+import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import '../utils/exam_overview_navigator.dart';
 import '../widgets/exam_overview_dialog.dart';
@@ -273,423 +274,408 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     Logger.i("🔐 LoginScreen: build method called");
     final screenSize = MediaQuery.of(context).size;
-    final safeAreaBottom = MediaQuery.of(context).padding.bottom;
     Logger.i(
       "🔐 LoginScreen: Screen size: ${screenSize.width}x${screenSize.height}",
     );
 
-    // Increase field height for better visibility and prevent shrinking
-    final fieldHeight = screenSize.height * 0.075;
-
     return Scaffold(
-      backgroundColor: const Color(0xFF1C1A5E),
+      backgroundColor: AppColors.surface,
       body: SafeArea(
-        // Don't add padding at the top to allow the blue background to extend fully
-        top: false,
-        bottom: false,
         child: SingleChildScrollView(
           child: Form(
             key: _formKey,
-            child: Container(
-              width: screenSize.width,
-              // Adjust the height to account for status bar and bottom safe area
-              height: screenSize.height,
-              color: const Color(
-                0xFF1C1A5E,
-              ), // Background color for top section
-              child: Stack(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // White container with rounded top corners - positioned to match design
-                  Positioned(
-                    top: screenSize.height * 0.42,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.only(
-                          topLeft: Radius.circular(25),
-                          topRight: Radius.circular(25),
+                  // ── Brand header ──────────────────────────────────
+                  const SizedBox(height: 24),
+                  // Logo
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.04),
+                          blurRadius: 4,
+                          offset: const Offset(0, 1),
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Color(0x1F171A1F),
-                            offset: Offset(0, -3),
-                            blurRadius: 5,
+                      ],
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Image.asset(
+                      'assets/logo.png',
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.school_rounded,
+                        size: 32,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'APTITUDE 4 US',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.0,
+                      color: AppColors.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Welcome Back',
+                    style: GoogleFonts.inter(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary,
+                      height: 32 / 24,
+                      letterSpacing: -0.24,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Sign in to access your nursing prep courses',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w400,
+                      color: AppColors.onSurfaceVariant,
+                      height: 20 / 14,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+
+                  // ── Email field ────────────────────────────────────
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: Text(
+                        'Email Address',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.onSurface,
+                          letterSpacing: 0.24,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  TextFormField(
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    autocorrect: false,
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: AppColors.onSurface,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'nurse.candidate@example.com',
+                      hintStyle: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: AppColors.outline,
+                      ),
+                      filled: true,
+                      fillColor: AppColors.surfaceContainerLowest,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: AppColors.primaryContainer,
+                          width: 1.5,
+                        ),
+                      ),
+                      errorBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: AppColors.error,
+                          width: 1,
+                        ),
+                      ),
+                      focusedErrorBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: AppColors.error,
+                          width: 1.5,
+                        ),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 14,
+                      ),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter your email';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // ── Password field ─────────────────────────────────
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: Text(
+                        'Password',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.onSurface,
+                          letterSpacing: 0.24,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  TextFormField(
+                    controller: _passwordController,
+                    obscureText: !_isPasswordVisible,
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: AppColors.onSurface,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: '••••••••••••',
+                      hintStyle: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: AppColors.outline,
+                      ),
+                      filled: true,
+                      fillColor: AppColors.surfaceContainerLowest,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: AppColors.primaryContainer,
+                          width: 1.5,
+                        ),
+                      ),
+                      errorBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: AppColors.error,
+                          width: 1,
+                        ),
+                      ),
+                      focusedErrorBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: AppColors.error,
+                          width: 1.5,
+                        ),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 14,
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _isPasswordVisible
+                              ? Icons.visibility_rounded
+                              : Icons.visibility_off_rounded,
+                          color: AppColors.outline,
+                          size: 20,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _isPasswordVisible = !_isPasswordVisible;
+                          });
+                        },
+                      ),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter your password';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 8),
+
+                  // ── Forgot password ────────────────────────────────
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () {
+                        // Show forgot password toast/dialog
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Password reset link sent to your registered email.',
+                              style: GoogleFonts.inter(fontSize: 14),
+                            ),
+                            backgroundColor: AppColors.primary,
+                            behavior: SnackBarBehavior.floating,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        );
+                      },
+                      child: Text(
+                        'Forgot Password?',
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.secondary,
+                          letterSpacing: 0.14,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // ── Error message ──────────────────────────────────
+                  if (_errorMessage.isNotEmpty)
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.errorContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.error_outline_rounded,
+                            color: AppColors.onErrorContainer,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _errorMessage,
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: AppColors.onErrorContainer,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _errorMessage = '';
+                              });
+                            },
+                            child: const Icon(
+                              Icons.close_rounded,
+                              color: AppColors.onErrorContainer,
+                              size: 18,
+                            ),
                           ),
                         ],
                       ),
                     ),
-                  ),
 
-                  // Title: "Xfini Academy"
-                  Positioned(
-                    top: screenSize.height * 0.08,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(8),
+                  // ── Sign In button ─────────────────────────────────
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _signIn,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryContainer,
+                        foregroundColor: AppColors.onPrimary,
+                        disabledBackgroundColor: AppColors.surfaceContainerHighest,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Text(
-                          "Xfini Academy",
-                          maxLines: 1,
-                          overflow: TextOverflow.visible,
-                          style: GoogleFonts.archivo(
-                            fontSize: screenSize.width * 0.095,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
+                        elevation: 0,
                       ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(
+                                color: AppColors.onPrimary,
+                                strokeWidth: 2.5,
+                              ),
+                            )
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  'Sign In',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.14,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                const Icon(
+                                  Icons.arrow_forward_rounded,
+                                  size: 20,
+                                ),
+                              ],
+                            ),
                     ),
                   ),
+                  const SizedBox(height: 32),
 
-                  // Image: Treasure chest - positioned higher to match design
-                  Positioned(
-                    top: screenSize.height * 0.16,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Container(
-                        width: screenSize.width * 0.5,
-                        height: screenSize.width * 0.5,
-                        decoration: const BoxDecoration(
-                          image: DecorationImage(
-                            image: AssetImage(
-                              'assets/images/treasure_chest.png',
-                            ),
-                            fit: BoxFit.contain,
-                            onError: null, // Handle missing image gracefully
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.school,
-                          color: Colors.white,
-                          size: 60,
-                        ),
-                      ),
+                  // ── Support footer ─────────────────────────────────
+                  Text(
+                    'Need help logging in?',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w400,
+                      color: AppColors.onSurfaceVariant,
                     ),
                   ),
-
-                  // Email Text Field - positioned in white container
-                  Positioned(
-                    top: screenSize.height * 0.45,
-                    left: screenSize.width * 0.06,
-                    right: screenSize.width * 0.06,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "Email",
-                          style: GoogleFonts.inter(
-                            fontSize: screenSize.width * 0.045,
-                            fontWeight: FontWeight.w500,
-                            color: const Color(0xFF171A1F),
+                  TextButton(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Support: support@aptitude4us.edu',
+                            style: GoogleFonts.inter(fontSize: 14),
                           ),
-                        ),
-                        SizedBox(height: 8),
-                        SizedBox(
-                          height: fieldHeight,
-                          child: TextFormField(
-                            controller: _emailController,
-                            keyboardType: TextInputType.emailAddress,
-                            style: TextStyle(
-                              fontSize: screenSize.width * 0.045,
-                              color: const Color(0xFF171A1F),
-                            ),
-                            decoration: InputDecoration(
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: screenSize.width * 0.04,
-                                vertical: fieldHeight * 0.25,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: const BorderSide(
-                                  color: Color(0xFF636AE8),
-                                  width: 1,
-                                ),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: const BorderSide(
-                                  color: Color(0xFF636AE8),
-                                  width: 1,
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: const BorderSide(
-                                  color: Color(0xFF636AE8),
-                                  width: 2,
-                                ),
-                              ),
-                              errorBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: const BorderSide(
-                                  color: Colors.red,
-                                  width: 1,
-                                ),
-                              ),
-                              focusedErrorBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: const BorderSide(
-                                  color: Colors.red,
-                                  width: 2,
-                                ),
-                              ),
-                              errorStyle: TextStyle(
-                                color: Colors.red,
-                                fontSize: screenSize.width * 0.035,
-                                height: 0.5,
-                              ),
-                            ),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Please enter your email';
-                              }
-                              return null;
-                            },
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                      ],
-                    ),
-                  ),
-
-                  // Password Text Field
-                  Positioned(
-                    top: screenSize.height * 0.57,
-                    left: screenSize.width * 0.06,
-                    right: screenSize.width * 0.06,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "Password",
-                          style: GoogleFonts.inter(
-                            fontSize: screenSize.width * 0.045,
-                            fontWeight: FontWeight.w500,
-                            color: const Color(0xFF171A1F),
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        SizedBox(
-                          height: fieldHeight,
-                          child: TextFormField(
-                            controller: _passwordController,
-                            obscureText: !_isPasswordVisible,
-                            style: TextStyle(
-                              fontSize: screenSize.width * 0.045,
-                              color: const Color(0xFF171A1F),
-                            ),
-                            decoration: InputDecoration(
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: screenSize.width * 0.04,
-                                vertical: fieldHeight * 0.25,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: const BorderSide(
-                                  color: Color(0xFF636AE8),
-                                  width: 1,
-                                ),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: const BorderSide(
-                                  color: Color(0xFF636AE8),
-                                  width: 1,
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: const BorderSide(
-                                  color: Color(0xFF636AE8),
-                                  width: 2,
-                                ),
-                              ),
-                              errorBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: const BorderSide(
-                                  color: Colors.red,
-                                  width: 1,
-                                ),
-                              ),
-                              focusedErrorBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: const BorderSide(
-                                  color: Colors.red,
-                                  width: 2,
-                                ),
-                              ),
-                              errorStyle: TextStyle(
-                                color: Colors.red,
-                                fontSize: screenSize.width * 0.035,
-                                height: 0.5,
-                              ),
-                              suffixIcon: IconButton(
-                                icon: Icon(
-                                  _isPasswordVisible
-                                      ? Icons.visibility
-                                      : Icons.visibility_off,
-                                  color: const Color(0xFF171A1F),
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _isPasswordVisible = !_isPasswordVisible;
-                                  });
-                                },
-                              ),
-                            ),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Please enter your password';
-                              }
-                              return null;
-                            },
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                      ],
-                    ),
-                  ),
-
-                  // Removed error message from here - moved to end of Stack for proper layering
-
-                  // Sign In Button - styled to match design
-                  Positioned(
-                    top: screenSize.height * 0.71,
-                    left: screenSize.width * 0.06,
-                    right: screenSize.width * 0.06,
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: fieldHeight,
-                      child: ElevatedButton(
-                        onPressed: _isLoading ? null : _signIn,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF323483),
+                          backgroundColor: AppColors.primary,
+                          behavior: SnackBarBehavior.floating,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          elevation: 1,
                         ),
-                        child:
-                            _isLoading
-                                ? SizedBox(
-                                  height: screenSize.width * 0.06,
-                                  width: screenSize.width * 0.06,
-                                  child: const CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 3,
-                                  ),
-                                )
-                                : Text(
-                                  "Sign In",
-                                  style: GoogleFonts.inter(
-                                    fontSize: screenSize.width * 0.045,
-                                    fontWeight: FontWeight.w600,
-                                    color: const Color(0xFFFFFFFF),
-                                  ),
-                                ),
+                      );
+                    },
+                    child: Text(
+                      'Contact Academy Support',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.secondary,
+                        decoration: TextDecoration.underline,
+                        decorationColor: AppColors.secondary,
                       ),
                     ),
                   ),
-
-                  // Add bottom padding to ensure content is properly spaced from bottom edge
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: SizedBox(
-                      height: safeAreaBottom > 0 ? safeAreaBottom : 20,
-                    ),
-                  ),
-
-                  // Error message display - positioned last to appear on top of other elements
-                  if (_errorMessage.isNotEmpty)
-                    Positioned(
-                      top: screenSize.height * 0.67,
-                      left: screenSize.width * 0.06,
-                      right: screenSize.width * 0.06,
-                      child: Material(
-                        elevation: 6, // Add elevation to ensure it appears on top
-                        borderRadius: BorderRadius.circular(6),
-                        color: Colors.transparent,
-                        child: Container(
-                          width: double.infinity,
-                          constraints: BoxConstraints(
-                            minHeight: 50,
-                            maxHeight: 150,
-                          ),
-                          padding: EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.red.withAlpha(200), // Much higher opacity for better text readability
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: Colors.red.withAlpha(180),
-                              width: 2,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withAlpha(51), // 20% opacity
-                                offset: Offset(0, 3),
-                                blurRadius: 6,
-                                spreadRadius: 0,
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(
-                                padding: EdgeInsets.only(top: 2),
-                                child: Icon(
-                                  Icons.error_outline,
-                                  color: Colors.white, // White icon for better contrast on red background
-                                  size: screenSize.width * 0.05,
-                                ),
-                              ),
-                              SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  _errorMessage,
-                                  style: TextStyle(
-                                    color: Colors.white, // White text on red background for better contrast
-                                    fontSize: screenSize.width * 0.038,
-                                    fontWeight: FontWeight.w600,
-                                    height: 1.4,
-                                  ),
-                                  maxLines: 4,
-                                  overflow: TextOverflow.visible,
-                                  softWrap: true,
-                                ),
-                              ),
-                              SizedBox(width: 8),
-                              GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    _errorMessage = '';
-                                  });
-                                },
-                                child: Container(
-                                  padding: EdgeInsets.all(4),
-                                  child: Icon(
-                                    Icons.close,
-                                    color: Colors.white, // White close icon for better visibility
-                                    size: screenSize.width * 0.045,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
+                  const SizedBox(height: 24),
                 ],
               ),
             ),

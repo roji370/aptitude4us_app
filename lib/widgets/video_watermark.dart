@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/app_colors.dart';
 
 /// Video watermark overlay widget that displays user name across the video
 /// Similar to XfiniWatermark but optimized for video content
@@ -11,7 +12,7 @@ class VideoWatermark extends StatelessWidget {
     super.key,
     required this.userName,
     this.opacity = 0.15,
-    this.textColor = const Color(0xFF323483),
+    this.textColor = AppColors.primary,
   });
 
   @override
@@ -81,7 +82,7 @@ class FullscreenVideoWatermark extends StatelessWidget {
     super.key,
     required this.userName,
     this.opacity = 0.12,
-    this.textColor = const Color(0xFF323483),
+    this.textColor = AppColors.primary,
   });
 
   @override

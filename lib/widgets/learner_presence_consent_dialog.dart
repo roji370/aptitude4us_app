@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/app_colors.dart';
 
 /// Modal consent dialog shown the first time a student opens a recorded
 /// lecture. The dialog is intentionally short, privacy-forward and **not
@@ -28,7 +29,7 @@ class LearnerPresenceConsentDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const brand = Color(0xFF323483);
+    final brand = AppColors.primary;
     // PopScope(canPop: false) blocks Android back / predictive back gesture
     // so the student cannot bypass the camera requirement by hitting back.
     return PopScope(
@@ -36,7 +37,7 @@ class LearnerPresenceConsentDialog extends StatelessWidget {
       child: AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
-          children: const [
+          children: [
             Icon(Icons.videocam_rounded, color: brand),
             SizedBox(width: 10),
             Expanded(child: Text('Camera Required')),
@@ -61,7 +62,7 @@ class LearnerPresenceConsentDialog extends StatelessWidget {
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
+                children: [
                   Icon(Icons.lock_outline, size: 18, color: brand),
                   SizedBox(width: 8),
                   Expanded(

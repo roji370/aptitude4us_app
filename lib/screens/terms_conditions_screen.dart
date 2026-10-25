@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../utils/app_colors.dart';
 
 class TermsConditionsScreen extends StatelessWidget {
   const TermsConditionsScreen({super.key});
@@ -14,11 +15,21 @@ class TermsConditionsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
-        title: const Text('Terms and Conditions'),
-        backgroundColor: const Color(0xFF1565C0),
-        foregroundColor: Colors.white,
+        title: Text(
+          'Terms and Conditions',
+          style: GoogleFonts.inter(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: AppColors.primary,
+          ),
+        ),
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.onSurface,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0.5,
       ),
       body: SafeArea(
         child: Padding(
@@ -31,7 +42,7 @@ class TermsConditionsScreen extends StatelessWidget {
                   termsText,
                   style: GoogleFonts.inter(
                     fontSize: 14,
-                    color: const Color(0xFF4D4D4D),
+                    color: AppColors.onSurfaceVariant,
                     height: 1.6,
                   ),
                   textAlign: TextAlign.justify,

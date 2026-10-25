@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/app_colors.dart';
 import 'login_screen.dart';
 import 'terms_conditions_screen.dart';
 
@@ -46,11 +47,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     // If from settings, show only the terms and conditions text
     if (widget.isFromSettings) {
       return Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: AppColors.surface,
         appBar: AppBar(
-          title: const Text('Terms and Conditions'),
-          backgroundColor: const Color(0xFF323483),
-          foregroundColor: Colors.white,
+          title: Text(
+            'Terms and Conditions',
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: AppColors.primary,
+            ),
+          ),
+          backgroundColor: AppColors.surface,
+          foregroundColor: AppColors.onSurface,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
         ),
         body: SafeArea(
           child: Padding(
@@ -63,133 +73,98 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     // Regular onboarding experience
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       body: SafeArea(
-        child: Stack(
+        child: Column(
           children: [
-            // Page view for onboarding slides
-            PageView(
-              controller: _pageController,
-              physics:
-                  _currentPage == 1 && !_termsAccepted
-                      ? const NeverScrollableScrollPhysics()
-                      : const AlwaysScrollableScrollPhysics(),
-              onPageChanged: (int page) {
-                setState(() {
-                  _currentPage = page;
-                });
-              },
-              children: [
-                // Welcome page
-                _buildWelcomePage(screenSize),
-
-                // Terms and conditions page
-                _buildTermsPage(screenSize),
-              ],
+            // ── Scrollable page content ──────────────────────────
+            Expanded(
+              child: PageView(
+                controller: _pageController,
+                physics:
+                    _currentPage == 1 && !_termsAccepted
+                        ? const NeverScrollableScrollPhysics()
+                        : const AlwaysScrollableScrollPhysics(),
+                onPageChanged: (int page) {
+                  setState(() {
+                    _currentPage = page;
+                  });
+                },
+                children: [
+                  _buildWelcomePage(screenSize),
+                  _buildTermsPage(screenSize),
+                ],
+              ),
             ),
 
-            // Bottom navigation
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 16,
+            // ── Bottom navigation ────────────────────────────────
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                border: const Border(
+                  top: BorderSide(color: AppColors.outlineVariant, width: 0.5),
                 ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0x1A000000),
-                      blurRadius: 5,
-                      offset: const Offset(0, -2),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Page indicator dots
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                      _numPages,
+                      (index) => _buildDot(index),
                     ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Page indicator dots
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(
-                        _numPages,
-                        (index) => _buildDot(index),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Continue / Get Started button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed:
+                          _currentPage == _numPages - 1
+                              ? _termsAccepted
+                                  ? _completeOnboarding
+                                  : null
+                              : () {
+                                  _pageController.nextPage(
+                                    duration: const Duration(milliseconds: 300),
+                                    curve: Curves.easeInOut,
+                                  );
+                                },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        disabledBackgroundColor: AppColors.surfaceContainerHighest,
+                        foregroundColor: AppColors.onPrimary,
+                        disabledForegroundColor: AppColors.outline,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            _currentPage == _numPages - 1
+                                ? 'Get Started'
+                                : 'Continue',
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.14,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.arrow_forward_rounded, size: 20),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 16),
-
-                    // Buttons
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // Back button (if not on first page)
-                        _currentPage > 0
-                            ? TextButton(
-                              onPressed: () {
-                                _pageController.previousPage(
-                                  duration: const Duration(milliseconds: 300),
-                                  curve: Curves.easeInOut,
-                                );
-                              },
-                              child: const Text(
-                                "Back",
-                                style: TextStyle(
-                                  color: Color(0xFF323483),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            )
-                            : const SizedBox(
-                              width: 80,
-                            ), // Empty space if on first page
-                        // Continue/Get Started button
-                        ElevatedButton(
-                          onPressed:
-                              _currentPage == _numPages - 1
-                                  ? _termsAccepted
-                                      ? _completeOnboarding
-                                      : null
-                                  : () {
-                                    _pageController.nextPage(
-                                      duration: const Duration(
-                                        milliseconds: 300,
-                                      ),
-                                      curve: Curves.easeInOut,
-                                    );
-                                  },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF323483),
-                            disabledBackgroundColor: Colors.grey.shade300,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            elevation: 0,
-                          ),
-                          child: Text(
-                            _currentPage == _numPages - 1
-                                ? "Get Started"
-                                : "Continue",
-                            style: TextStyle(
-                              color:
-                                  _currentPage == _numPages - 1 &&
-                                          !_termsAccepted
-                                      ? Colors.grey.shade500
-                                      : Colors.white,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -198,83 +173,346 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
+  /// Welcome page matching Stitch Screen 2 — value proposition cards
   Widget _buildWelcomePage(Size screenSize) {
-    return Container(
-      padding: const EdgeInsets.all(24),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // App icon or logo
-          Container(
-            height: screenSize.width * 0.5,
-            width: screenSize.width * 0.5,
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/images/logo/app_logo.png'),
-                fit: BoxFit.contain,
+          // ── Header bar ──────────────────────────────────────────
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  // Logo
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.asset(
+                      'assets/logo.png',
+                      width: 40,
+                      height: 40,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceContainerLow,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.school_rounded,
+                          color: AppColors.primary,
+                          size: 24,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'APTITUDE 4 US',
+                    style: GoogleFonts.inter(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ),
-          const SizedBox(height: 40),
-
-          // Welcome text
-          Text(
-            "Welcome to Xfini Academy",
-            style: GoogleFonts.poppins(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF323483),
-            ),
-            textAlign: TextAlign.center,
+              TextButton(
+                onPressed: () {
+                  _pageController.animateToPage(
+                    _numPages - 1,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                  );
+                },
+                child: Text(
+                  'Skip',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.onSurfaceVariant,
+                    letterSpacing: 0.24,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
 
-          // App description
-          Text(
-            "Your trusted learning companion for nursing students studying abroad.",
-            style: GoogleFonts.inter(
-              fontSize: 16,
-              color: const Color(0xFF757575),
+          // ── Visual display card ─────────────────────────────────
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
             ),
-            textAlign: TextAlign.center,
+            child: Column(
+              children: [
+                // Illustration circle
+                Container(
+                  width: 144,
+                  height: 144,
+                  decoration: const BoxDecoration(
+                    color: AppColors.surfaceContainerHighest,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Icon(
+                      Icons.medical_services_rounded,
+                      size: 64,
+                      color: AppColors.primaryContainer,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Accreditation pill
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceContainer,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.verified_rounded,
+                        size: 16,
+                        color: AppColors.secondary,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Curriculum Aligned with NMBI Standards',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.onSurfaceVariant,
+                          letterSpacing: 0.33,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 40),
+          const SizedBox(height: 24),
+
+          // ── Content & value proposition ──────────────────────────
+          Text(
+            'Welcome to Aptitude 4 Us',
+            style: GoogleFonts.inter(
+              fontSize: 24,
+              fontWeight: FontWeight.w700,
+              color: AppColors.primary,
+              height: 32 / 24,
+              letterSpacing: -0.24,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your learning companion for nursing exams and professional development.',
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              fontWeight: FontWeight.w400,
+              color: AppColors.onSurfaceVariant,
+              height: 20 / 14,
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // ── Value proposition cards ──────────────────────────────
+          _buildValueCard(
+            'RCSI Aptitude & OSCE Preparation',
+            'Real-world scenario simulations and clinical stations',
+          ),
+          const SizedBox(height: 10),
+          _buildValueCard(
+            'Comprehensive Study Modules',
+            'Evidence-based clinical guidelines and review notes',
+          ),
+          const SizedBox(height: 10),
+          _buildValueCard(
+            'Mentorship & High-Yield Q-Bank',
+            'Direct feedback from registered healthcare specialists',
+          ),
+          const SizedBox(height: 24),
         ],
       ),
     );
   }
 
-  Widget _buildTermsPage(Size screenSize) {
+  /// Single value proposition card with teal check badge
+  Widget _buildValueCard(String title, String subtitle) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(
-        24,
-        24,
-        24,
-        100,
-      ), // Extra bottom padding for buttons
-      child: Column(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "Terms and Conditions",
-            style: GoogleFonts.poppins(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF323483),
+          Container(
+            width: 28,
+            height: 28,
+            decoration: const BoxDecoration(
+              color: AppColors.secondaryContainer,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.check_rounded,
+              size: 18,
+              color: AppColors.onSecondaryContainer,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.onSurface,
+                    letterSpacing: 0.14,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w400,
+                    color: AppColors.onSurfaceVariant,
+                    height: 18 / 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-          // Scrollable terms content
-          Expanded(child: _buildTermsContent(screenSize)),
+  /// Terms page matching Stitch Screen 3 — structured policy cards
+  Widget _buildTermsPage(Size screenSize) {
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Header ──────────────────────────────────────────
+                Text(
+                  'Terms & Conditions',
+                  style: GoogleFonts.inter(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primary,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+                const SizedBox(height: 12),
 
-          // Accept checkbox
-          if (!widget.isFromSettings)
-            Row(
+                // ── Mandatory compliance banner ─────────────────────
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: AppColors.secondaryContainer,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.gavel_rounded,
+                          size: 20,
+                          color: AppColors.onSecondaryContainer,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'MANDATORY COMPLIANCE',
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.secondary,
+                                letterSpacing: 1.0,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Please review and accept our platform policies before accessing coursework.',
+                              style: GoogleFonts.inter(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w400,
+                                color: AppColors.onSurfaceVariant,
+                                height: 20 / 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // ── Terms content ───────────────────────────────────
+                _buildTermsContent(screenSize),
+              ],
+            ),
+          ),
+        ),
+
+        // ── Accept checkbox ──────────────────────────────────────
+        if (!widget.isFromSettings)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: const BoxDecoration(
+              border: Border(
+                top: BorderSide(color: AppColors.outlineVariant, width: 0.5),
+              ),
+            ),
+            child: Row(
               children: [
                 Checkbox(
                   value: _termsAccepted,
-                  activeColor: const Color(0xFF323483),
+                  activeColor: AppColors.secondary,
                   onChanged: (value) {
                     setState(() {
                       _termsAccepted = value ?? false;
@@ -282,50 +520,55 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   },
                 ),
                 Expanded(
-                  child: Text(
-                    "I have read and accept the Terms and Conditions",
-                    style: GoogleFonts.inter(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _termsAccepted = !_termsAccepted;
+                      });
+                    },
+                    child: Text(
+                      'I have read and accept the Terms and Conditions',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.onSurface,
+                      ),
                     ),
                   ),
                 ),
               ],
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 
   Widget _buildTermsContent(Size screenSize) {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            TermsConditionsScreen.termsText,
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              color: const Color(0xFF4D4D4D),
-              height: 1.6,
-            ),
-            textAlign: TextAlign.justify,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          TermsConditionsScreen.termsText,
+          style: GoogleFonts.inter(
+            fontSize: 13,
+            color: AppColors.onSurfaceVariant,
+            height: 1.6,
           ),
-        ],
-      ),
+          textAlign: TextAlign.justify,
+        ),
+      ],
     );
   }
 
   Widget _buildDot(int index) {
-    return Container(
+    final bool isActive = _currentPage == index;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
       margin: const EdgeInsets.symmetric(horizontal: 4),
       height: 8,
-      width: _currentPage == index ? 24 : 8,
+      width: isActive ? 28 : 8,
       decoration: BoxDecoration(
-        color:
-            _currentPage == index
-                ? const Color(0xFF323483)
-                : const Color(0xFFE0E0E0),
+        color: isActive ? AppColors.primaryContainer : AppColors.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(4),
       ),
     );

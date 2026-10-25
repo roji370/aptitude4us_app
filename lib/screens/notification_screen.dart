@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/auth_service.dart';
+import '../utils/app_colors.dart';
 import 'chat_screen.dart';
 import 'package:intl/intl.dart';
 
@@ -68,13 +69,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
     final currentUser = Provider.of<AuthService>(context).currentUser;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF323483),
+        backgroundColor: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
         title: Text(
           'Notifications',
           style: GoogleFonts.inter(
-            color: Colors.white,
+            color: AppColors.primary,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -103,7 +105,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
         elevation: 0,
         systemOverlayStyle: const SystemUiOverlayStyle(
           statusBarColor: Colors.transparent,
-          statusBarIconBrightness: Brightness.light,
+          statusBarIconBrightness: Brightness.dark,
         ),
       ),
       body: SafeArea(
@@ -213,7 +215,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                           side: BorderSide(
-                            color: const Color(0xFFC9C8D8),
+                            color: AppColors.outlineVariant,
                             width: 1,
                           ),
                         ),
@@ -236,16 +238,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                 Container(
                                   padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(
-                                    color: const Color(
-                                      0xFF323483,
-                                    ).withAlpha(26),
+                                    color: AppColors.primary.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Icon(
                                     notification['type'] == 'chat'
                                         ? Icons.chat_bubble_outline
                                         : Icons.notifications_none,
-                                    color: const Color(0xFF323483),
+                                    color: AppColors.primary,
                                     size: 20,
                                   ),
                                 ),
@@ -260,7 +260,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                         style: GoogleFonts.inter(
                                           fontSize: 16,
                                           fontWeight: FontWeight.w600,
-                                          color: const Color(0xFF323483),
+                                          color: AppColors.primary,
                                         ),
                                       ),
                                       if (notification['body'] != null) ...[

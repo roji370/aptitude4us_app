@@ -64,6 +64,10 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent> {
   // ── Error / auth state ──
   String? _errorMessage;
 
+  // ── Self-healing: auto-trigger initialize() if splash missed it ──
+  bool _hasTriggeredSelfHeal = false;
+  Timer? _selfHealTimer;
+
   // ── Retry cooldown ──
   Timer? _retryCooldownTimer;
   int _retryCooldownSeconds = 0;
@@ -78,6 +82,7 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent> {
 
   @override
   void dispose() {
+    _selfHealTimer?.cancel();
     _retryCooldownTimer?.cancel();
     _screenshotService.removeListener(_onScreenshotServiceChanged);
     _screenshotService.stopMonitoring();
@@ -421,22 +426,51 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent> {
       (s) => s.dataGeneration,
     );
 
-    // Still loading initial subscription check
+    // DEBUG: Log current state on every build
+    Logger.i(
+      '🔍 ProtectedCourseContent.build() — '
+      'hasCheckedOnce=$hasCheckedOnce, '
+      'hasActiveSubscription=$hasActiveSubscription, '
+      'dataGeneration=$dataGeneration, '
+      'courseId=${widget.courseId}, '
+      'contentTitle=${widget.contentTitle}',
+    );
+
+    // Still loading initial subscription check — self-heal if splash missed it
     if (!hasCheckedOnce) {
-      return _buildLoadingState();
+      Logger.w('⏳ Stuck: hasCheckedOnce is FALSE');
+      if (!_hasTriggeredSelfHeal) {
+        _hasTriggeredSelfHeal = true;
+        _selfHealTimer = Timer(const Duration(seconds: 3), () {
+          if (!mounted) return;
+          final session = Provider.of<SessionProvider>(context, listen: false);
+          if (!session.hasCheckedOnce) {
+            Logger.w('🔧 SELF-HEAL: Splash never called initialize() — triggering now');
+            final authService = Provider.of<AuthService>(context, listen: false);
+            final userId = authService.currentUser?.uid;
+            if (userId != null) {
+              session.initialize(userId);
+            } else {
+              Logger.e('🔧 SELF-HEAL: No userId available — cannot initialize');
+            }
+          }
+        });
+      }
+      return _buildLoadingState(message: 'Verifying access...');
     }
 
     // Subscription expired → show expired screen
     if (!hasActiveSubscription) {
       Logger.w(
-        '🚫 Content access denied - subscription expired',
+        '🚫 Content access denied - subscription expired '
+        '(hasCheckedOnce=$hasCheckedOnce, hasActive=$hasActiveSubscription)',
       );
       if (!_isNavigatingToSubscription) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _navigateToSubscriptionScreen();
         });
       }
-      return _buildLoadingState();
+      return _buildLoadingState(message: 'Subscription not active [B]');
     }
 
     // ── Subscription is active. Check course assignment if courseId is set. ──
@@ -459,7 +493,7 @@ class _ProtectedCourseContentState extends State<ProtectedCourseContent> {
 
       // Still checking course assignment
       if (_isCourseCheckLoading || _isCourseAssigned == null) {
-        return _buildLoadingState(message: 'Checking course access...');
+        return _buildLoadingState(message: 'Checking course access... [C]');
       }
 
       // Course not assigned — show "not assigned" screen with retry

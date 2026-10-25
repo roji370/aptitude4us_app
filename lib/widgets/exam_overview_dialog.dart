@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
 
@@ -57,13 +58,13 @@ class ExamOverviewDialog extends StatelessWidget {
                 width: ResponsiveHelper.adaptiveFontSize(context, 80.0),
                 height: ResponsiveHelper.adaptiveFontSize(context, 80.0),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1565C0).withOpacity(0.1),
+                  color: AppColors.primary.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   Icons.play_circle_outline,
                   size: ResponsiveHelper.adaptiveFontSize(context, 48.0),
-                  color: const Color(0xFF1565C0),
+                  color: AppColors.primary,
                 ),
               ),
               
@@ -158,7 +159,7 @@ class ExamOverviewDialog extends StatelessWidget {
                     onProceed(); // Execute the callback
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1565C0),
+                    backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
                     elevation: 2,
                     shape: RoundedRectangleBorder(

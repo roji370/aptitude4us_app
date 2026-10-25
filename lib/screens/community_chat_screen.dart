@@ -6,6 +6,7 @@ import '../services/community_chat_service.dart';
 import '../services/attachment_service.dart';
 import '../services/auth_service.dart';
 import '../services/auth_persistence_service.dart';
+import '../utils/app_colors.dart';
 import '../widgets/community_chat_message_bubble.dart';
 import '../widgets/attachment_picker.dart';
 import '../widgets/protected_course_content.dart';
@@ -943,7 +944,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen>
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
                             valueColor: AlwaysStoppedAnimation<Color>(
-                              Color(0xFF1565C0),
+                              AppColors.secondary,
                             ),
                           ),
                         )
