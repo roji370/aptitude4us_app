@@ -1,4 +1,0 @@
-Implementing:
-1. SharedPreferences to markContentItemAsSeen and check in getContentItemUpdateInfo.
-2. Remove markContentTypeAsSeen from ContentTypesScreen tap handler.
-3. Check and call markContentTypeAsSeen from ContentByTypeScreen if all items seen.
