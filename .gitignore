@@ -165,7 +165,7 @@ lib/generated_plugin_registrant.dart
 
 # Release artifacts
 release/
-briffini-academy-*.apk
+aptitude4us-*.apk
 
 # iOS Project files to ignore
 ios/Runner.xcodeproj/*
