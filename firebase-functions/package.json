@@ -1,6 +1,6 @@
 {
-  "name": "briffini-app-functions",
-  "description": "Cloud Functions for Briffini App",
+  "name": "aptitude4us-app-functions",
+  "description": "Cloud Functions for Student App",
   "scripts": {
     "lint": "eslint .",
     "serve": "firebase emulators:start --only functions",
