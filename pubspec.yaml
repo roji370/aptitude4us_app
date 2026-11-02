@@ -1,5 +1,5 @@
-name: xfini_academy
-description: "Xfini Academy - A comprehensive learning platform for students with interactive content, messaging, and progress tracking."
+name: aptitude4us_academy
+description: "Aptitude4us - A comprehensive learning platform for students with interactive content, messaging, and progress tracking."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.2.4+23 
+version: 1.0.0+1 
 
 environment:
   sdk: ^3.7.2
@@ -91,7 +91,7 @@ dev_dependencies:
 flutter_launcher_icons:
   ios: true
   remove_alpha_ios: true
-  image_path: "assets/images/logo/splash_logo.png"
+  image_path: "assets/images/logo/aptitude4us_splash_logo.png"
   
 
 # Override flutter_pdfview with local vendored copy that disables
@@ -113,8 +113,11 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
+    - assets/logo.png
     - assets/images/
-    - assets/images/xfini_logo.png
+    - assets/images/aptitude4us_logo.png
+    - assets/images/logo/
+    - assets/images/logo/aptitude4us_splash_logo.png
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
 
