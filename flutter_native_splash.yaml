@@ -4,8 +4,8 @@ flutter_native_splash:
   color: "#FFFFFF"  # Pure white
   color_dark: "#FFFFFF"  # Consistent across light/dark modes
   
-  # Minimal logo - shows briefly while Flutter engine loads
-  image: assets/images/logo/splash_logo.png
+  # Aptitude4Us branded logo - shows briefly while Flutter engine loads
+  image: assets/images/logo/aptitude4us_splash_logo.png
   
   # Image sizing - center for clean look
   android_gravity: center
@@ -21,6 +21,6 @@ flutter_native_splash:
   
   # Android 12+ specific settings - disabled for faster startup
   android_12:
-    image: assets/images/logo/splash_logo.png
+    image: assets/images/logo/aptitude4us_splash_logo.png
     color: "#FFFFFF"
     icon_background_color: "#FFFFFF"
