@@ -57,3 +57,12 @@
 -dontwarn androidx.window.sidecar.SidecarInterface
 -dontwarn androidx.window.sidecar.SidecarProvider
 -dontwarn androidx.window.sidecar.SidecarWindowLayoutInfo
+
+# Pdfium - PDF rendering native library (prevent R8 from stripping JNI methods)
+-keep class com.shockwave.** { *; }
+-keepclassmembers class com.shockwave.** { *; }
+-dontwarn com.shockwave.**
+
+# Android PDF Viewer (used by flutter_pdfview)
+-keep class io.github.oothp.** { *; }
+-dontwarn io.github.oothp.**
