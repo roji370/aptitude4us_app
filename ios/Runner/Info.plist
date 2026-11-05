@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Xfini Academy</string>
+	<string>Aptitude4us</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -82,7 +82,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>briffini_academy</string>
+	<string>aptitude4us</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -93,10 +93,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.briffini.academy.filehandler</string>
+			<string>com.aptitude4us.academy.filehandler</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>briffini-file</string>
+				<string>aptitude4us-file</string>
 			</array>
 		</dict>
 	</array>
