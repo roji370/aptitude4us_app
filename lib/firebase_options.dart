@@ -28,57 +28,58 @@ class DefaultFirebaseOptions {
 
   // Web configuration
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyCxGroehAVetfOyNexCJglaY06ishxcrSE',
-    appId: '1:296902325405:web:443c0d4b0e8bffd8969074',
-    messagingSenderId: '296902325405',
-    projectId: 'course-c18bb',
-    authDomain: 'course-c18bb.firebaseapp.com',
-    storageBucket: 'course-c18bb.firebasestorage.app',
-    measurementId: 'G-481TZLW9M7',
+    apiKey: 'AIzaSyAOvAz4i5DBIvqY4kNGVXOE3iqgq1mbapU',
+    appId: '1:963626043371:web:deedca113df0f92f21fbae',
+    messagingSenderId: '963626043371',
+    projectId: 'apt4us-afb04',
+    authDomain: 'apt4us-afb04.firebaseapp.com',
+    storageBucket: 'apt4us-afb04.firebasestorage.app',
   );
 
   // Android configuration
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyCxGroehAVetfOyNexCJglaY06ishxcrSE',
-    appId: '1:296902325405:android:296902325405123456789',
-    messagingSenderId: '296902325405',
-    projectId: 'course-c18bb',
-    storageBucket: 'course-c18bb.firebasestorage.app',
+    apiKey: 'AIzaSyAGgSfuDEbaIpYerS2D3o3K7UKNZZrwb4g',
+    appId: '1:963626043371:android:8c6b2d5cf23b802221fbae',
+    messagingSenderId: '963626043371',
+    projectId: 'apt4us-afb04',
+    storageBucket: 'apt4us-afb04.firebasestorage.app',
   );
 
   // iOS configuration
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyCXE9XOu9W-yr0oHs-geQYJjzQ9UnsPcB4',
-    appId: '1:296902325405:ios:31e16c468a855d13969074',
-    messagingSenderId: '296902325405',
-    projectId: 'course-c18bb',
-    storageBucket: 'course-c18bb.firebasestorage.app',
-    iosBundleId: 'com.briffini.academy',
+    apiKey: 'AIzaSyBCQj1-naA5C31B9LueBAy4f9FQpMKCjhI',
+    appId: '1:963626043371:ios:645e7c5b6ceee18321fbae',
+    messagingSenderId: '963626043371',
+    projectId: 'apt4us-afb04',
+    storageBucket: 'apt4us-afb04.firebasestorage.app',
+    iosBundleId: 'com.aptitude4us.academy',
   );
 
-  // Other platforms
+  // macOS configuration (uses same as iOS)
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyCxGroehAVetfOyNexCJglaY06ishxcrSE',
-    appId: '1:296902325405:macos:your_macos_app_id',
-    messagingSenderId: '296902325405',
-    projectId: 'course-c18bb',
-    storageBucket: 'course-c18bb.firebasestorage.app',
-    iosBundleId: 'com.briffini.academy',
+    apiKey: 'AIzaSyBCQj1-naA5C31B9LueBAy4f9FQpMKCjhI',
+    appId: '1:963626043371:ios:645e7c5b6ceee18321fbae',
+    messagingSenderId: '963626043371',
+    projectId: 'apt4us-afb04',
+    storageBucket: 'apt4us-afb04.firebasestorage.app',
+    iosBundleId: 'com.aptitude4us.academy',
   );
 
+  // Windows configuration (uses web config as fallback)
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyCxGroehAVetfOyNexCJglaY06ishxcrSE',
-    appId: '1:296902325405:windows:your_windows_app_id',
-    messagingSenderId: '296902325405',
-    projectId: 'course-c18bb',
-    storageBucket: 'course-c18bb.firebasestorage.app',
+    apiKey: 'AIzaSyAOvAz4i5DBIvqY4kNGVXOE3iqgq1mbapU',
+    appId: '1:963626043371:web:deedca113df0f92f21fbae',
+    messagingSenderId: '963626043371',
+    projectId: 'apt4us-afb04',
+    storageBucket: 'apt4us-afb04.firebasestorage.app',
   );
 
+  // Linux configuration (uses web config as fallback)
   static const FirebaseOptions linux = FirebaseOptions(
-    apiKey: 'AIzaSyCxGroehAVetfOyNexCJglaY06ishxcrSE',
-    appId: '1:296902325405:linux:your_linux_app_id',
-    messagingSenderId: '296902325405',
-    projectId: 'course-c18bb',
-    storageBucket: 'course-c18bb.firebasestorage.app',
+    apiKey: 'AIzaSyAOvAz4i5DBIvqY4kNGVXOE3iqgq1mbapU',
+    appId: '1:963626043371:web:deedca113df0f92f21fbae',
+    messagingSenderId: '963626043371',
+    projectId: 'apt4us-afb04',
+    storageBucket: 'apt4us-afb04.firebasestorage.app',
   );
 }
