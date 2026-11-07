@@ -7,10 +7,10 @@ import 'logger.dart';
 
 /// Secure-storage key for the device ID.
 /// Stored in iOS Keychain / Android EncryptedSharedPreferences.
-const String _secureDeviceIdKey = 'briffini_device_id_secure';
+const String _secureDeviceIdKey = 'app_device_id_secure';
 
 /// Legacy SharedPreferences key — used only during one-time migration.
-const String _legacyDeviceIdKey = 'briffini_device_id';
+const String _legacyDeviceIdKey = 'app_device_id';
 
 /// Concurrency guard: ensures only one migration / generation runs at a time.
 Completer<String>? _pendingGetDeviceId;
