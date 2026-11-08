@@ -15,6 +15,11 @@ class CommunityChatMessage {
   final String? replyToMessageId;
   final CommunityChatMessage? replyToMessage;
 
+  /// Whether this message has pending local writes (not yet confirmed by server).
+  /// Set from `doc.metadata.hasPendingWrites` in `fromFirestore`.
+  /// Never persisted to Firestore — it's a client-only field.
+  final bool isPending;
+
   CommunityChatMessage({
     required this.id,
     required this.senderId,
@@ -28,6 +33,7 @@ class CommunityChatMessage {
     this.attachment,
     this.replyToMessageId,
     this.replyToMessage,
+    this.isPending = false,
   });
 
   factory CommunityChatMessage.fromFirestore(DocumentSnapshot doc) {
@@ -53,6 +59,7 @@ class CommunityChatMessage {
       attachment: attachment,
       replyToMessageId: data['replyToMessageId'],
       replyToMessage: null, // Will be populated separately if needed
+      isPending: doc.metadata.hasPendingWrites,
     );
   }
 
@@ -100,6 +107,7 @@ class CommunityChatMessage {
     AttachmentData? attachment,
     String? replyToMessageId,
     CommunityChatMessage? replyToMessage,
+    bool? isPending,
   }) {
     return CommunityChatMessage(
       id: id ?? this.id,
@@ -114,6 +122,7 @@ class CommunityChatMessage {
       attachment: attachment ?? this.attachment,
       replyToMessageId: replyToMessageId ?? this.replyToMessageId,
       replyToMessage: replyToMessage ?? this.replyToMessage,
+      isPending: isPending ?? this.isPending,
     );
   }
 }
