@@ -14,6 +14,9 @@ class MessageBubble extends StatefulWidget {
   final bool isHighlighted;
   final Animation<double>? highlightAnimation;
   final Function(String messageId)? onScrollToMessage;
+  /// Whether to play the built-in slide+scale entrance animation.
+  /// Set to false for cached / paginated messages to avoid stale re-animation.
+  final bool animate;
 
   const MessageBubble({
     super.key,
@@ -25,6 +28,7 @@ class MessageBubble extends StatefulWidget {
     this.isHighlighted = false,
     this.highlightAnimation,
     this.onScrollToMessage,
+    this.animate = true,
   });
 
   @override
@@ -56,7 +60,12 @@ class _MessageBubbleState extends State<MessageBubble>
       CurvedAnimation(parent: _animationController, curve: Curves.easeOutCubic),
     );
 
-    _animationController.forward();
+    if (widget.animate) {
+      _animationController.forward();
+    } else {
+      // Skip animation — show at final state immediately.
+      _animationController.value = 1.0;
+    }
   }
 
   @override

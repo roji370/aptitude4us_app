@@ -16,6 +16,11 @@ class CommunityChatMessageBubble extends StatefulWidget {
   final bool isHighlighted;
   final Animation<double>? highlightAnimation;
 
+  /// Whether to play the built-in slide+scale entrance animation.
+  /// Set to false for cached / paginated / existing messages to avoid
+  /// stale re-animation on every scroll into cache extent.
+  final bool animate;
+
   const CommunityChatMessageBubble({
     super.key,
     required this.message,
@@ -25,6 +30,7 @@ class CommunityChatMessageBubble extends StatefulWidget {
     this.showAvatar = true,
     this.isHighlighted = false,
     this.highlightAnimation,
+    this.animate = true,
   });
 
   @override
@@ -56,7 +62,12 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
       CurvedAnimation(parent: _animationController, curve: Curves.easeOutCubic),
     );
 
-    _animationController.forward();
+    if (widget.animate) {
+      _animationController.forward();
+    } else {
+      // Skip animation — show at final state immediately.
+      _animationController.value = 1.0;
+    }
   }
 
   @override
@@ -660,26 +671,33 @@ class _CommunityChatMessageBubbleState extends State<CommunityChatMessageBubble>
     IconData iconData;
     Color iconColor;
 
-    switch (widget.message.status) {
-      case 'sending':
-        iconData = Icons.schedule;
-        iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5);
-        break;
-      case 'sent':
-        iconData = Icons.check;
-        iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7);
-        break;
-      case 'delivered':
-        iconData = Icons.done_all;
-        iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7);
-        break;
-      case 'read':
-        iconData = Icons.done_all;
-        iconColor = theme.colorScheme.primary;
-        break;
-      default:
-        iconData = Icons.check;
-        iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5);
+    // If the message has pending local writes (not yet confirmed by server),
+    // always show the clock icon regardless of the status field.
+    if (widget.message.isPending) {
+      iconData = Icons.schedule;
+      iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5);
+    } else {
+      switch (widget.message.status) {
+        case 'sending':
+          iconData = Icons.schedule;
+          iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5);
+          break;
+        case 'sent':
+          iconData = Icons.check;
+          iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7);
+          break;
+        case 'delivered':
+          iconData = Icons.done_all;
+          iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7);
+          break;
+        case 'read':
+          iconData = Icons.done_all;
+          iconColor = theme.colorScheme.primary;
+          break;
+        default:
+          iconData = Icons.check;
+          iconColor = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5);
+      }
     }
 
     return Icon(
