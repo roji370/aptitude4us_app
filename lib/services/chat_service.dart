@@ -12,6 +12,40 @@ class ChatService {
   final AuthService _authService = AuthService();
   final int _messagesPerPage = 20; // Number of messages to load per batch
 
+  // ── Static in-memory cache for instant chat open ──
+  static List<Map<String, dynamic>> _cache = [];
+
+  /// Returns a shallow copy of the cached messages (newest first).
+  static List<Map<String, dynamic>> get cachedMessages => List.of(_cache);
+
+  /// Update the cache with the latest messages (keeps at most 30).
+  /// Filters out any unconfirmed temp-* or failed messages so the next
+  /// screen open never shows stale optimistic bubbles.
+  static void updateCache(List<Map<String, dynamic>> m) {
+    _cache = m
+        .where((msg) {
+          final id = msg['id'] as String?;
+          if (id != null && id.startsWith('temp-')) return false;
+          if (msg['status'] == 'failed') return false;
+          return true;
+        })
+        .take(30)
+        .toList();
+  }
+
+  /// Clear the cache (call on sign-out so one user never sees another's data).
+  static void clearCache() => _cache = [];
+
+  /// Pre-fetch the first page of messages into the static cache.
+  /// Safe to call from splash / home screen on a fire-and-forget basis.
+  Future<void> prefetch() async {
+    try {
+      _cache = await getMessagesPaginated(limit: 20);
+    } catch (e) {
+      Logger.w('ChatService.prefetch failed (non-blocking): $e');
+    }
+  }
+
   // Get the actual user display name from UserModel
   Future<String> _getUserDisplayName() async {
     try {
@@ -41,9 +75,10 @@ class ChatService {
     }
   }
 
-  // Get messages with pagination
+  // Get messages with pagination using compound cursor (timestamp + docId)
   Future<List<Map<String, dynamic>>> getMessagesPaginated({
-    DocumentSnapshot? lastDocument,
+    Timestamp? lastTimestamp,
+    String? lastId,
     int limit = 20,
   }) async {
     final user = _auth.currentUser;
@@ -56,7 +91,8 @@ class ChatService {
         _createPaginatedQuery(
           field: 'receiverId',
           value: user.uid,
-          lastDocument: lastDocument,
+          lastTimestamp: lastTimestamp,
+          lastId: lastId,
           limit: limit,
         ),
 
@@ -64,7 +100,8 @@ class ChatService {
         _createPaginatedQuery(
           field: 'senderId',
           value: user.uid,
-          lastDocument: lastDocument,
+          lastTimestamp: lastTimestamp,
+          lastId: lastId,
           limit: limit,
         ),
 
@@ -72,7 +109,8 @@ class ChatService {
         _createPaginatedQuery(
           field: 'receiverId',
           value: 'ALL',
-          lastDocument: lastDocument,
+          lastTimestamp: lastTimestamp,
+          lastId: lastId,
           limit: limit,
         ),
       ];
@@ -88,17 +126,23 @@ class ChatService {
         allMessages.addAll(_processQuerySnapshot(snapshot));
       }
 
-      // Deduplicate by message ID
+      // Deduplicate by message ID (safety net)
       final Map<String, Map<String, dynamic>> uniqueMessages = {};
       for (var msg in allMessages) {
         uniqueMessages[msg['id']] = msg;
       }
 
-      // Convert to list and sort by timestamp
+      // Convert to list and sort by timestamp desc, then docId desc
       final result = uniqueMessages.values.toList();
-      result.sort((a, b) => b['timestamp'].compareTo(a['timestamp']));
+      result.sort((a, b) {
+        final tsCompare = b['timestamp'].compareTo(a['timestamp']);
+        if (tsCompare != 0) return tsCompare;
+        return (b['id'] as String).compareTo(a['id'] as String);
+      });
 
-      // Limit to the requested number
+      // Limit to the requested number.
+      // Messages fetched but trimmed are older than the new cursor, so the
+      // next page will pick them up correctly — no gaps, no duplicates.
       return result.take(limit).toList();
     } catch (e) {
       Logger.e('Error fetching paginated messages: $e');
@@ -106,24 +150,62 @@ class ChatService {
     }
   }
 
-  // Create a query with pagination
+  // Create a query with compound cursor pagination
   Query _createPaginatedQuery({
     required String field,
     required dynamic value,
-    DocumentSnapshot? lastDocument,
+    Timestamp? lastTimestamp,
+    String? lastId,
     required int limit,
   }) {
     Query query = _firestore
         .collection('messages')
         .where(field, isEqualTo: value)
         .orderBy('timestamp', descending: true)
+        .orderBy(FieldPath.documentId, descending: true)
         .limit(limit);
 
-    if (lastDocument != null) {
-      query = query.startAfterDocument(lastDocument);
+    if (lastTimestamp != null && lastId != null) {
+      query = query.startAfter([lastTimestamp, lastId]);
     }
 
     return query;
+  }
+
+  /// Lightweight stream that emits whenever the newest message for the current
+  /// user changes. Uses `limit(1)` per query for minimal Firestore reads.
+  /// Each emission is a record with the doc's id, senderId, and clientId
+  /// so the listener can make a targeted skip decision.
+  Stream<({String id, String? senderId, String? clientId})?> newestMessageStream() {
+    final user = _auth.currentUser;
+    if (user == null) return Stream.value(null);
+
+    Stream<({String id, String? senderId, String? clientId})?> latestDoc(
+        String field, dynamic value) {
+      return _firestore
+          .collection('messages')
+          .where(field, isEqualTo: value)
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .snapshots()
+          .map((snap) {
+        if (snap.docs.isEmpty) return null;
+        final doc = snap.docs.first;
+        final data = doc.data();
+        return (
+          id: doc.id,
+          senderId: data['senderId'] as String?,
+          clientId: data['clientId'] as String?,
+        );
+      });
+    }
+
+    // Merge all three — emits whenever ANY stream fires a change.
+    return Rx.merge([
+      latestDoc('receiverId', user.uid),
+      latestDoc('senderId', user.uid),
+      latestDoc('receiverId', 'ALL'),
+    ]);
   }
 
   // Legacy method for backward compatibility
@@ -195,7 +277,8 @@ class ChatService {
         'id': doc.id,
         ...data,
         'timestamp': data['timestamp']?.toDate() ?? DateTime.now(),
-        'document': doc, // Include the document reference for pagination
+        // Keep the raw Firestore Timestamp for compound cursor pagination.
+        '_firestoreTimestamp': data['timestamp'],
       };
     }).toList();
   }
@@ -204,6 +287,7 @@ class ChatService {
   Future<Map<String, dynamic>> sendMessage({
     required String text,
     String? replyToMessageId,
+    String? clientId,
   }) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -225,6 +309,11 @@ class ChatService {
         'type': 'text',
       };
 
+      // Persist clientId so the fetch path can match temp → confirmed.
+      if (clientId != null) {
+        messageData['clientId'] = clientId;
+      }
+
       // Add reply information if provided
       if (replyToMessageId != null) {
         messageData['replyToMessageId'] = replyToMessageId;
@@ -245,6 +334,7 @@ class ChatService {
     required AttachmentData attachment,
     String? text,
     String? replyToMessageId,
+    String? clientId,
   }) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -275,6 +365,11 @@ class ChatService {
         'type': messageType,
         'attachment': attachment.toMap(),
       };
+
+      // Persist clientId so the fetch path can match temp → confirmed.
+      if (clientId != null) {
+        messageData['clientId'] = clientId;
+      }
 
       // Add reply information if provided
       if (replyToMessageId != null) {
