@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -5,12 +6,14 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../services/chat_service.dart';
 import '../services/attachment_service.dart';
 import '../utils/app_colors.dart';
+import '../utils/chat_merge.dart';
 import '../widgets/attachment_picker.dart';
 import '../utils/logger.dart';
 import '../utils/responsive_helper.dart';
 import '../widgets/protected_course_content.dart';
 
 import '../widgets/message_bubble.dart';
+import '../widgets/new_message_entrance.dart';
 import '../widgets/reply_input_widget.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -32,7 +35,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   bool _isLoadingMore = false;
   bool _hasMoreMessages = true;
   bool _isSending = false;
-  DocumentSnapshot? _lastDocument;
+  // Compound cursor for correct cross-query pagination.
+  Timestamp? _lastCursorTimestamp;
+  String? _lastCursorId;
   String? _error;
   final int _messagesPerBatch = 20;
 
@@ -54,13 +59,134 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   late Animation<double> _inputScaleAnimation;
   late Animation<double> _fabScaleAnimation;
 
+  // ── Entrance animation tracking ──
+  // Only ids/clientIds in this set will play the entrance animation.
+  // Messages from cache, initial load, and pagination are NEVER added.
+  final Set<String> _entering = {};
+
+  // ── Pending incoming messages (user is scrolled up) ──
+  // Held here instead of inserting into _messages, to avoid shifting the
+  // scroll position. Merged in when the user taps the pill or scrolls back
+  // near the bottom.
+  List<Map<String, dynamic>> _pendingIncoming = [];
+
+  // ── Pending full replace (stale cache while scrolled up) ──
+  // When mergeFetchedPage returns wasReplaced but the user is scrolled up,
+  // store the fetched page here. Applied on pill tap / scroll-to-bottom.
+  // Not null when a deferred replace is waiting.
+  List<Map<String, dynamic>>? _pendingReplace;
+
+  // ── Live listener for incoming messages ──
+  StreamSubscription<({String id, String? senderId, String? clientId})?>?
+      _newestMessageSub;
+  String? _lastKnownNewestId;
+
+  // ── Refresh guard: prevents overlapping silent refreshes ──
+  bool _isRefreshing = false;
+  bool _refreshQueued = false;
+
   @override
   void initState() {
     super.initState();
     _initializeAnimations();
-    _loadInitialMessages();
     _setupScrollListener();
     _setupInputListener();
+
+    // ── Cache-first instant open ──
+    final cached = ChatService.cachedMessages;
+    if (cached.isNotEmpty) {
+      _messages = cached;
+      _isLoading = false;
+      _hasMoreMessages = cached.length >= _messagesPerBatch;
+      _extractCursor(cached);
+      // Silently refresh in the background — don't show spinner.
+      _requestSilentRefresh();
+    } else {
+      // No cache — show skeleton, then load.
+      _loadInitialMessages();
+    }
+
+    // Start listening for new incoming messages in real time.
+    _startLiveListener();
+  }
+
+  /// Extract the compound cursor (timestamp + docId) from the last message
+  /// in a list. Works with both cached and freshly-fetched messages.
+  void _extractCursor(List<Map<String, dynamic>> messages) {
+    if (messages.isEmpty) return;
+    final last = messages.last;
+    _lastCursorTimestamp = last['_firestoreTimestamp'] as Timestamp?;
+    _lastCursorId = last['id'] as String?;
+  }
+
+  /// Lightweight Firestore listener (3× limit-1 queries merged) that detects
+  /// new messages in real time and triggers a silent refresh.
+  void _startLiveListener() {
+    _newestMessageSub = _chatService.newestMessageStream().listen((event) {
+      if (!mounted || event == null) return;
+      if (event.id == _lastKnownNewestId) return;
+
+      // If this message is already in our list (by doc id), nothing to do.
+      if (_messages.any((m) => m['id'] == event.id) ||
+          _pendingIncoming.any((m) => m['id'] == event.id) ||
+          (_pendingReplace?.any((m) => m['id'] == event.id) ?? false)) {
+        _lastKnownNewestId = event.id;
+        return;
+      }
+
+      // Skip ONLY if this is our own in-flight send: the emitted doc's
+      // clientId matches a temp-* bubble we're still holding. _sendMessage
+      // will swap it in place. Everything else (admin messages, broadcasts,
+      // other users' messages) always triggers a refresh.
+      if (event.clientId != null) {
+        final isOwnInFlight = _messages.any((m) {
+          final id = m['id'] as String?;
+          return m['clientId'] == event.clientId &&
+              id != null &&
+              id.startsWith('temp-');
+        });
+        if (isOwnInFlight) {
+          _lastKnownNewestId = event.id;
+          return;
+        }
+      }
+
+      // Don't set _lastKnownNewestId yet — only after a successful refresh.
+      // If the fetch fails (flaky network), the next event for the same id
+      // must retry instead of being silently skipped.
+      _requestSilentRefresh(pendingNewestId: event.id);
+    });
+  }
+
+  /// Guarded entry point for silent refreshes. Prevents overlapping fetches:
+  /// if a refresh is already running, queues exactly one follow-up.
+  /// [pendingNewestId] — the newest-message id that triggered this refresh;
+  /// set as [_lastKnownNewestId] only on success.
+  void _requestSilentRefresh({String? pendingNewestId}) {
+    if (_isRefreshing) {
+      _refreshQueued = true;
+      return;
+    }
+    _doSilentRefresh(pendingNewestId: pendingNewestId);
+  }
+
+  Future<void> _doSilentRefresh({String? pendingNewestId}) async {
+    _isRefreshing = true;
+    _refreshQueued = false;
+    try {
+      await _loadInitialMessages(silent: true);
+      // Only mark the id as processed after a successful refresh.
+      if (pendingNewestId != null) {
+        _lastKnownNewestId = pendingNewestId;
+      }
+    } finally {
+      _isRefreshing = false;
+      // If another refresh was requested while we were running, run one more.
+      if (_refreshQueued && mounted) {
+        _refreshQueued = false;
+        _doSilentRefresh();
+      }
+    }
   }
 
   void _initializeAnimations() {
@@ -111,36 +237,158 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   void _setupScrollListener() {
     _scrollController.addListener(() {
+      if (!mounted) return;
+
+      // Pagination: load more when near the top (oldest messages).
       if (_scrollController.position.pixels >=
               _scrollController.position.maxScrollExtent - 200 &&
           !_isLoadingMore &&
           _hasMoreMessages) {
         _loadMoreMessages();
       }
+
+      // Merge pending incoming / apply deferred replace when near bottom.
+      if (_scrollController.offset < 100) {
+        if (_pendingReplace != null) {
+          _applyPendingReplace();
+        } else if (_pendingIncoming.isNotEmpty) {
+          _mergePendingIncoming();
+        }
+      }
     });
   }
 
-  Future<void> _loadInitialMessages() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  Future<void> _loadInitialMessages({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
 
     try {
-      final messages = await _chatService.getMessagesPaginated(
+      final fetched = await _chatService.getMessagesPaginated(
         limit: _messagesPerBatch,
       );
 
-      setState(() {
-        _messages = messages;
-        _isLoading = false;
-        _hasMoreMessages = messages.length >= _messagesPerBatch;
+      if (!mounted) return;
 
-        if (messages.isNotEmpty) {
-          _lastDocument = messages.last['document'];
+      if (!silent) {
+        // ── First load (no existing messages) — just set the list. ──
+        setState(() {
+          _messages = fetched;
+          _isLoading = false;
+          _hasMoreMessages = fetched.length >= _messagesPerBatch;
+          _extractCursor(fetched);
+        });
+        ChatService.updateCache(fetched);
+        return;
+      }
+
+      // ── Silent refresh: merge page-1 into the existing list. ──
+      final currentUid = FirebaseAuth.instance.currentUser?.uid;
+      final result = mergeFetchedPage(
+        existing: _messages,
+        fetched: fetched,
+        currentUid: currentUid,
+      );
+
+      final isNearBottom = !_scrollController.hasClients ||
+          _scrollController.offset < 100;
+
+      if (result.wasReplaced) {
+        if (isNearBottom) {
+          // Stale cache, near bottom — apply immediately.
+          setState(() {
+            _messages = result.messages;
+            _hasMoreMessages = fetched.length >= _messagesPerBatch;
+            _extractCursor(fetched);
+            _pendingIncoming = [];
+            _pendingReplace = null;
+          });
+          // Animate incoming messages.
+          for (final key in result.newIncomingKeys) {
+            _entering.add(key);
+          }
+        } else {
+          // Stale cache, scrolled up — defer the replace.
+          // Don't touch _messages, cursor, or scroll position.
+          setState(() {
+            _pendingReplace = fetched;
+            // Clear any older pending incoming — they're obsolete now.
+            _pendingIncoming = [];
+          });
         }
-      });
+      } else if (result.newIncomingKeys.isEmpty) {
+        // No new messages — just update existing entries in-place.
+        setState(() {
+          _messages = result.messages;
+        });
+      } else if (isNearBottom) {
+        // Near bottom — insert new messages directly and animate.
+        for (final key in result.newIncomingKeys) {
+          _entering.add(key);
+        }
+        setState(() {
+          _messages = result.messages;
+        });
+        // Auto-scroll to bottom.
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            0,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
+        }
+      } else {
+        // Scrolled up — hold new messages in _pendingIncoming.
+        // Update existing entries in-place (keys that already existed).
+        // But do NOT insert the new messages into _messages.
+        final updatedWithoutNew = mergeFetchedPage(
+          existing: _messages,
+          fetched: fetched.where((msg) {
+            final key =
+                (msg['clientId'] as String?) ?? (msg['id'] as String?) ?? '';
+            return !result.newIncomingKeys.contains(key);
+          }).toList(),
+          currentUid: currentUid,
+        );
+        setState(() {
+          _messages = updatedWithoutNew.messages;
+          // Add genuinely new messages to pending.
+          for (final msg in fetched) {
+            final key =
+                (msg['clientId'] as String?) ?? (msg['id'] as String?) ?? '';
+            if (result.newIncomingKeys.contains(key)) {
+              // Avoid duplicates in pending.
+              if (!_pendingIncoming.any((m) =>
+                  ((m['clientId'] as String?) ?? (m['id'] as String?)) ==
+                  key)) {
+                _pendingIncoming.add(msg);
+              }
+            }
+          }
+        });
+      }
+
+      // Only set cursor if we didn't have one (first load from cache path).
+      if (_lastCursorTimestamp == null && fetched.isNotEmpty) {
+        _extractCursor(fetched);
+      }
+
+      // Cache only the latest page.
+      ChatService.updateCache(fetched);
     } catch (e) {
+      if (!mounted) return;
+
+      // In silent mode, swallow the error — stale cache is better than a
+      // spinner or error screen. Do NOT mark _lastKnownNewestId; the caller
+      // (_doSilentRefresh) only marks it on success.
+      if (silent) {
+        Logger.w('Silent refresh failed (keeping cache): $e');
+        return;
+      }
+
       setState(() {
         _error = 'Error loading messages: $e';
         _isLoading = false;
@@ -149,8 +397,102 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 
+  /// Merge pending incoming messages into _messages and scroll to bottom.
+  /// Called when the user taps the "new messages" pill or scrolls near bottom.
+  void _mergePendingIncoming() {
+    if (_pendingIncoming.isEmpty) return;
+
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+
+    // Add animation keys for the pending messages.
+    for (final msg in _pendingIncoming) {
+      final key =
+          (msg['clientId'] as String?) ?? (msg['id'] as String?) ?? '';
+      if (key.isNotEmpty && msg['senderId'] != currentUid) {
+        _entering.add(key);
+      }
+    }
+
+    // Merge pending into the existing list.
+    final merged = mergeFetchedPage(
+      existing: _messages,
+      fetched: _pendingIncoming,
+      currentUid: currentUid,
+    );
+
+    setState(() {
+      _messages = merged.messages;
+      _pendingIncoming = [];
+    });
+
+    // Scroll to bottom.
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  /// Apply a deferred full replace (stale cache while scrolled up).
+  /// Replaces _messages with the stored fetched page, keeping in-flight
+  /// temp-* bubbles pinned at front. Resets cursor and pagination.
+  /// No entrance animations — the user is jumping to a fresh view.
+  void _applyPendingReplace() {
+    if (!mounted) return;
+    final fetched = _pendingReplace;
+    if (fetched == null) return;
+
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+
+    // mergeFetchedPage with the current _messages preserves in-flight temps
+    // and returns wasReplaced=true with temps pinned at front.
+    final result = mergeFetchedPage(
+      existing: _messages,
+      fetched: fetched,
+      currentUid: currentUid,
+    );
+
+    setState(() {
+      _messages = result.messages;
+      _hasMoreMessages = fetched.length >= _messagesPerBatch;
+      _pendingReplace = null;
+      _pendingIncoming = [];
+    });
+    _extractCursor(fetched);
+
+    // Jump to bottom with no animation on the messages.
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+
+    // The stored page may be minutes old — refresh to catch anything newer.
+    _requestSilentRefresh();
+  }
+
+  /// Pill tap handler — applies a deferred replace if one is pending,
+  /// otherwise merges pending incoming messages.
+  void _onPendingPillTapped() {
+    if (!mounted) return;
+    if (_pendingReplace != null) {
+      _applyPendingReplace();
+    } else {
+      _mergePendingIncoming();
+    }
+  }
+
+  /// Label for the "new messages" pill.
+  String get _pendingPillLabel {
+    if (_pendingReplace != null) {
+      return 'New messages';
+    }
+    final n = _pendingIncoming.length;
+    return n == 1 ? '1 new message' : '$n new messages';
+  }
+
   Future<void> _loadMoreMessages() async {
-    if (!_hasMoreMessages || _lastDocument == null) return;
+    if (!_hasMoreMessages || _lastCursorTimestamp == null || _lastCursorId == null) return;
 
     setState(() {
       _isLoadingMore = true;
@@ -158,7 +500,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
     try {
       final moreMessages = await _chatService.getMessagesPaginated(
-        lastDocument: _lastDocument,
+        lastTimestamp: _lastCursorTimestamp,
+        lastId: _lastCursorId,
         limit: _messagesPerBatch,
       );
 
@@ -167,7 +510,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       setState(() {
         if (moreMessages.isNotEmpty) {
           _messages.addAll(moreMessages);
-          _lastDocument = moreMessages.last['document'];
+          _extractCursor(moreMessages);
         }
 
         _hasMoreMessages = moreMessages.length >= _messagesPerBatch;
@@ -203,14 +546,21 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       _isSendingReply = _replyingToMessage != null;
     });
 
+    // ── Stable clientId for optimistic messages ──
+    final clientId = 'c-${DateTime.now().microsecondsSinceEpoch}';
+
     // Optimistic UI: insert a temporary bubble
     final tempMessage = <String, dynamic>{
-      'id': 'temp-${DateTime.now().millisecondsSinceEpoch}',
+      'id': 'temp-$clientId',
+      'clientId': clientId,
       'text': text,
       'senderId': FirebaseAuth.instance.currentUser?.uid,
       'timestamp': DateTime.now(),
       'status': 'sending',
     };
+
+    // Mark for entrance animation
+    _entering.add(clientId);
 
     setState(() {
       _messages.insert(0, tempMessage);
@@ -220,7 +570,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     // Ensure newest is visible
     _scrollController.animateTo(
       0,
-      duration: const Duration(milliseconds: 250),
+      duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
     );
 
@@ -228,6 +578,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       final result = await _chatService.sendMessage(
         text: text,
         replyToMessageId: _replyingToMessage?['id'],
+        clientId: clientId,
       );
 
       if (!result['success']) {
@@ -235,24 +586,26 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           _showSnackBar('Error: ${result['error']}', isError: true);
           // Remove temp message and restore text on error
           setState(() {
-            if (_messages.isNotEmpty &&
-                _messages.first['id'] == tempMessage['id']) {
-              _messages.removeAt(0);
+            final idx = _messages.indexWhere((m) => m['clientId'] == clientId);
+            if (idx != -1) {
+              _messages.removeAt(idx);
             }
           });
+          _entering.remove(clientId);
           _messageController.text = text;
         }
       } else {
         // Success feedback
         HapticFeedback.selectionClick();
-        // Upgrade optimistic bubble to real one without reloading the whole list
+        // Upgrade optimistic bubble IN PLACE — keep the same clientId so
+        // the ValueKey stays stable and the widget is NOT remounted.
         final String? newId = result['messageId'] as String?;
         setState(() {
-          if (_messages.isNotEmpty &&
-              _messages.first['id'] == tempMessage['id']) {
-            _messages.first['status'] = 'sent';
+          final idx = _messages.indexWhere((m) => m['clientId'] == clientId);
+          if (idx != -1) {
+            _messages[idx]['status'] = 'sent';
             if (newId != null) {
-              _messages.first['id'] = newId;
+              _messages[idx]['id'] = newId;
             }
           }
           // Clear reply state after successful send
@@ -260,11 +613,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             _replyingToMessage = null;
           }
         });
+
+        // Update cache after successful send.
+        ChatService.updateCache(_messages);
+
         // Keep scrolled to newest
-        if (mounted) {
+        if (mounted && _scrollController.hasClients) {
           _scrollController.animateTo(
             0,
-            duration: const Duration(milliseconds: 250),
+            duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
           );
         }
@@ -275,11 +632,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         _messageController.text = text;
         // Rollback optimistic insert
         setState(() {
-          if (_messages.isNotEmpty &&
-              _messages.first['id'] == tempMessage['id']) {
-            _messages.removeAt(0);
+          final idx = _messages.indexWhere((m) => m['clientId'] == clientId);
+          if (idx != -1) {
+            _messages.removeAt(idx);
           }
         });
+        _entering.remove(clientId);
       }
     } finally {
       if (mounted) {
@@ -461,6 +819,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _newestMessageSub?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     _inputFocusNode.dispose();
@@ -476,6 +835,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
     return Scaffold(
       backgroundColor: Colors.white,
+      resizeToAvoidBottomInset: true,
       appBar: _buildAppBar(theme),
       body: ProtectedCourseContent(
         contentTitle: 'Admin Chat',
@@ -506,7 +866,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       actions: [
         IconButton(
           icon: const Icon(Icons.refresh, color: Colors.black),
-          onPressed: _loadInitialMessages,
+          onPressed: () => _loadInitialMessages(),
           tooltip: 'Refresh',
         ),
       ],
@@ -528,7 +888,60 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         Expanded(
           child: Container(
             color: Colors.grey[100],
-            child: _buildMessagesList(),
+            child: Stack(
+              children: [
+                _buildMessagesList(),
+                // "N new messages" pill — shown when messages are held pending
+                // or a full replace is deferred.
+                if (_pendingIncoming.isNotEmpty || _pendingReplace != null)
+                  Positioned(
+                    bottom: 12,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: GestureDetector(
+                        onTap: _onPendingPillTapped,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primary,
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.15),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.arrow_downward,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                _pendingPillLabel,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
         // Message input - no gap
@@ -731,6 +1144,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       ),
       // Add cacheExtent for smoother scrolling
       cacheExtent: 500,
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       itemCount: _messages.length + (_hasMoreMessages ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == _messages.length) {
@@ -782,8 +1196,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     final currentUser = FirebaseAuth.instance.currentUser;
     final isMe = message['senderId'] == currentUser?.uid;
 
-    return MessageBubble(
-      key: ValueKey(message['id'] ?? index),
+    // ── Stable key: prefer clientId (survives optimistic→confirmed upgrade)
+    // over Firestore id, with index as last resort.
+    final animKey =
+        (message['clientId'] as String?) ?? (message['id'] as String?) ?? '$index';
+
+    final shouldAnimate = _entering.contains(animKey);
+
+    final bubble = MessageBubble(
+      key: ValueKey(animKey),
       message: message,
       isMe: isMe,
       status: 'sent',
@@ -791,7 +1212,25 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       isHighlighted: _highlightedMessageId == message['id'],
       highlightAnimation: _highlightAnimation,
       onScrollToMessage: _scrollToMessage,
+      // Disable MessageBubble's own slide+scale for non-entering messages
+      // AND for entering messages (NewMessageEntrance handles their anim).
+      animate: false,
     );
+
+    if (shouldAnimate) {
+      return NewMessageEntrance(
+        key: ValueKey('enter-$animKey'),
+        animate: true,
+        isMe: isMe,
+        onDone: () {
+          // Remove without setState so recycled items never re-animate.
+          _entering.remove(animKey);
+        },
+        child: bubble,
+      );
+    }
+
+    return bubble;
   }
 
   Widget _buildEmptyState() {
@@ -1149,8 +1588,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         // Success feedback
         HapticFeedback.selectionClick();
 
-        // Reload messages to show the new attachment
-        _loadInitialMessages();
+        // Reload messages to show the new attachment (guarded).
+        _requestSilentRefresh();
+
+        // Scroll to the bottom so the user sees their own attachment.
+        if (mounted && _scrollController.hasClients) {
+          _scrollController.animateTo(
+            0,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
