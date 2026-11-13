@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "296902325405",
-    "project_id": "course-c18bb",
-    "storage_bucket": "course-c18bb.firebasestorage.app"
+    "project_number": "963626043371",
+    "project_id": "apt4us-afb04",
+    "storage_bucket": "apt4us-afb04.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:296902325405:android:cd4759434a8adb1c969074",
+        "mobilesdk_app_id": "1:963626043371:android:8c6b2d5cf23b802221fbae",
         "android_client_info": {
-          "package_name": "com.briffini.academy"
+          "package_name": "com.aptitude4us.academy"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCxGroehAVetfOyNexCJglaY06ishxcrSE"
+          "current_key": "AIzaSyAGgSfuDEbaIpYerS2D3o3K7UKNZZrwb4g"
         }
       ],
       "services": {
@@ -26,4 +26,4 @@
     }
   ],
   "configuration_version": "1"
-} 
+}

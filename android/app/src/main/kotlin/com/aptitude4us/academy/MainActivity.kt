@@ -1,4 +1,4 @@
-package com.briffini.academy
+package com.aptitude4us.academy
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine

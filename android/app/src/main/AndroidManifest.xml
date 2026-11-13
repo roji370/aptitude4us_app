@@ -15,7 +15,7 @@
 
 
     <application
-        android:label="Xfini Academy"
+        android:label="Aptitude4us"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true"
@@ -54,19 +54,8 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_sound"
             android:resource="@raw/notification_sound" />
-        
-        <!-- flutter_local_notifications receivers -->
-        <receiver android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" 
-                  android:exported="false" />
-        <receiver android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
-                  android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED"/>
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </receiver>
+
+
         
         <!-- File provider for sharing files with other apps -->
         <provider
