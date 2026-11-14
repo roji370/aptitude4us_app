@@ -142,7 +142,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
   Future<void> _openStore() async {
     setState(() => _state = _UpdateState.downloading);
     try {
-      final url = 'https://play.google.com/store/apps/details?id=com.briffini.academy';
+      final url = ''; // TODO: Add new client's Play Store URL
       final uri = Uri.parse(url);
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -276,7 +276,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
 
                 Text(
                   widget.updateMessage ??
-                      'A new version of Xfini Academy is available. Please update to continue.',
+                      'A new version of Aptitude4us is available. Please update to continue.',
                   style: GoogleFonts.inter(
                     fontSize: 16,
                     color: Colors.white.withValues(alpha: 0.9),

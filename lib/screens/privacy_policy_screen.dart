@@ -32,7 +32,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
             ),
 
             Text(
-              'Privacy Policy for Xfini Academy',
+              'Privacy Policy for Aptitude4us',
               style: Theme.of(
                 context,
               ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
@@ -106,7 +106,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
             _buildSection(
               context,
               'Contact Us',
-              'If you have any questions about this Privacy Policy, please contact us at support@xfini.academy or through the app\'s support feature.',
+              'If you have any questions about this Privacy Policy, please contact us at support@aptitude4us.com or through the app\'s support feature.',
             ),
 
             SizedBox(
