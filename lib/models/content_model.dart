@@ -18,6 +18,8 @@ class ContentModel {
 
   final DateTime? createdAt;      // When this item was created in Firestore
 
+  final String? storagePath;      // Firebase Storage path (for signed URL generation)
+
   ContentModel({
     required this.id,
     required this.title,
@@ -32,6 +34,7 @@ class ContentModel {
     this.processingStatus,
     this.duration,
     this.createdAt,
+    this.storagePath,
   });
 
   factory ContentModel.fromJson(Map<String, dynamic> json, String id) {
@@ -164,6 +167,9 @@ class ContentModel {
       "ContentModel.fromJson output - title: $titleValue, type: $contentTypeValue, content: $contentValue",
     );
 
+    // Parse storagePath
+    String? storagePathValue = json['storagePath'];
+
     return ContentModel(
       id: id,
       title: titleValue,
@@ -178,6 +184,7 @@ class ContentModel {
       processingStatus: processingStatusValue,
       duration: durationValue,
       createdAt: createdAtValue,
+      storagePath: storagePathValue,
     );
   }
 
@@ -203,6 +210,8 @@ class ContentModel {
       if (processingStatus != null) json['processingStatus'] = processingStatus;
       if (duration != null) json['duration'] = duration;
     }
+    
+    if (storagePath != null) json['storagePath'] = storagePath;
     
     return json;
   }
