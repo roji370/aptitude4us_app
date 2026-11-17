@@ -1,8 +1,7 @@
 import 'dart:async';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:xfini_academy/providers/session_provider.dart';
-import 'package:xfini_academy/services/subscription_service.dart';
+import 'package:aptitude4us_academy/providers/session_provider.dart';
+import 'package:aptitude4us_academy/services/subscription_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fake SubscriptionService — uses `implements` to avoid Firebase constructor.

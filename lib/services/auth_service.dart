@@ -7,6 +7,8 @@ import '../models/user_model.dart';
 import 'auth_persistence_service.dart';
 import '../services/notification_service.dart'; // Add this import
 import 'subscription_service.dart';
+import 'chat_service.dart';
+import 'community_chat_service.dart';
 import '../utils/logger.dart';
 import '../utils/device_id.dart';
 import '../main.dart'; // For FirebaseInitHelper
@@ -560,6 +562,10 @@ class AuthService {
       // Clear subscription cache to ensure fresh data for next login
       SubscriptionService.clearCache();
 
+      // Clear chat cache so the next user never sees stale messages
+      ChatService.clearCache();
+      CommunityChatService.clearCache();
+
       Logger.i("User successfully signed out");
     } catch (e) {
       Logger.e("Error during sign out: $e");
@@ -892,6 +898,10 @@ class AuthService {
       // Clear subscription cache
       SubscriptionService.clearCache();
 
+      // Clear chat cache
+      ChatService.clearCache();
+      CommunityChatService.clearCache();
+
       Logger.i("Emergency logout successful");
     } catch (e) {
       Logger.e("Error during emergency sign out: $e");
@@ -900,6 +910,8 @@ class AuthService {
         _auth!.signOut();
         // Clear subscription cache even in fallback
         SubscriptionService.clearCache();
+        ChatService.clearCache();
+        CommunityChatService.clearCache();
       } catch (finalError) {
         Logger.e("Final attempt at logout failed: $finalError");
       }
