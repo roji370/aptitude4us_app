@@ -19,6 +19,8 @@ class PlatformVideoPlayer extends StatelessWidget {
   final String? userName;
   final bool showWatermark;
   final VideoPlayerController? existingController; // For iOS only
+  final String? contentId;
+  final Future<String?> Function()? onUrlExpired;
 
   const PlatformVideoPlayer({
     super.key,
@@ -28,6 +30,8 @@ class PlatformVideoPlayer extends StatelessWidget {
     this.userName,
     this.showWatermark = true,
     this.existingController,
+    this.contentId,
+    this.onUrlExpired,
   });
 
   @override
@@ -39,6 +43,8 @@ class PlatformVideoPlayer extends StatelessWidget {
         autoPlay: autoPlay,
         userName: userName,
         showWatermark: showWatermark,
+        contentId: contentId,
+        onUrlExpired: onUrlExpired,
       );
     } else {
       // iOS - use existing video_player implementation
@@ -63,6 +69,8 @@ class _AndroidVideoPlayer extends StatefulWidget {
   final bool autoPlay;
   final String? userName;
   final bool showWatermark;
+  final String? contentId;
+  final Future<String?> Function()? onUrlExpired;
 
   const _AndroidVideoPlayer({
     required this.videoUrl,
@@ -70,6 +78,8 @@ class _AndroidVideoPlayer extends StatefulWidget {
     this.autoPlay = false,
     this.userName,
     this.showWatermark = true,
+    this.contentId,
+    this.onUrlExpired,
   });
 
   @override
@@ -125,10 +135,11 @@ class _AndroidVideoPlayerState extends State<_AndroidVideoPlayer>
       final dataSource = BetterPlayerDataSource(
         BetterPlayerDataSourceType.network,
         widget.videoUrl,
-        cacheConfiguration: const BetterPlayerCacheConfiguration(
+        cacheConfiguration: BetterPlayerCacheConfiguration(
           useCache: true,
-          maxCacheSize: 100 * 1024 * 1024, // 100MB total cache
-          maxCacheFileSize: 50 * 1024 * 1024, // 50MB per file
+          maxCacheSize: 500 * 1024 * 1024, // 500MB total cache
+          maxCacheFileSize: 50 * 1024 * 1024, // 50MB per cache span
+          key: widget.contentId, // Stable key so signed URL changes don't defeat cache
         ),
         // Optimized buffering for low-end devices
         bufferingConfiguration: const BetterPlayerBufferingConfiguration(
@@ -247,7 +258,16 @@ class _AndroidVideoPlayerState extends State<_AndroidVideoPlayer>
     }
   }
 
+  bool _hasAttemptedUrlRefresh = false;
+
   void _handlePlaybackError(String? error) {
+    if (!_hasAttemptedUrlRefresh && widget.onUrlExpired != null) {
+      _hasAttemptedUrlRefresh = true;
+      Logger.i('Android: Attempting URL refresh before retry');
+      _retryWithFreshUrl();
+      return;
+    }
+
     if (_retryCount < _maxRetries) {
       _retryCount++;
       Logger.i('Android: Playback retry attempt $_retryCount/$_maxRetries');
@@ -257,6 +277,66 @@ class _AndroidVideoPlayerState extends State<_AndroidVideoPlayer>
         setState(() {
           _hasError = true;
           _errorMessage = _getErrorMessage(error);
+        });
+      }
+    }
+  }
+
+  Future<void> _retryWithFreshUrl() async {
+    if (widget.onUrlExpired == null) return;
+
+    final freshUrl = await widget.onUrlExpired!();
+    if (!mounted) return;
+
+    // If the refresh returned null, decide based on reason:
+    // Permission/auth denial is terminal — show error immediately, don't
+    // enter the normal retry path (which would re-request the same dead URL).
+    if (freshUrl == null) {
+      Logger.e('Android: URL refresh denied, showing terminal error');
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+          _errorMessage = 'Access denied.\nPlease verify your permissions.';
+        });
+      }
+      return;
+    }
+
+    Logger.i('Android: Got fresh URL, re-setting up data source');
+    final dataSource = BetterPlayerDataSource(
+      BetterPlayerDataSourceType.network,
+      freshUrl,
+      cacheConfiguration: BetterPlayerCacheConfiguration(
+        useCache: true,
+        maxCacheSize: 500 * 1024 * 1024,
+        maxCacheFileSize: 50 * 1024 * 1024,
+        key: widget.contentId,
+      ),
+      bufferingConfiguration: const BetterPlayerBufferingConfiguration(
+        minBufferMs: 10000,
+        maxBufferMs: 30000,
+        bufferForPlaybackMs: 2000,
+        bufferForPlaybackAfterRebufferMs: 4000,
+      ),
+    );
+
+    try {
+      await _controller?.setupDataSource(dataSource);
+      // Reset the retry flag after 60 seconds of healthy playback.
+      // Not immediately, to prevent infinite retry loops on persistent failures.
+      Future.delayed(const Duration(seconds: 60), () {
+        if (mounted) {
+          _hasAttemptedUrlRefresh = false;
+          Logger.d('Android: URL refresh flag reset after 60s healthy playback');
+        }
+      });
+      Logger.i('Android: Resumed playback with fresh URL');
+    } catch (e) {
+      Logger.e('Android: URL refresh failed: $e');
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+          _errorMessage = _getErrorMessage(e);
         });
       }
     }
