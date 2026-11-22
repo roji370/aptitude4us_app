@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../services/auth_service.dart';
 import '../services/auth_persistence_service.dart';
 import '../services/firestore_service.dart';
@@ -22,6 +23,8 @@ import 'onboarding_screen.dart';
 import 'force_update_screen.dart';
 import 'profile_completion_screen.dart';
 import '../services/notification_service.dart';
+import '../services/chat_service.dart';
+import '../services/community_chat_service.dart';
 import '../services/first_time_user_service.dart';
 import '../utils/exam_overview_navigator.dart';
 import '../widgets/exam_overview_dialog.dart';
@@ -41,6 +44,7 @@ class _SplashScreenState extends State<SplashScreen>
   bool _isNavigating = false;
   bool _hasNavigated = false; // Prevent duplicate navigation
   String _loadingText = "Loading...";
+  String _appVersion = '';
 
   // Debug flag to disable preloading if needed
   // TEMPORARILY DISABLED to fix app crash issue
@@ -51,6 +55,9 @@ class _SplashScreenState extends State<SplashScreen>
     super.initState();
 
     Logger.i("🔄 SplashScreen: initState called - Starting app initialization");
+
+    // Load dynamic app version from platform (pubspec.yaml / Gradle / Xcode)
+    _loadAppVersion();
 
     // Configure status bar for splash screen
     _configureStatusBar();
@@ -91,6 +98,21 @@ class _SplashScreenState extends State<SplashScreen>
           statusBarIconBrightness: Brightness.dark,
         ),
       );
+    }
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final packageInfo = await PackageInfo.fromPlatform().timeout(
+        const Duration(seconds: 2),
+      );
+      if (mounted && packageInfo.version.isNotEmpty) {
+        setState(() {
+          _appVersion = packageInfo.version;
+        });
+      }
+    } catch (e) {
+      Logger.e("Error loading app version: $e");
     }
   }
 
@@ -477,36 +499,37 @@ class _SplashScreenState extends State<SplashScreen>
           return;
         }
 
+        // [COMMENTED OUT] Exam overview check removed — no longer required for new users.
         // Profile is NOT complete — check if the exam overview has been watched.
         // The exam overview is a mandatory first-time orientation that users must
         // complete before filling out their profile.
-        final firstTimeUserService = FirstTimeUserService();
-        bool hasWatchedExamOverview = false;
-        try {
-          hasWatchedExamOverview = await firstTimeUserService
-              .hasWatchedExamOverview(userId)
-              .timeout(const Duration(seconds: 3));
-        } catch (e) {
-          Logger.e("Error checking exam overview status: $e");
-          // Default to true on error so user isn't stuck
-          hasWatchedExamOverview = true;
-        }
+        // final firstTimeUserService = FirstTimeUserService();
+        // bool hasWatchedExamOverview = false;
+        // try {
+        //   hasWatchedExamOverview = await firstTimeUserService
+        //       .hasWatchedExamOverview(userId)
+        //       .timeout(const Duration(seconds: 3));
+        // } catch (e) {
+        //   Logger.e("Error checking exam overview status: $e");
+        //   // Default to true on error so user isn't stuck
+        //   hasWatchedExamOverview = true;
+        // }
 
         if (!mounted || _hasNavigated) { innerTimeout.cancel(); return; }
 
-        if (!hasWatchedExamOverview) {
-          Logger.i("Profile incomplete & exam overview not watched - showing exam overview dialog");
+        // if (!hasWatchedExamOverview) {
+        //   Logger.i("Profile incomplete & exam overview not watched - showing exam overview dialog");
+        //
+        //   if (!mounted) { innerTimeout.cancel(); return; }
+        //
+        //   // Show exam overview dialog
+        //   innerTimeout.cancel();
+        //   await _showExamOverviewDialog();
+        //   return;
+        // }
 
-          if (!mounted) { innerTimeout.cancel(); return; }
-
-          // Show exam overview dialog
-          innerTimeout.cancel();
-          await _showExamOverviewDialog();
-          return;
-        }
-
-        // Exam overview already watched but profile still incomplete — go to profile completion
-        Logger.i("Exam overview already watched - navigating to profile completion");
+        // Profile incomplete — go directly to profile completion
+        Logger.i("Profile incomplete - navigating to profile completion");
         innerTimeout.cancel();
         _navigateToProfileCompletion();
         return;
@@ -634,50 +657,28 @@ class _SplashScreenState extends State<SplashScreen>
     );
   }
 
-  /// Show exam overview dialog to first-time users
-  Future<void> _showExamOverviewDialog() async {
-    if (!mounted) return;
-
-    final firestoreService = Provider.of<FirestoreService>(context, listen: false);
-
-    await showDialog(
-      context: context,
-      barrierDismissible: false, // User must click proceed
-      builder: (dialogContext) => ExamOverviewDialog(
-        onProceed: () async {
-          Logger.i('📚 Navigating to Exam Overview from dialog');
-          
-          // Navigate to exam overview with timeout protection.
-          // ExamOverviewNavigator calls firestoreService.getCourses()
-          // which is an unbounded Firestore call — if it hangs, user
-          // is stuck in a non-dismissible dialog with no escape.
-          bool success = false;
-          try {
-            success = await ExamOverviewNavigator.navigateToExamOverview(
-              context,
-              firestoreService,
-            ).timeout(
-              const Duration(seconds: 10),
-              onTimeout: () {
-                Logger.w('⏰ Exam overview navigation timed out');
-                return false;
-              },
-            );
-          } catch (e) {
-            Logger.e('Error navigating to exam overview: $e');
-            success = false;
-          }
-          
-          if (!success) {
-            Logger.e('Failed to navigate to exam overview — going to home');
-            if (mounted) {
-              _navigateToHome();
-            }
-          }
-        },
-      ),
-    );
-  }
+  // [COMMENTED OUT] Exam overview dialog removed — no longer required for new users.
+  // /// Show exam overview dialog to first-time users
+  // Future<void> _showExamOverviewDialog() async {
+  //   if (!mounted) return;
+  //   final firestoreService = Provider.of<FirestoreService>(context, listen: false);
+  //   await showDialog(
+  //     context: context,
+  //     barrierDismissible: false,
+  //     builder: (dialogContext) => ExamOverviewDialog(
+  //       onProceed: () async {
+  //         Logger.i('📚 Navigating to Exam Overview from dialog');
+  //         bool success = false;
+  //         try {
+  //           success = await ExamOverviewNavigator.navigateToExamOverview(
+  //             context, firestoreService,
+  //           ).timeout(const Duration(seconds: 10), onTimeout: () => false);
+  //         } catch (e) { success = false; }
+  //         if (!success && mounted) { _navigateToHome(); }
+  //       },
+  //     ),
+  //   );
+  // }
 
   void _navigateToLogin() async {
     if (!mounted || !_isNavigating || _hasNavigated) return;
@@ -857,6 +858,11 @@ class _SplashScreenState extends State<SplashScreen>
 
       Logger.i("✅ SplashScreen: All home data preloaded successfully");
 
+      // Fire-and-forget chat message prefetch — runs in parallel with
+      // the "Ready!" delay below.  Failure is non-blocking.
+      ChatService().prefetch();
+      CommunityChatService().prefetch();
+
       if (mounted) {
         setState(() {
           _loadingText = "Ready!";
@@ -919,46 +925,34 @@ class _SplashScreenState extends State<SplashScreen>
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Logo circle
+                      // Aptitude4Us full branded logo
                       Container(
-                        width: 100,
-                        height: 100,
+                        width: 220,
+                        height: 220,
                         decoration: BoxDecoration(
-                          color: AppColors.surfaceContainerLowest,
-                          shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.06),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
+                              color: AppColors.secondary.withValues(alpha: 0.10),
+                              blurRadius: 40,
+                              spreadRadius: 8,
                             ),
                           ],
                         ),
-                        padding: const EdgeInsets.all(8),
                         child: Image.asset(
-                          'assets/logo.png',
+                          'assets/images/logo/aptitude4us_splash_logo.png',
                           fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => Icon(
-                            Icons.school_rounded,
-                            size: 48,
-                            color: AppColors.primary,
+                          errorBuilder: (_, __, ___) => Image.asset(
+                            'assets/logo.png',
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, __, ___) => Icon(
+                              Icons.school_rounded,
+                              size: 80,
+                              color: AppColors.primary,
+                            ),
                           ),
                         ),
                       ),
                       const SizedBox(height: 24),
-
-                      // App title
-                      Text(
-                        'APTITUDE 4 US',
-                        style: GoogleFonts.inter(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.2,
-                          color: AppColors.primary,
-                          height: 32 / 24,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
 
                       // Subtitle
                       Text(
@@ -1010,25 +1004,27 @@ class _SplashScreenState extends State<SplashScreen>
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text(
-                            'v1.2.4',
-                            style: GoogleFonts.inter(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: AppColors.onSurfaceVariant,
-                              letterSpacing: 0.33,
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            child: Text(
-                              '•',
-                              style: TextStyle(
-                                color: AppColors.outlineVariant,
+                          if (_appVersion.isNotEmpty) ...[
+                            Text(
+                              'v$_appVersion',
+                              style: GoogleFonts.inter(
                                 fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: AppColors.onSurfaceVariant,
+                                letterSpacing: 0.33,
                               ),
                             ),
-                          ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              child: Text(
+                                '•',
+                                style: TextStyle(
+                                  color: AppColors.outlineVariant,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                          ],
                           Text(
                             'Aptitude 4 Us',
                             style: GoogleFonts.inter(
