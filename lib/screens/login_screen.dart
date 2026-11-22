@@ -5,6 +5,8 @@ import '../services/auth_service.dart';
 import '../services/auth_persistence_service.dart';
 import '../services/first_time_user_service.dart';
 import '../services/firestore_service.dart';
+// [DISABLED] Student progress tracking removed from the product.
+// import '../services/timezone_service.dart';
 import '../utils/app_colors.dart';
 import '../utils/logger.dart';
 import '../utils/exam_overview_navigator.dart';
@@ -148,6 +150,11 @@ class _LoginScreenState extends State<LoginScreen> {
         // Force a token refresh to get the latest custom claims
         await authService.forceTokenRefresh();
 
+        // [DISABLED] Student progress tracking removed from the product.
+        // // Write the student's IANA timezone to their user doc (fire-and-forget).
+        // // This powers server-side streak computation in the student's local time.
+        // TimezoneService.writeTimezoneToUserDoc();
+
         // Get the custom claims for logging/debugging
         final claims = await authService.getCustomClaims();
         Logger.i("User claims after login: $claims");
@@ -188,23 +195,24 @@ class _LoginScreenState extends State<LoginScreen> {
             return;
           }
 
+          // [COMMENTED OUT] Exam overview check removed — no longer required for new users.
           // Profile is NOT complete — check if the exam overview has been watched.
           // The exam overview is a mandatory first-time orientation that users must
           // go through before filling out their profile.
-          final firstTimeUserService = FirstTimeUserService();
-          final hasWatchedExamOverview = await firstTimeUserService
-              .hasWatchedExamOverview(userCredential.user!.uid);
+          // final firstTimeUserService = FirstTimeUserService();
+          // final hasWatchedExamOverview = await firstTimeUserService
+          //     .hasWatchedExamOverview(userCredential.user!.uid);
 
-          if (!mounted) return;
+          // if (!mounted) return;
 
-          if (!hasWatchedExamOverview) {
-            Logger.i("Profile incomplete & exam overview not watched - showing exam overview dialog");
-            _showExamOverviewDialog();
-            return;
-          }
+          // if (!hasWatchedExamOverview) {
+          //   Logger.i("Profile incomplete & exam overview not watched - showing exam overview dialog");
+          //   _showExamOverviewDialog();
+          //   return;
+          // }
 
-          // Exam overview already watched but profile still incomplete — go to profile completion
-          Logger.i("Exam overview already watched - navigating to profile completion");
+          // Profile incomplete — go directly to profile completion
+          Logger.i("Profile incomplete - navigating to profile completion");
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
               Navigator.of(scaffoldContext).pushReplacement(
@@ -237,38 +245,29 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  /// Show exam overview dialog to first-time users
-  void _showExamOverviewDialog() {
-    if (!mounted) return;
-
-    final firestoreService = Provider.of<FirestoreService>(context, listen: false);
-
-    showDialog(
-      context: context,
-      barrierDismissible: false, // User must click proceed
-      builder: (dialogContext) => ExamOverviewDialog(
-        onProceed: () async {
-          Logger.i('📚 Navigating to Exam Overview from login dialog');
-          
-          // Navigate to exam overview
-          final success = await ExamOverviewNavigator.navigateToExamOverview(
-            context,
-            firestoreService,
-          );
-          
-          if (!success) {
-            Logger.e('Failed to navigate to exam overview');
-            // If navigation fails, navigate to home as fallback
-            if (mounted) {
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const MainScreen()),
-              );
-            }
-          }
-        },
-      ),
-    );
-  }
+  // [COMMENTED OUT] Exam overview dialog removed — no longer required for new users.
+  // /// Show exam overview dialog to first-time users
+  // void _showExamOverviewDialog() {
+  //   if (!mounted) return;
+  //   final firestoreService = Provider.of<FirestoreService>(context, listen: false);
+  //   showDialog(
+  //     context: context,
+  //     barrierDismissible: false,
+  //     builder: (dialogContext) => ExamOverviewDialog(
+  //       onProceed: () async {
+  //         Logger.i('📚 Navigating to Exam Overview from login dialog');
+  //         final success = await ExamOverviewNavigator.navigateToExamOverview(
+  //           context, firestoreService,
+  //         );
+  //         if (!success && mounted) {
+  //           Navigator.of(context).pushReplacement(
+  //             MaterialPageRoute(builder: (_) => const MainScreen()),
+  //           );
+  //         }
+  //       },
+  //     ),
+  //   );
+  // }
 
   @override
   Widget build(BuildContext context) {
