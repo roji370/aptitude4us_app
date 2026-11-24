@@ -193,30 +193,29 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: !widget.isExamOverviewMode,
-      onPopInvokedWithResult: (bool didPop, dynamic result) {
-        if (!didPop && widget.isExamOverviewMode) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Please watch the Exam Overview before accessing the app',
-                style: TextStyle(color: Colors.white),
-              ),
-              backgroundColor: Colors.orange,
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
-      },
+      canPop: true, // [CHANGED] Exam overview mode no longer blocks back navigation
+      // onPopInvokedWithResult: (bool didPop, dynamic result) {
+      //   if (!didPop && widget.isExamOverviewMode) {
+      //     ScaffoldMessenger.of(context).showSnackBar(
+      //       const SnackBar(
+      //         content: Text(
+      //           'Please watch the Exam Overview before accessing the app',
+      //           style: TextStyle(color: Colors.white),
+      //         ),
+      //         backgroundColor: Colors.orange,
+      //         duration: Duration(seconds: 3),
+      //       ),
+      //     );
+      //   }
+      // },
       child: Scaffold(
         backgroundColor: AppColors.surface,
         appBar: AppBar(
           backgroundColor: AppColors.surface,
           elevation: 0,
           surfaceTintColor: Colors.transparent,
-          leading: widget.isExamOverviewMode
-            ? null
-            : IconButton(
+          // [CHANGED] Always show back button
+          leading: IconButton(
                 icon: const Icon(Icons.arrow_back_rounded, color: AppColors.onSurface),
                 onPressed: () => Navigator.of(context).pop(),
               ),
@@ -348,9 +347,8 @@ class _ContentTypesScreenState extends State<ContentTypesScreen> {
                         ),
                       ],
                     ),
-      bottomNavigationBar: widget.isExamOverviewMode
-        ? null
-        : CustomBottomNavigation(
+      // [CHANGED] Always show bottom navigation
+      bottomNavigationBar: CustomBottomNavigation(
             selectedIndex: _selectedIndex,
             onTap: (index) {
               setState(() {
