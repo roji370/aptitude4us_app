@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/auth_service.dart';
 import '../utils/app_colors.dart';
 import 'chat_screen.dart';
+import '../services/chat_service.dart';
 import 'package:intl/intl.dart';
 
 class NotificationScreen extends StatefulWidget {
@@ -220,8 +221,18 @@ class _NotificationScreenState extends State<NotificationScreen> {
                           ),
                         ),
                         child: InkWell(
-                          onTap: () {
+                          onTap: () async {
                             if (notification['type'] == 'chat') {
+                              // Warm the cache if empty so chat opens instantly.
+                              if (ChatService.cachedMessages.isEmpty) {
+                                await ChatService()
+                                    .prefetch()
+                                    .timeout(
+                                      const Duration(milliseconds: 400),
+                                      onTimeout: () {},
+                                    );
+                              }
+                              if (!context.mounted) return;
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
