@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/device_id.dart';
 import '../utils/logger.dart';
+import 'video_cache_service.dart';
 
 /// Service to manage single-device sessions for Firebase Authentication
 /// Ensures only one active session per user across all devices
@@ -309,6 +310,9 @@ class SessionService {
       
       // Clear local session data
       await _clearLocalSessionData();
+
+      // Wipe cached course videos
+      await VideoCacheService.instance.clearAll();
       
       // Sign out from Firebase Auth
       await _auth.signOut();
