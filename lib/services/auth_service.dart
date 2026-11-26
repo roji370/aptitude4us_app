@@ -9,6 +9,7 @@ import '../services/notification_service.dart'; // Add this import
 import 'subscription_service.dart';
 import 'chat_service.dart';
 import 'community_chat_service.dart';
+import 'video_cache_service.dart';
 import '../utils/logger.dart';
 import '../utils/device_id.dart';
 import '../main.dart'; // For FirebaseInitHelper
@@ -565,6 +566,9 @@ class AuthService {
       // Clear chat cache so the next user never sees stale messages
       ChatService.clearCache();
       CommunityChatService.clearCache();
+
+      // Wipe cached course videos so they don't persist across accounts
+      await VideoCacheService.instance.clearAll();
 
       Logger.i("User successfully signed out");
     } catch (e) {
