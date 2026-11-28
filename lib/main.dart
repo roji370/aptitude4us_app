@@ -24,6 +24,8 @@ import 'services/notification_service.dart';
 import 'services/storage_service.dart';
 import 'services/subscription_service.dart';
 import 'providers/session_provider.dart';
+// [DISABLED] Student progress tracking removed from the product.
+// import 'providers/progress_provider.dart';
 import 'utils/accessibility_helper.dart';
 import 'utils/adaptive_navigation.dart';
 import 'utils/app_colors.dart';
@@ -160,7 +162,7 @@ void main() async {
   // Configure immediate UI to prevent white screen
   await _configureImmediateUI();
 
-  Logger.i('🚀 Starting Xfini Academy app...');
+  Logger.i('🚀 Starting Aptitude4us app...');
   
   // Configure system UI properties for iPhone 11+ compatibility
   final Brightness statusBarIconBrightness =
@@ -193,6 +195,10 @@ void main() async {
         ChangeNotifierProvider<SessionProvider>(
           create: (_) => SessionProvider(),
         ),
+        // [DISABLED] Student progress tracking removed from the product.
+        // ChangeNotifierProvider<ProgressProvider>(
+        //   create: (_) => ProgressProvider(),
+        // ),
       ],
       child: const MyApp(),
     ),
@@ -206,7 +212,7 @@ Future<void> _configureImmediateUI() async {
   // Set app to show immediately with branded color to prevent white flash
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
-      statusBarColor: Color(0xFF1A237E), // Xfini brand color
+      statusBarColor: Color(0xFF1A237E), // Brand color
       statusBarIconBrightness: Brightness.light,
       systemNavigationBarColor: Color(0xFF1A237E),
       systemNavigationBarIconBrightness: Brightness.light,
