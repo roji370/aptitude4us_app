@@ -20,6 +20,7 @@ import '../models/content_model.dart';
 import '../models/course_model.dart';
 import '../models/module_model.dart';
 import '../services/storage_service.dart';
+import '../services/video_cache_service.dart';
 import '../services/auth_service.dart';
 import '../providers/session_provider.dart';
 import '../utils/pdf_loader.dart';
@@ -27,6 +28,9 @@ import '../widgets/custom_pdf_viewer.dart';
 import '../services/firestore_service.dart';
 import '../services/first_time_user_service.dart';
 import '../services/screenshot_blocking_service.dart';
+// [DISABLED] Student progress tracking removed from the product.
+// import '../services/progress_tracker.dart';
+// import '../services/progress_service.dart';
 import '../utils/exam_overview_navigator.dart';
 import '../widgets/custom_bottom_navigation.dart';
 import '../widgets/screen_recording_warning_dialog.dart';
@@ -344,6 +348,13 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
   // Also shows a loading placeholder instead of raw content during the check window.
   final Set<String> _pendingCheckContentIds = {};
 
+  // [DISABLED] Student progress tracking removed from the product.
+  // // Progress tracking: active trackers for the current content item
+  // VideoProgressTracker? _activeVideoTracker;
+  // PdfProgressTracker? _activePdfTracker;
+  // SimpleProgressTracker? _activeSimpleTracker;
+  // String? _activeTrackerContentId; // Content ID the tracker is tracking
+
   @override
   void initState() {
     super.initState();
@@ -412,6 +423,12 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     // Remove app lifecycle observer
     WidgetsBinding.instance.removeObserver(this);
 
+    // [DISABLED] Student progress tracking removed from the product.
+    // // Dispose active progress trackers (cleanup only — no network calls)
+    // _activeVideoTracker?.dispose();
+    // _activePdfTracker?.dispose();
+    // _activeSimpleTracker?.dispose();
+
     // Pause all currently playing videos when leaving the screen
     _contentStateManager.pauseAllVideos();
 
@@ -454,10 +471,25 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
         // Pause all videos when app goes to background or becomes inactive
         Logger.i('📱 App paused/inactive - pausing all videos');
         _contentStateManager.pauseAllVideos();
+        // [DISABLED] Student progress tracking removed from the product.
+        // // Flush progress trackers with final segments
+        // _activeVideoTracker?.onAppPaused();
+        // _activePdfTracker?.onAppPaused();
         break;
       case AppLifecycleState.resumed:
-        // App resumed - videos will remain paused until user manually plays them
+        // App resumed — videos remain paused until user manually plays them.
+        // Defensive: if a controller is somehow still playing (e.g. audio-only
+        // background playback), re-sync the tracker so segments aren't lost.
         Logger.i('📱 App resumed - videos remain paused until user interaction');
+        // [DISABLED] Student progress tracking removed from the product.
+        // if (_activeVideoTracker != null && _activeTrackerContentId != null) {
+        //   // Check if the controller is still playing and re-open a segment
+        //   final ctrl = _contentStateManager.getVideoControllerById(_activeTrackerContentId!);
+        //   if (ctrl != null && ctrl.value.isInitialized && ctrl.value.isPlaying) {
+        //     final pos = ctrl.value.position.inMilliseconds / 1000.0;
+        //     _activeVideoTracker!.onAppResumed(pos, isPlaying: true);
+        //   }
+        // }
         break;
       case AppLifecycleState.detached:
         // App is detached - pause videos for cleanup
@@ -842,20 +874,61 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
         throw Exception("Invalid video URL format");
       }
 
-      // Create and initialize the video controller
-      final controller = VideoPlayerController.networkUrl(
-        Uri.parse(videoUrl),
-      );
+      // Create and initialize the video controller.
+      // Prefer the private on-device cache (no re-download); otherwise stream
+      // from the network and cache in the background for next time.
+      // One-time-view videos are never cached.
+      final cache = VideoCacheService.instance;
+      final cacheable = !content.isOneTimeView;
+      final cachedFile =
+          cacheable ? await cache.getCachedFile(content.id, videoUrl) : null;
 
-      await controller.initialize();
+      VideoPlayerController? controller;
+      if (cachedFile != null) {
+        try {
+          controller = VideoPlayerController.file(cachedFile);
+          await controller.initialize();
+          Logger.i('Playing ${content.title} from private cache');
+        } catch (e) {
+          // Corrupt / unreadable cache entry: drop it and fall back to network.
+          Logger.w('Cached video unreadable, falling back to network: $e');
+          await controller?.dispose();
+          controller = null;
+          await cache.remove(content.id);
+        }
+      }
+
+      if (controller == null) {
+        controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
+        await controller.initialize();
+        if (cacheable) {
+          // Fire and forget; never blocks or breaks playback.
+          unawaited(cache.cacheInBackground(content.id, videoUrl));
+        }
+      }
 
       // Store the controller in the content state manager
-      _contentStateManager.setVideoController(content, controller);
+      final VideoPlayerController readyController = controller;
+      _contentStateManager.setVideoController(content, readyController);
 
       // Add listener to track video progress for exam overview completion
       if (_isExamOverviewContent()) {
-        controller.addListener(() => _trackVideoProgress(controller, content));
+        readyController.addListener(
+          () => _trackVideoProgress(readyController, content),
+        );
       }
+
+      // Start the video progress tracker now that the controller is ready.
+      // Read resume position to seek to the last watched position.
+      // [DISABLED] Student progress tracking removed from the product.
+      // if (_activeVideoTracker != null && _activeTrackerContentId == content.id) {
+      //   final resume = await ProgressService.getResumePosition(content.id);
+      //   final resumePos = resume?.currentPosition ?? 0;
+      //   if (resumePos > 0 && controller.value.duration.inSeconds > 0) {
+      //     await controller.seekTo(Duration(milliseconds: (resumePos * 1000).toInt()));
+      //   }
+      //   await _activeVideoTracker!.start(initialPosition: resumePos);
+      // }
 
       // Rebuild the UI to show the video player
       if (mounted) {
@@ -1026,6 +1099,66 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Progress tracking — tracker lifecycle management
+  // ---------------------------------------------------------------------------
+
+  // [DISABLED] Student progress tracking removed from the product.
+  // /// Initializes the appropriate progress tracker for the given content item.
+  // /// Only creates a new tracker if the content has changed.
+  // /// Disposes the previous tracker when switching content.
+  // void _ensureTrackerForContent(ContentModel content) {
+  //   if (content.id == _activeTrackerContentId) return; // Already tracking
+  //
+  //   // Flush old trackers before disposing — sends final heartbeat/update
+  //   _activeVideoTracker?.onRoutePopped();
+  //   _activePdfTracker?.onRoutePopped();
+  //
+  //   // Dispose previous trackers (cleanup only — no network calls)
+  //   _activeVideoTracker?.dispose();
+  //   _activePdfTracker?.dispose();
+  //   _activeSimpleTracker?.dispose();
+  //   _activeVideoTracker = null;
+  //   _activePdfTracker = null;
+  //   _activeSimpleTracker = null;
+  //   _activeTrackerContentId = content.id;
+  //
+  //   switch (content.contentType) {
+  //     case 'video':
+  //       _activeVideoTracker = VideoProgressTracker(
+  //         courseId: widget.course.id,
+  //         moduleId: widget.module.id,
+  //         contentId: content.id,
+  //         videoDuration: content.duration,
+  //       );
+  //       // start() is called from _initializeVideoController after the
+  //       // controller is ready, so we can pass the initial resume position.
+  //       break;
+  //     case 'pdf':
+  //       _activePdfTracker = PdfProgressTracker(
+  //         courseId: widget.course.id,
+  //         moduleId: widget.module.id,
+  //         contentId: content.id,
+  //       );
+  //       // start() is called from the PDF onRender callback.
+  //       break;
+  //     case 'audio':
+  //     case 'text':
+  //     case 'note':
+  //     case 'image':
+  //     case 'link':
+  //       _activeSimpleTracker = SimpleProgressTracker(
+  //         courseId: widget.course.id,
+  //         moduleId: widget.module.id,
+  //         contentId: content.id,
+  //         contentType: content.contentType == 'text' ? 'note' : content.contentType,
+  //       );
+  //       // Fire-and-forget: mark as viewed when content is displayed.
+  //       Future.microtask(() => _activeSimpleTracker?.markViewed());
+  //       break;
+  //   }
+  // }
+
   // Update the _buildContentView method to handle PDF viewing with watermark
   Widget _buildContentView(ContentModel content) {
     Logger.d(
@@ -1053,6 +1186,10 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
 
     // Ensure iOS screen protection is toggled appropriately by content type
     _maybeUpdateProtectionForContentType(content.contentType);
+
+    // [DISABLED] Student progress tracking removed from the product.
+    // // Initialize progress tracker for this content (if not already tracking it)
+    // _ensureTrackerForContent(content);
     switch (content.contentType) {
       case 'video':
         if (content.content.isEmpty) {
@@ -1088,17 +1225,29 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
             child: LearnerPresenceVideoWrapper(
               contentKey: content.id,
               child: Center(
-                child: SimpleVideoPlayer(
-                  key: ValueKey("video_${content.id}_persistent"),
-                  videoUrl: existingController?.dataSource ?? content.originalUrl ?? content.content,
-                  autoPlay: false,
-                  userName: _userName,
-                  showWatermark: true,
-                  existingController: existingController,
-                  onViewedCallback: content.isOneTimeView
-                      ? () => _markOneTimeContentViewed(content)
-                      : null,
-                  disableSeeking: content.isOneTimeView,
+                child: Builder(
+                  builder: (context) {
+                    // [DISABLED] Student progress tracking removed from the product.
+                    // final tracker = _activeVideoTracker;
+                    return SimpleVideoPlayer(
+                      key: ValueKey("video_${content.id}_persistent"),
+                      videoUrl: existingController?.dataSource ?? content.originalUrl ?? content.content,
+                      autoPlay: false,
+                      userName: _userName,
+                      showWatermark: true,
+                      existingController: existingController,
+                      onViewedCallback: content.isOneTimeView
+                          ? () => _markOneTimeContentViewed(content)
+                          : null,
+                      disableSeeking: content.isOneTimeView,
+                      // [DISABLED] Student progress tracking removed from the product.
+                      // onProgressPosition: (pos) => tracker?.onPosition(pos),
+                      // onProgressPlay: (pos) => tracker?.onPlay(pos),
+                      // onProgressPause: () => tracker?.onPause(),
+                      // onProgressSeek: (pos) => tracker?.onSeek(pos),
+                      // onProgressSpeedChanged: (speed) => tracker?.onSpeedChanged(speed),
+                    );
+                  },
                 ),
               ),
             ),
@@ -1157,6 +1306,15 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                   onViewedCallback: content.isOneTimeView
                       ? () => _markOneTimeContentViewed(content)
                       : null,
+                  // [DISABLED] Student progress tracking removed from the product.
+                  // onTotalPagesKnown: (totalPages) {
+                  //   _activePdfTracker?.onTotalPagesKnown(totalPages);
+                  //   // Start PDF tracker once we know the pages
+                  //   _activePdfTracker?.start();
+                  // },
+                  // onPageChanged: (page) {
+                  //   _activePdfTracker?.onPageChanged(page);
+                  // },
                 ),
               ),
 
@@ -1721,6 +1879,12 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
     return PopScope(
       canPop: !widget.isExamOverviewMode,
       onPopInvokedWithResult: (bool didPop, dynamic result) {
+        // [DISABLED] Student progress tracking removed from the product.
+        // if (didPop) {
+        //   // Flush progress trackers when navigating away
+        //   _activeVideoTracker?.onRoutePopped();
+        //   _activePdfTracker?.onRoutePopped();
+        // }
         if (!didPop && widget.isExamOverviewMode) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -2232,6 +2396,11 @@ class _ContentViewerScreenState extends State<ContentViewerScreen> with WidgetsB
                                   _contentStateManager.pauseVideo(currentContent);
                                 }
                               }
+
+                              // [DISABLED] Student progress tracking removed from the product.
+                              // // Flush progress tracker for the content we're leaving
+                              // _activeVideoTracker?.onRoutePopped();
+                              // _activePdfTracker?.onRoutePopped();
                               
                               setState(() {
                                 _currentContentIndex = i;
